@@ -16,9 +16,9 @@ The lifter is total.  It works at the granularity of the boolean connectives: a 
 disjunct or negand it cannot read becomes an opaque block whose signature is the columns, context
 sources and relations its text names (a conservative scan); an expression it cannot parse at all
 is one opaque block.  Every lifted atom is validated with the spec checker before it is kept, so
-the lifted spec always checks.  A user function is never inlined (D34): any call that is not one
-of the identity sources or a compiler helper of a declared hierarchy is unreadable, however short
-the function's body.  Deparsing differs across versions (D30): the parser reads the deparsed text
+the lifted spec always checks.  A user function is unreadable (D34) unless it is one of the
+identity sources, a compiler helper, or (#52, `inline_functions`, applied by the import before
+lifting) a stable one-statement SQL helper returning a boolean, read as its body.  Deparsing differs across versions (D30): the parser reads the deparsed text
 of every version in the matrix, and the tests pin shapes, not strings.
 """
 from __future__ import annotations
@@ -1324,8 +1324,10 @@ class Lifter:
         return isinstance(node, Str) and node.value == ""
 
     def func_reason(self, node: Func) -> str:
-        return (f"calls {node.name}(), a function the lifter does not read: user functions are never inlined, "
-                f"whatever their body")
+        return (f"calls {node.name}(), a function the lifter does not read: only a stable or immutable "
+                f"one-statement SQL function returning boolean is read as its body (a SECURITY DEFINER one only "
+                f"when its owner bypasses the policies of the tables it reads), with arguments that are the "
+                f"row's columns or constants")
 
     # --- source text
     @property
@@ -1371,7 +1373,9 @@ class InnerScope:
 
     def classify(self, node: Node) -> tuple[str, Any]:
         if isinstance(node, Col):
-            if node.qual in (self.table, self.alias) and node.qual is not None:
+            # an aliased table answers only to its alias (SQL's scoping), so `t.c` inside an
+            # aliased subquery over t is the outer row's (an inlined helper's argument, #52)
+            if node.qual is not None and node.qual == (self.alias or self.table):
                 if node.name not in self.cols:
                     raise Unreadable(f"column {self.table}.{node.name} is not modelled")
                 return "inner", node.name
@@ -1433,6 +1437,99 @@ def lookup_calls(text: str, bodies: dict[str, str]) -> list[tuple[str, int, int,
         out.append((name[len("mls_lookup_"):], m.start(), tail.end(),
                     "ARRAY(" + _LOOKUP_KEY.sub(lambda _: "= " + key, body.group(1), count=1) + ")"))
         i = tail.end()
+    return out
+
+
+_FUNC_SELECT = re.compile(r"^\s*select\s+(.*?)\s*;?\s*$", re.IGNORECASE | re.DOTALL)
+_FUNC_FROM = re.compile(r'\b(from|join)\s+((?:"?[a-z_][a-z0-9_]*"?\.)?"?[a-z_][a-z0-9_]*"?)(?=\s*(?:where\b|\)|$))',
+                        re.IGNORECASE)
+_ARG_COL = re.compile(r'^"?([a-z_][a-z0-9_]*)"?$')
+_ARG_INERT = re.compile(r"'(?:[^']|'')*'|::[a-z_ ]+(?:\[\])?|\bARRAY\b|\bauth\.[a-z_]+\(\)|\b(?:true|false|null)\b|"
+                        r"\d+(?:\.\d+)?", re.IGNORECASE)
+
+
+def function_body(src: str) -> str | None:
+    """The expression a one-statement `language sql` function returns, `select <expr>`, or None."""
+    m = _FUNC_SELECT.match(src)
+    if m is None or ";" in m.group(1):
+        return None
+    return m.group(1)
+
+
+def inline_functions(text: str, table: str, columns: set[str], functions: dict[str, dict],
+                     calls: list[tuple[str, str]] | None = None) -> str:
+    """#52: every call of a one-statement SQL helper (`functions`: name -> {"params", "expr"},
+    `adopt._read`) replaced by the expression its body returns, the arguments in place of the
+    parameters, so that `has_org_role(org_id, ARRAY['owner'])` reads as the EXISTS it is.  An
+    argument is the policy table's column (qualified with the table, the helper's own FROM
+    aliased, so that it stays the outer row's) or holds no column at all (constants, an array of
+    them, `auth.uid()`); a call with any other argument stays as it is, for the lifter to report.
+    Helpers that call helpers are inlined to a depth of three.  `calls` collects (the inlined
+    expression, the call it replaced), for `restore_calls`."""
+    for _ in range(3):
+        out, i, changed = [], 0, False
+        pat = re.compile(r'(?<![\w."])(' + "|".join(map(re.escape, sorted(functions, key=len, reverse=True)))
+                         + r')\s*\(') if functions else None
+        while pat is not None and (m := pat.search(text, i)) is not None:
+            f = functions[m.group(1)]
+            args, j, depth, start, quote = [], m.end(), 1, m.end(), False
+            while j < len(text) and depth:
+                ch = text[j]
+                if ch == "'":
+                    quote = not quote
+                elif not quote and ch in "([":
+                    depth += 1
+                elif not quote and ch in ")]":
+                    depth -= 1
+                elif not quote and ch == "," and depth == 1:
+                    args.append(text[start:j])
+                    start = j + 1
+                j += 1
+            args.append(text[start:j - 1])
+            args = [a.strip() for a in args if a.strip() or f["params"]]
+            subst = _function_args(args, table, columns) if len(args) == len(f["params"]) else None
+            if subst is None:
+                out.append(text[i:j])
+                i = j
+                continue
+            body = _FUNC_FROM.sub(lambda t: f"{t.group(1)} {t.group(2)} mls_inline", f["expr"])
+            for n, (param, arg) in enumerate(zip(f["params"], subst), start=1):
+                body = re.sub(r'(?<![\w."$])(?:"' + re.escape(param) + '"|' + re.escape(param) + r')(?![\w"])|\$'
+                              + str(n) + r'(?!\d)', lambda _: f"({arg})", body) if param else re.sub(
+                                  r'\$' + str(n) + r'(?!\d)', lambda _: f"({arg})", body)
+            out.append(text[i:m.start()] + "(" + body + ")")
+            if calls is not None:
+                calls.append((body, text[m.start():j]))
+            i, changed = j, True
+        text = "".join(out) + text[i:]
+        if not changed:
+            break
+    return text
+
+
+def restore_calls(sql: str, calls: list[tuple[str, str]]) -> str | None:
+    """An opaque fragment of an inlined text with each whole inlined helper put back as its call
+    (an opaque block must not run a SECURITY DEFINER body as the invoker), or None when the
+    fragment holds only part of one: then the text is read again without inlining."""
+    for body, call in reversed(calls):
+        for form in (f"({body})", body):
+            sql = sql.replace(form, call)
+    if "mls_inline" in sql or any(sql.strip() in body for body, _ in calls if sql.strip() != body):
+        return None
+    return sql
+
+
+def _function_args(args: list[str], table: str, columns: set[str]) -> list[str] | None:
+    """The arguments as they read inside the helper's body, or None when one cannot be placed."""
+    out = []
+    for a in args:
+        c = _ARG_COL.match(a)
+        if c is not None and c.group(1) in columns:
+            out.append(f'"{table}"."{c.group(1)}"')
+        elif re.search(r"[a-z_]", _ARG_INERT.sub(" ", a), re.IGNORECASE) is None:
+            out.append(a)
+        else:
+            return None
     return out
 
 

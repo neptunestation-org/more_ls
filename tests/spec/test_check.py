@@ -346,6 +346,12 @@ def test_assume_is_refused_where_the_proofs_cannot_state_it():
     assert has(errs, "$.tables.docs.assume[3].bypass", "'trigger t' is not a bypass path")
     assert has(errs, "$.tables.docs.assume[4].bypass", "'function f' is not a bypass path")
     assert not any(e.path in ("$.tables.docs.assume[0].bypass", "$.tables.docs.assume[1].bypass") for e in errs)
+    # #52: an inlined helper names the function and the md5 of its body
+    d["tables"]["docs"]["assume"] = [{"inlined": "function can_read(integer, text) md5 0cc175b9c0f1b6a831c399e269772661"},
+                                     {"inlined": "function can_read(integer, text)"}]
+    errs = errors(d)
+    assert has(errs, "$.tables.docs.assume[1].inlined", "is not an inlined helper")
+    assert not any(e.path == "$.tables.docs.assume[0].inlined" for e in errs)
     d["tables"]["docs"]["mode"] = "observed"
     d["tables"]["docs"]["assume"] = [{"rls": "not_forced"}]
     d["rules"] = [r for r in d["rules"] if r["table"] != "docs"]

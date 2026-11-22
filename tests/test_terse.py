@@ -120,7 +120,8 @@ def whole() -> dict:
     d["tables"]["docs"]["tags"] = ["tenant", "pii"]
     d["tables"]["docs"]["mode"] = "adopted"
     d["tables"]["docs"]["assume"] = [{"owner": "authenticated"}, {"rls": "not_forced"}, {"bypassrls": "svc"},
-                                     {"bypass": "function is_member(bigint, text)"}]
+                                     {"bypass": "function is_member(bigint, text)"},
+                                     {"inlined": "function is_member(bigint, text) md5 0cc175b9c0f1b6a831c399e269772661"}]
     d["tables"]["audit"] = {"columns": {"id": {"type": "int", "nullable": False}}, "mode": "observed"}
     d["tables"]["select"] = {"columns": {"from": {"type": "text", "nullable": True}}, "primary_key": None}
     d["opaques"] = {"gate": {"table": "docs", "columns": ["level"], "context": ["clearance"], "relations": ["member_of"],
@@ -163,7 +164,7 @@ table docs adopted {
   primary_key (id);
   unique (tenant_id, owner_id);
   tags (tenant, pii);
-  assume ('owner authenticated', 'rls not_forced', 'bypassrls svc', 'bypass function is_member(bigint, text)')
+  assume ('owner authenticated', 'rls not_forced', 'bypassrls svc', 'bypass function is_member(bigint, text)', 'inlined function is_member(bigint, text) md5 0cc175b9c0f1b6a831c399e269772661')
 }
 
 table audit observed {

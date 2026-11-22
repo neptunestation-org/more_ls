@@ -431,3 +431,77 @@ def test_enum_labels_are_the_catalogs(pg_dsn):
         assert [(e.path, e.fix) for e in errs] == [("$.tables.docs.columns.status", "declare it as enum DocStatus")]
     finally:
         h.close()
+
+
+HELPERS_SQL = """
+do $$ begin if not exists (select from pg_roles where rolname = 'app') then create role app; end if;
+             if not exists (select from pg_roles where rolname = 'mls_weak') then create role mls_weak; end if; end $$;
+create table members (user_id bigint not null, team_id bigint not null, role text not null,
+                      primary key (user_id, team_id));
+create table tickets (id bigint primary key, team_id bigint not null, level int not null);
+alter table members enable row level security;
+alter table tickets enable row level security;
+create function is_member(t bigint) returns boolean language sql stable security definer as $f$
+  select exists (select 1 from members
+                 where team_id = t and user_id = nullif(current_setting('app.uid', true), '')::bigint)
+$f$;
+create function has_role(t bigint, roles text[]) returns boolean language sql stable as $f$
+  select exists (select 1 from members
+                 where team_id = t and user_id = nullif(current_setting('app.uid', true), '')::bigint
+                   and role = any(roles))
+$f$;
+create function is_member_v(t bigint) returns boolean language sql volatile security definer as $f$
+  select exists (select 1 from members
+                 where team_id = t and user_id = nullif(current_setting('app.uid', true), '')::bigint)
+$f$;
+create function is_member_w(t bigint) returns boolean language sql stable security definer as $f$
+  select exists (select 1 from members
+                 where team_id = t and user_id = nullif(current_setting('app.uid', true), '')::bigint)
+$f$;
+alter function is_member_w(bigint) owner to mls_weak;
+create policy member_read on tickets for select to app using (is_member(team_id));
+create policy admin_edit on tickets for update to app using (has_role(team_id, array['admin']));
+create policy v_read on tickets for select to app using (level < 0 or is_member_v(team_id));
+create policy w_read on tickets for select to app using (level < -1 or is_member_w(team_id));
+"""
+
+
+@pytest.fixture
+def helpers(pg_dsn):
+    dbname = "mls_helpers"
+    with psycopg.connect(pg_dsn, autocommit=True) as admin:
+        admin.execute(f'drop database if exists "{dbname}"')
+        admin.execute(f'create database "{dbname}"')
+    conn = psycopg.connect(psycopg.conninfo.make_conninfo(pg_dsn, dbname=dbname), autocommit=True)
+    conn.execute(HELPERS_SQL)
+    yield conn
+    conn.close()
+    with psycopg.connect(pg_dsn, autocommit=True) as admin:
+        admin.execute(f'drop database if exists "{dbname}"')
+
+
+def test_one_line_sql_helpers_are_read_inline_and_drift_checks_their_bodies(helpers):
+    """#52: a stable one-statement SQL helper returning a boolean is read as its body: a SECURITY
+    DEFINER one whose owner bypasses the table's policies (it reads every row, as a relation does)
+    and an invoker one.  A volatile helper, and a definer one whose owner the policies bind, stay
+    opaque calls.  The table assumes each inlined helper with its body's md5, and drift reports a
+    changed body as a difference."""
+    res = import_schema(helpers)
+    spec = check_spec(Spec.model_validate(res.spec))
+    assert sorted(o["sql"].strip() for o in res.spec["opaques"].values()) == [
+        "is_member_v(team_id)", "is_member_w(team_id)"], res.notes
+    rules = {r.name: r for r in spec.policies()}
+    assert "member" in json.dumps(rules["member_read"].using.model_dump(by_alias=True, exclude_none=True))
+    assert "member" in json.dumps(rules["admin_edit"].using.model_dump(by_alias=True, exclude_none=True))
+    assumed = sorted(a.inlined.split(" md5 ")[0] for a in spec.tables["tickets"].assume if hasattr(a, "inlined"))
+    assert assumed == ["function has_role(bigint, text[])", "function is_member(bigint)"]
+    helpers.execute("drop policy v_read on tickets; drop policy w_read on tickets")
+    spec = check_spec(Spec.model_validate(import_schema(helpers).spec))
+    script = compile_spec(spec)
+    inline = [i for i in drift(helpers, spec, script).items if "body" in i.object]
+    assert sorted(i.kind for i in inline) == ["assumed", "assumed"], [str(i) for i in inline]
+    with helpers.transaction(force_rollback=True):
+        helpers.execute("""create or replace function is_member(t bigint) returns boolean language sql stable
+                           security definer as $f$ select true $f$""")
+        changed = [i for i in drift(helpers, spec, script).items if "is_member(bigint)" in i.object]
+        assert [i.kind for i in changed] == ["differs"] and "has a new body" in changed[0].object

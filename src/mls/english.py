@@ -11,7 +11,7 @@ from typing import Any
 from mls.spec.model import (
     CONTEXT_NOW, And, BypassAssumed, CardinalityRule, CheckRule, ColRef, ComposedRelation, ColumnImmutable, ColumnRule, Cmp, Const,
     CtxRef, Custom, InclusionRule, InGroup, InvariantPreserved, IsNull, LeastPrivilege, Lit, Member, MonotoneIn,
-    MustAllow, NewRef, Not, NowBetween, OldRef, OpaqueRef, Or, OwnerAssumed, PathAssumed, PolicyRule, Pred, Property,
+    MustAllow, NewRef, Not, NowBetween, OldRef, OpaqueRef, Or, OwnerAssumed, PathAssumed, InlinedAssumed, PolicyRule, Pred, Property,
     RlsAssumed,
     RoleSeparation,
     Rule, Spec, TenantIsolation, TransitionRule, WriteSubsetRead,
@@ -241,6 +241,10 @@ def assumption(table: str, a) -> str:
     if isinstance(a, PathAssumed):
         return (f"assumed: {a.bypass} runs as its owner and reads `{table}` without its policies; it is a "
                 f"trusted path, and what an app role reaches through it is not covered by the proofs")
+    if isinstance(a, InlinedAssumed):
+        fn, _, digest = a.inlined.rpartition(" md5 ")
+        return (f"assumed: {fn} keeps the body it had when it was imported (md5 {digest}): its calls in the "
+                f"policies on `{table}` are read as that body")
     raise TypeError(a)
 
 

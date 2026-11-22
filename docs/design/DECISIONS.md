@@ -492,7 +492,8 @@ reviewer can act on; a lifted policy is proved, diffed and explained like one ML
 the whole value of adopting. Limits: a policy that calls a user function stays opaque even when
 the function is a one-line SQL wrapper — the lifter reads `pg_proc` only to build the signature,
 never to inline (a SECURITY DEFINER body is exactly the object D34 says must be visible, not
-trusted). Rejected: lifting through `pg_node_tree` (`polqual`) instead of the deparsed text —
+trusted).  *Amended by D73:* a one-statement boolean SQL helper is inlined, and the spec assumes
+its body. Rejected: lifting through `pg_node_tree` (`polqual`) instead of the deparsed text —
 version-specific and undocumented; a `--lift-functions` option — reopens D3.
 *Implementation defaults (2026-11-05):* the lifter works at the boolean connectives — a
 conjunct, disjunct or negand it cannot read becomes an opaque block of its own text, so a
@@ -1353,3 +1354,33 @@ column, a read row is the only row with it, so `∀k: rel(k, x.value) → k = x.
 row's own pair was asserted and a second pair with the same value stayed possible.  Lean: neither
 is transcribed (`lean/CLAUDE.md`); both are consequences of `Relational.lean`'s derivation of a
 relation from the rows, which is where a transcription would prove them.
+
+## D73 — Import reads one-statement SQL helpers inline (#52; amends D46)
+
+Found in the scarpar takeover: today's policies make 115 calls to three one-line SECURITY
+DEFINER helpers (`has_org_role(org_id, array[...])`, `is_org_member(org_id)`,
+`shares_org_with(user_id)`), each an `exists` over `org_members`.  D46 kept every user function
+opaque, so `before.mls` held 81 opaque blocks, and the diff against the new spec reported 379 of
+its 388 access changes as undecidable ("conditional on unverified SQL"): it could not say what the
+takeover changes.  Chosen by the user: amend D46, narrowly.  (1) The import inlines a call when
+the function is `language sql`, one `select` statement, returns boolean, is not a set, is stable
+or immutable, is not overloaded, and each argument is the policy row's column (qualified with the
+table; the body's FROM is aliased, so SQL's scoping keeps the argument the outer row's: an
+aliased table answers only to its alias, `InnerScope.classify`) or holds no column (constants,
+arrays of them, `auth.uid()`).  (2) A SECURITY DEFINER function qualifies only when its owner
+bypasses the policies of every table its body names (superuser, BYPASSRLS, or the owner of the
+table while RLS is not forced): then its body reads every row, which is a relation's meaning, so
+the inlined atom says what the call did.  An invoker function reads as the same subquery written
+in the policy.  (3) D46's objection stands for what stays opaque: an opaque block runs as the
+invoker, so a definer body must never be placed in one.  An opaque fragment is put back as the
+call (`lift.restore_calls`); a fragment inside one helper's body means the whole expression is read
+again without inlining.  (4) Visible, not trusted (D34): the import makes the body visible by
+reading it and records it as a table assumption, `{"inlined": "function f(types) md5 <hex>"}` on
+each table whose policies call it, rendered in every report; `mls drift` reports a changed or
+dropped body as `differs` (fix: import again).  The takeover skeleton (`--policies discard`)
+reads no policy and carries none.  (5) The identity adapter is detected from the inlined bodies
+too (a helper may be the only place that reads `current_setting('app.uid')`).  Rejected: a
+`--lift-functions` flag (D46 rejected it; a flag makes the diff's meaning depend on how the
+import was run), and inlining plpgsql (its control flow is not an expression).  On scarpar:
+81 opaque blocks → 2, and 388 access changes → 54, of which 3 still rest on opaque SQL.  Fixture
+`tests/templates/test_adopt.py::test_one_line_sql_helpers_are_read_inline_and_drift_checks_their_bodies`.

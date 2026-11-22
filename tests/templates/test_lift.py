@@ -176,7 +176,7 @@ def test_user_function_stays_opaque_even_as_a_one_line_wrapper(pg_dsn):
         assert wrapped["using"]["and"][1] == {"cmp": [{"col": "level"}, "<=", {"const": 2}]}
         block = res.spec["opaques"][wrapped["using"]["and"][0]["opaque"]]
         assert block["sql"].startswith("is_member(") and block["columns"] == ["tenant_id"] and block["context"] == ["uid"]
-        assert any("wrapped" in n and "never inlined" in n for n in res.notes)
+        assert any("wrapped" in n and "does not read" in n for n in res.notes)
         assert list(res.spec["opaques"]) == [wrapped["using"]["and"][0]["opaque"]]
     finally:
         h.close()

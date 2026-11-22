@@ -15,7 +15,7 @@ approval artifact (D10, D33).  The grammar:
     enum       := 'enum' NAME '(' STRING (',' STRING)* ')'        (a Postgres enum type and its labels, in order)
     column     := NAME TYPE ['not null']                          (a bare column is nullable; TYPE 'enum' NAME for an enum)
     option     := 'primary_key' '(' names ')' | 'unique' '(' names ')' | 'tags' '(' names ')'
-                | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)')
+                | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)' | 'inlined function f(t) md5 h')
     relation   := 'relation' NAME '=' TABLE '(' KEY ',' VALUE ')' ['where' pred]
                 | 'relation' NAME '=' RELATION ('.' TABLE '(' KEY ',' VALUE ')')+   (D56, ≤ 3 hops)
     hierarchy  := 'hierarchy' NAME '=' TABLE 'id' COL 'parent' COL 'depth' COL 'max_depth' INT 'members' REL
@@ -47,7 +47,7 @@ from mls.spec.model import (
     Hierarchy, Identity, In, InclusionRule, InGroup, InvariantPreserved, IsNull, LeastPrivilege, Lit, Member,
     MonotoneIn, MustAllow, NewRef, Not, NowBetween, OldRef, Opaque, OpaqueRef, Or, PolicyRule, Pred, Property,
     Relation, ComposedRelation, Hop, RoleSeparation, Rule, RuleBase, Spec, Table, TenantIsolation, TransitionRule, WriteSubsetRead,
-    OwnerAssumed, BypassAssumed, RlsAssumed, PathAssumed, ContextVar, Column,
+    OwnerAssumed, BypassAssumed, RlsAssumed, PathAssumed, InlinedAssumed, ContextVar, Column,
 )
 
 OR, AND, NOT, ATOM = 1, 2, 3, 4
@@ -86,7 +86,7 @@ RENDERED_CLASSES: set[type] = {
     MustAllow, RoleSeparation,
     Lit, And, Or, Not, IsNull, Cmp, In, Member, InGroup, NowBetween, OpaqueRef,
     ColRef, OldRef, NewRef, CtxRef, Const,
-    OwnerAssumed, BypassAssumed, RlsAssumed, PathAssumed,
+    OwnerAssumed, BypassAssumed, RlsAssumed, PathAssumed, InlinedAssumed,
 }
 
 
@@ -305,6 +305,8 @@ def assumption(a) -> str:
         return string(f"rls {a.rls}")
     if isinstance(a, PathAssumed):
         return string(f"bypass {a.bypass}")
+    if isinstance(a, InlinedAssumed):
+        return string(f"inlined {a.inlined}")
     raise TypeError(a)
 
 

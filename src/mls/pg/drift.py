@@ -34,7 +34,7 @@ from mls.compile.table import table_ddl
 from mls.identity import get_adapter
 from mls.pg.catalog import Snapshot, bypass_paths, snapshot
 from mls.pg.lift import mls_type
-from mls.spec.model import BypassAssumed, OwnerAssumed, PathAssumed, RlsAssumed, Spec
+from mls.spec.model import BypassAssumed, InlinedAssumed, OwnerAssumed, PathAssumed, RlsAssumed, Spec
 
 FAILING = ("missing", "unexpected", "differs", "hardening")
 
@@ -283,6 +283,17 @@ def compare(spec: Spec, expected: Snapshot, actual: Snapshot) -> tuple[list[Drif
         b_items, b_notes = bypass_report(spec, actual["bypass"])
         items += b_items
         notes += b_notes
+    for t, tb in spec.tables.items():  # #52: the helpers the import read inline keep their bodies
+        for a in tb.assume:
+            if isinstance(a, InlinedAssumed):
+                fn, _, digest = a.inlined.rpartition(" md5 ")
+                now = actual.get("bodies", {}).get(path_key(fn))
+                if now == digest:
+                    items.append(DriftItem("assumed", f"{fn} keeps the body the policies on {t} are read as"))
+                else:
+                    items.append(DriftItem("differs", f"{fn} " + ("is gone" if now is None else "has a new body")
+                                           + f" since the import, which read its calls in the policies on {t} "
+                                             f"as its old body (fix: import again, or restore the function)"))
     return items, notes
 
 
@@ -291,6 +302,9 @@ def drift(conn: psycopg.Connection, spec: Spec, script: Script, schema: str = "p
         actual = snapshot(conn, schema, list(spec.governed()), _roles(spec), _observed(spec))
         present = [t for t in spec.governed() if actual["tables"].get(t) is not None]
         actual["bypass"] = bypass_paths(conn, schema, present, list(spec.roles))
+        actual["bodies"] = {path_key(f"function {n}({types})"): digest for n, types, digest in conn.execute(
+            """select p.proname, oidvectortypes(p.proargtypes), md5(p.prosrc) from pg_proc p
+               join pg_namespace n on n.oid = p.pronamespace where n.nspname = %s""", (schema,)).fetchall()}
         expected = shadow_snapshot(conn, spec, script, _live_types(spec, actual))
     items, notes = compare(spec, expected, actual)
     notes += [f"table '{t}' in schema '{schema}' is not in the spec" for t in actual["other_tables"]]

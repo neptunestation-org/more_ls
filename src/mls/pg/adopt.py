@@ -45,7 +45,7 @@ from mls.compile.internal import INTERNAL_ROLE
 from mls.errors import MlsError, SpecError
 from mls.pg.catalog import _strip_schema, bypass_paths
 from mls.pg.lift import (
-    CAST_TO_MLS, Env, Unreadable, inline_lookups, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr,
+    CAST_TO_MLS, Env, Unreadable, function_body, inline_functions, inline_lookups, restore_calls, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr,
     mls_type,
 )
 from mls.pg.lift import IsTrue as _IsTrue
@@ -128,6 +128,29 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
                        where n.nspname = %s and p.proname like 'mls\\_lookup\\_%%' and p.prosecdef
                          and pg_get_userbyid(p.proowner) = %s""", (schema, INTERNAL_ROLE))
         cat["lookups"] = dict(cur.fetchall())  # D67: the compiler's lookup helpers, read back inline
+        # #52: the schema's one-statement SQL helpers that return a boolean, read back inline.  A
+        # SECURITY DEFINER one counts only when its owner bypasses the policies of every table its
+        # body names (then its body reads all rows, as a relation does); an invoker one reads as
+        # the same subquery written in the policy would.
+        cur.execute("""select p.proname, coalesce(p.proargnames, '{}'), p.pronargs, p.prosrc,
+                              oidvectortypes(p.proargtypes), md5(p.prosrc)
+                       from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_language l on l.oid = p.prolang
+                         join pg_roles o on o.oid = p.proowner
+                       where n.nspname = %s and l.lanname = 'sql' and not p.proretset and p.prorettype = 'bool'::regtype
+                         and p.provolatile in ('s', 'i') and p.proname not like 'mls\\_%%'
+                         and (not p.prosecdef or o.rolsuper or o.rolbypassrls or not exists (
+                           select 1 from pg_class t join pg_namespace tn on tn.oid = t.relnamespace
+                           where t.relkind in ('r', 'p') and tn.nspname not in ('pg_catalog', 'information_schema')
+                             and p.prosrc ~* ('\\m' || t.relname || '\\M')
+                             and (t.relforcerowsecurity or not pg_has_role(o.oid, t.relowner, 'USAGE'))))
+                         and (select count(*) from pg_proc q where q.proname = p.proname and q.pronamespace = p.pronamespace) = 1""",
+                    (schema,))
+        cat["functions"] = {}
+        for fname, argnames, nargs, src, types, digest in cur.fetchall():
+            expr = function_body(src)
+            if expr is not None:
+                cat["functions"][fname] = {"params": (list(argnames) + [""] * nargs)[:nargs], "expr": expr,
+                                           "assume": f"function {fname}({types}) md5 {digest}"}
         cur.execute("select rolname, rolsuper, rolcanlogin, rolbypassrls from pg_roles")
         for name, sup, login, bypass in cur.fetchall():
             cat["roles"][name] = {"super": sup, "login": login, "bypassrls": bypass}
@@ -214,6 +237,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
 
     # --- identity: guessed from the policy expressions
     texts = [e for t in tables.values() for p in t["policies"] for e in (p["using"], p["check"]) if e]
+    texts += [f["expr"] for n, f in cat["functions"].items() if any(n + "(" in e for e in texts)]  # #52
     hits = {a: sum(1 for e in texts if m.search(e)) for a, m in MARKERS.items()}
     ranked = sorted((n, a) for a, n in hits.items() if n)
     user_fks = discard and any(con["type"] == "f" and con["refname"] == USER_TABLE
@@ -491,14 +515,24 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
 
     # --- policies through the lifter (D46); what it cannot read is an opaque block
     opaques: dict[str, dict] = {}
+    inlined_by: dict[str, set[str]] = {}  # #52: per table, the helpers its policies were read through
     rules: list[dict] = list(inclusions)
     lifted_n = opaque_n = 0
 
     def lift_expr(table: str, text: str, base: str, scope: str, depcols: list[str], top_is_true: bool = False):
         parts = 0
+        calls: list[tuple[str, str]] = []  # #52: the inlined helpers, put back in an opaque block
+
+        class Retry(Exception):
+            pass
 
         def make_opaque(sql: str, cols: list[str], ctx: list[str], rels: list[str]) -> str:
             nonlocal parts
+            if calls:
+                restored = restore_calls(sql, calls)
+                if restored is None:
+                    raise Retry
+                sql = restored
             parts += 1
             whole = sql.strip() == text.strip()
             oname = ident(base) if whole else ident(f"{base}_{parts}")
@@ -512,8 +546,18 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
         def make_relation(rtable: str, key: str, value: str, where: dict | None = None) -> str | None:
             return propose(rtable, key, value, f"{scope} expression on {table} reads it as a membership", where)
 
-        text = inline_lookups(text, cat["lookups"])
-        return lift(text, table, env, scope, make_opaque, make_relation, top_is_true=top_is_true)
+        inlined = inline_functions(text, table, set(modelled[table]), cat["functions"], calls)
+        if calls:
+            try:
+                r = lift(inline_lookups(inlined, cat["lookups"]), table, env, scope, make_opaque, make_relation,
+                         top_is_true=top_is_true)
+                used = {re.match(r"\w+", call).group(0) for _, call in calls}
+                inlined_by.setdefault(table, set()).update(cat["functions"][n]["assume"] for n in used)
+                return r
+            except Retry:  # an opaque part inside a helper's body: read the text with the calls as written
+                calls.clear()
+        return lift(inline_lookups(text, cat["lookups"]), table, env, scope, make_opaque, make_relation,
+                    top_is_true=top_is_true)
 
     for name, t in tables.items():
         if name not in governed:
@@ -750,6 +794,10 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
     if drop:
         rules = [r for r in rules if r["id"] not in drop]
         checked = finish(rules)
+    for t, fns in sorted(inlined_by.items()):  # #52: drift checks that each helper keeps its body
+        spec_tables[t].setdefault("assume", []).extend({"inlined": f} for f in sorted(fns))
+        notes.append(f"table {t}: its policies call {', '.join(f.split(' md5 ')[0] for f in sorted(fns))}, read "
+                     f"inline as the body each has now (assumed; drift reports a changed body)")
     spec = {"mls_version": "0.1", "identity": {"adapter": adapter, "context": context}, "roles": roles,
             "enums": enums, "tables": spec_tables, "relations": relations, "opaques": opaques, "rules": rules, "properties": []}
 

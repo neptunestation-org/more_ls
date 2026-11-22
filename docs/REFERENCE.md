@@ -204,6 +204,7 @@ declared table depends on its mode:
 | `{"rls": "not_forced"}` | row-level security is not forced; the owner bypasses the policies and is trusted | `assumed` instead of `hardening: row level security is not forced` |
 | `{"bypassrls": "<app role>"}` | the role has `BYPASSRLS`, reads and writes the table unfiltered, and is trusted | `assumed` instead of `hardening: role has BYPASSRLS` (only when every governed table assumes it) |
 | `{"bypass": "view <v>"}` / `{"bypass": "function <f>(<types>)"}` | a bypass path (below) reaches the table without its policies and is trusted; what an app role reaches through it is not covered by the proofs | `assumed` instead of `hardening: <path> reaches table <t> without its policies` |
+| `{"inlined": "function <f>(<types>) md5 <hex>"}` | `mls import` read the calls of this SQL helper in the table's policies as its body (see `mls import` in section 15); the helper keeps the body whose md5 is given | `assumed` while the body is unchanged; `differs: <f> has a new body since the import` (or `is gone`) otherwise |
 
 Every assumption is repeated in the proof report, `mls explain`, `mls diff` and the compiled
 script's header (the list of trusted roles grows by it).  When the catalog no longer needs an
@@ -706,7 +707,7 @@ grammar:
     enum       := 'enum' NAME '(' STRING (',' STRING)* ')'        (a Postgres enum type and its labels, in order)
     column     := NAME TYPE ['not null']                          (a bare column is nullable; TYPE 'enum' NAME for an enum)
     option     := 'primary_key' '(' names ')' | 'unique' '(' names ')' | 'tags' '(' names ')'
-                | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)')
+                | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)' | 'inlined function f(t) md5 h')
     relation   := 'relation' NAME '=' TABLE '(' KEY ',' VALUE ')' ['where' pred]
                 | 'relation' NAME '=' BASE ('.' TABLE '(' KEY ',' VALUE ')')+   (composed)
     hierarchy  := 'hierarchy' NAME '=' TABLE 'id' COL 'parent' COL 'depth' COL 'max_depth' INT 'members' REL
@@ -1067,8 +1068,15 @@ A `(key, value)` membership proposes the relation when the pair is unique in a g
 opaque with the reason.  The lifter
 works at the boolean connectives: a conjunct, disjunct or negand it cannot read becomes an
 opaque block of its own text (an expression it cannot parse at all is one block), so a lifted
-spec always checks.  Never read: a call to any function that is not an identity source or a
-compiler helper (a one-line SQL wrapper included: user functions are never inlined),
+spec always checks.  A call to a SQL helper of the schema is read as the helper's body when the
+helper is one `select` statement returning a boolean, declared `stable` or `immutable`, and its
+arguments are the row's columns or constants (`has_org_role(org_id, array['owner', 'admin'])`
+reads as the membership its `exists` holds).  A `security definer` helper qualifies only when its
+owner bypasses the policies of every table its body names, so that it reads every row as a
+relation does.  The table then assumes the helper with the md5 of its body
+(`{"inlined": "function has_org_role(uuid, text[]) md5 ..."}`), and `mls drift` reports a changed
+body; a part of a policy that stays opaque keeps the call as written.  Never read: a call to any
+other function that is not an identity source or a compiler helper,
 `like` (an opaque block over the column, which the leakproof lint reports), a negated
 membership (an anti-join), a membership subquery that joins tables other than as a chain of
 key lookups inside an `exists` (nested subqueries are composed relations too), an outer join, `IS TRUE` inside an expression (the fragment is three-valued), `CASE`,

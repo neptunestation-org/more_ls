@@ -86,7 +86,7 @@ def _single_key(v: Any) -> str:
             return "?"
         return next(iter(v))
     for tag in ("col", "ctx", "const", "old", "new", "cmp", "in", "member", "in_group", "now_between",
-                "is_null", "opaque", "and", "or", "not", "lit", "owner", "bypassrls", "rls", "bypass"):
+                "is_null", "opaque", "and", "or", "not", "lit", "owner", "bypassrls", "rls", "bypass", "inlined"):
         if hasattr(v, tag) or hasattr(v, tag + "_"):
             return tag
     return "?"
@@ -225,6 +225,13 @@ class PathAssumed(Strict):
     bypass: str
 
 
+class InlinedAssumed(Strict):
+    """A helper the import read inline (#52): `function f(argtypes) md5 <hex>`, a one-statement SQL
+    function whose calls in the table's policies the spec reads as its body, assumed to keep the
+    body whose md5 is given; drift compares it with the catalog."""
+    inlined: str
+
+
 class RlsAssumed(Strict):
     """`not_forced`: row level security is not forced on the table; its owner bypasses every policy
     and is trusted.  (No other value: a table without row level security *enabled* is `observed`.)"""
@@ -237,9 +244,10 @@ Assumption = Annotated[
         Annotated[BypassAssumed, Tag("bypassrls")],
         Annotated[RlsAssumed, Tag("rls")],
         Annotated[PathAssumed, Tag("bypass")],
+        Annotated[InlinedAssumed, Tag("inlined")],
     ],
     Discriminator(_single_key, custom_error_type="invalid_assumption",
-                  custom_error_message="an assumption is one of {owner}, {bypassrls}, {rls}, {bypass}"),
+                  custom_error_message="an assumption is one of {owner}, {bypassrls}, {rls}, {bypass}, {inlined}"),
 ]
 
 

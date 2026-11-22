@@ -26,7 +26,7 @@ from mls.spec.model import (
     CONTEXT_NOW, And, BypassAssumed, CardinalityRule, CheckRule, ColRef, ColType, ColumnRule, Cmp, Const, CtxRef,
     INT_RANGE, In, Custom, InclusionRule, InGroup, InvariantPreserved, IsNull, Lit, Member, MonotoneIn, MustAllow, NewRef, Not,
     RoleSeparation,
-    NowBetween, OldRef, OpaqueRef, Or, OwnerAssumed, PathAssumed, PolicyRule, RlsAssumed, Spec, TenantIsolation,
+    NowBetween, OldRef, OpaqueRef, Or, OwnerAssumed, PathAssumed, InlinedAssumed, PolicyRule, RlsAssumed, Spec, TenantIsolation,
     ColumnImmutable, WriteSubsetRead, LeastPrivilege, TransitionRule, comparable, pair_unique,
 )
 
@@ -41,6 +41,7 @@ CATALOG_IDENT_FIX = ("letters of either case, digits and underscores, starting w
 ORDERED_TYPES = {"int", "bigint", "timestamp"}
 # D54: a bypass path as drift spells it (`pg/catalog.py:bypass_paths`)
 BYPASS_PATH = re.compile(r'view\s+[\w."$]+|function\s+[\w."$]+\s*\([^()]*\)')
+INLINED = re.compile(r'function\s+[\w."$]+\s*\([^()]*\)\s+md5\s+[0-9a-f]{32}')
 
 
 def _json_path(loc: tuple) -> str:
@@ -614,6 +615,13 @@ class Checker:
                                                 f"'function <name>(<argument types>)', as mls drift reports it",
                              "copy the path from the drift or import report, e.g. \"view project_overview\" or "
                              "\"function is_team_member(bigint)\"")
+            elif isinstance(a, InlinedAssumed):
+                key = ("inlined", " ".join(a.inlined.split()))
+                if not INLINED.fullmatch(a.inlined.strip()):
+                    self.err(f"{apath}.inlined", f"'{a.inlined}' is not an inlined helper: one is "
+                                                 f"'function <name>(<argument types>) md5 <32 hex digits>'",
+                             "copy it from mls import's output, e.g. \"function is_member(uuid) md5 "
+                             "0cc175b9c0f1b6a831c399e269772661\"")
             else:
                 self.err(apath, "unknown assumption")
                 continue

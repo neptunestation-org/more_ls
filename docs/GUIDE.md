@@ -1758,8 +1758,10 @@ These are decisions, not gaps; `docs/design/DECISIONS.md` has the reasoning.
   create (section 10.1), but it never silently applies to an adopted table a hardening it would
   have to assume: an app-role owner or unforced row-level security is stated in the spec and
   repeated in every report, or it is drift.  A hand-written policy is lifted into the fragment
-  when the lifter reads it and adopted as an opaque block otherwise; a function of yours
-  in a policy is never inlined, however short its body.
+  when the lifter reads it and adopted as an opaque block otherwise.  A function of yours in a
+  policy is read as its body only when it is a one-statement SQL helper returning a boolean
+  (`is_member(team_id)`); the spec then states that the helper keeps that body, and drift checks
+  it.  Any other function stays an opaque call.
 - **The fragment.**  No joins, subqueries, arithmetic or functions in predicates (a chain of
   lookups through keys is a composed relation, section 7).  Comparison
   right-hand sides are context or constants; membership keys in policies are context or constants,

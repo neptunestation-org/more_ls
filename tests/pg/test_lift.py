@@ -11,7 +11,7 @@ import pytest
 
 from mls.errors import SpecError
 from mls.pg.lift import (
-    Env, Unreadable, lift, now_between_shape, nullable_columns, parse, strip_check, transition_expr,
+    Env, Unreadable, function_body, inline_functions, lift, now_between_shape, restore_calls, nullable_columns, parse, strip_check, transition_expr,
 )
 from mls.spec import check_spec
 from mls.spec.model import Spec, load_spec
@@ -217,7 +217,7 @@ def test_user_function_is_never_inlined():
     assert r.pred == {"or": [{"cmp": [{"col": "level"}, "<", {"const": 1}]}, {"opaque": "op1"}]}
     assert sink.blocks["op1"]["sql"] == "is_member(tenant_id, auth.uid())"
     assert sink.blocks["op1"]["columns"] == ["tenant_id"] and sink.blocks["op1"]["context"] == ["uid"]
-    assert "never inlined" in r.reasons[0]
+    assert "does not read" in r.reasons[0]
     # the whole expression unreadable: one block, the policy's text
     r, sink = do("is_member(tenant_id, auth.uid())")
     assert r.kind == "opaque" and r.pred == {"opaque": "op1"} and sink.blocks["op1"]["sql"].startswith("is_member")
@@ -304,6 +304,70 @@ def test_a_subquery_over_a_nullable_column_is_a_relation():
     env.tables["memberships"]["user_id"] = (env.tables["memberships"]["user_id"][0], True)
     r, _ = do(MEMBER, env=env)
     assert r.pred == MEMBER_ATOM and r.kind != "opaque"
+
+
+# ----------------------------------------------------------------------------- SQL helpers read inline (#52)
+HELPERS = {
+    "is_member": {"params": ["t"], "expr": function_body(
+        "select exists (\n  select 1 from public.memberships\n  where tenant_id = t and user_id = auth.uid()\n);")},
+    "has_role": {"params": ["t", "roles"], "expr": function_body(
+        "select exists (select 1 from public.memberships where tenant_id = t and user_id = auth.uid() "
+        "and role = any(roles))")},
+    "is_member_pos": {"params": [""], "expr": function_body(
+        "select exists (select 1 from memberships where tenant_id = $1 and user_id = auth.uid())")},
+}
+
+
+def inlined(text: str, table: str = "docs", env: Env | None = None):
+    env = env or env_of()
+    calls: list = []
+    sql = inline_functions(text, table, set(env.tables[table]), HELPERS, calls)
+    r, sink = do(sql, env=env, table=table)
+    return r, sink, calls
+
+
+def test_a_one_line_sql_helper_reads_as_its_body():
+    """#52: `is_member(tenant_id)` is the EXISTS its body holds, the argument in place of the
+    parameter (named or positional), so it lifts to the membership; the call is recorded."""
+    for text in ("is_member(tenant_id)", "is_member_pos(tenant_id)"):
+        r, _, calls = inlined(text)
+        assert r.kind == "lifted" and r.pred == MEMBER_ATOM, (text, r.reasons)
+        assert [c for _, c in calls] == [text]
+    assert function_body("select 1; select 2") is None  # one statement only
+
+
+def test_a_helper_argument_stays_the_outer_rows_column():
+    """The argument is qualified with the policy's table and the helper's FROM is aliased, so on
+    the membership table itself `tenant_id` inside the body is the membership's and the argument
+    is the policy row's (SQL's scoping: an aliased table answers only to its alias)."""
+    env = env_of()
+    r, _, _ = inlined("is_member(tenant_id)", table="memberships", env=env)
+    assert r.pred == MEMBER_ATOM, r.reasons
+
+
+def test_a_helper_with_constant_arguments_reads_their_values():
+    """An array of constants is an argument the body can hold (`role = any(roles)` becomes an `in`);
+    an argument that computes from a column cannot be placed, and the call stays as written."""
+    env = env_of()
+    env.tables["memberships"]["role"] = ("text", True)
+    r, sink, _ = inlined("has_role(tenant_id, ARRAY['admin'::text, 'owner'::text])", env=env)
+    assert r.kind == "lifted", r.reasons
+    rel = r.pred["member"]["relation"]
+    assert env.conditions[rel] == {"in": [{"col": "role"}, [{"const": "admin"}, {"const": "owner"}]]} or \
+        env.conditions[rel] == {"or": [{"cmp": [{"col": "role"}, "=", {"const": "admin"}]},
+                                       {"cmp": [{"col": "role"}, "=", {"const": "owner"}]}]}
+    r, sink, calls = inlined("is_member((tenant_id || ''::text))")
+    assert calls == [] and r.kind == "opaque" and sink.blocks["op1"]["sql"] == "is_member((tenant_id || ''::text))"
+
+
+def test_an_opaque_part_of_an_inlined_text_keeps_the_call():
+    """An opaque block runs as the invoker: a SECURITY DEFINER body must never be placed in one, so
+    a whole inlined helper is put back as its call, and a fragment of one means read it again
+    without inlining."""
+    body = HELPERS["is_member"]["expr"].replace("t ", "(tenant_id) ")
+    calls = [(body, "is_member(tenant_id)")]
+    assert restore_calls(f"(level < 1) OR ({body})", calls) == "(level < 1) OR is_member(tenant_id)"
+    assert restore_calls("user_id = auth.uid()", calls) is None
 
 
 # ----------------------------------------------------------------------------- composed relations (D56)
