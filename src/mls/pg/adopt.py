@@ -172,11 +172,12 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
                             for r in cur.fetchall()]
             cur.execute("""select conname, contype, pg_get_constraintdef(oid), conkey, confrelid, confkey,
                                   confupdtype, confdeltype, confmatchtype, convalidated,
-                                  case when confrelid <> 0 then confrelid::regclass::text end
+                                  case when confrelid <> 0 then confrelid::regclass::text end,
+                                  condeferrable, condeferred
                            from pg_constraint where conrelid = %s order by conname""", (oid,))
             t["constraints"] = [{"name": r[0], "type": r[1], "def": _strip_schema(r[2], schema), "cols": list(r[3] or []),
                                  "ref": r[4], "refcols": list(r[5] or []), "upd": r[6], "del": r[7], "match": r[8],
-                                 "validated": r[9], "refname": r[10]}
+                                 "validated": r[9], "refname": r[10], "deferrable": r[11], "deferred": r[12]}
                                 for r in cur.fetchall()]
             cur.execute("""select p.oid, p.polname, p.polcmd, p.polpermissive,
                                   array(select rolname from pg_roles where oid = any (p.polroles) order by 1),
@@ -468,6 +469,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                  "the referenced columns are not a key"),
                 (con["match"] != "s", "not MATCH SIMPLE"),
                 (con["upd"] != "r", f"ON UPDATE {actions.get(con['upd'], con['upd'])}"),
+                (con["deferrable"] and not con["deferred"], "DEFERRABLE INITIALLY IMMEDIATE"),
                 (con["del"] != "r", f"ON DELETE {actions.get(con['del'], con['del'])}"),
                 (not set(con["colnames"]) <= modelled[name], "a column of it is not modelled")) if bad]
             if unmet:
@@ -479,7 +481,8 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
             if rel is None:
                 continue
             inclusions.append({"kind": "inclusion", "name": ident(con["name"]), "table": name,
-                               "columns": con["colnames"], "relation": rel, "on_delete": "restrict"})
+                               "columns": con["colnames"], "relation": rel, "on_delete": "restrict",
+                               **({"deferred": True} if con["deferred"] else {})})
 
     # --- membership tables, from the schema alone (D52): a two-column key with a foreign key on
     # each column, keyed by the column that refers to the user table
@@ -518,6 +521,21 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
     inlined_by: dict[str, set[str]] = {}  # #52: per table, the helpers its policies were read through
     lifted_exprs: list[dict] = []  # #41: every policy expression lifted, with the memberships read as the caller
     depcols_of: dict[str, dict[str, list[str]]] = {}
+    # #35: a cycle of inclusions checked after each statement cannot be stated (the checker refuses
+    # it, and calling it deferred would change it); one inclusion per cycle stays foreign
+    from mls.spec.fkcycle import Fk, cycles
+
+    while True:
+        found = cycles([Fk(r["name"], r["table"], relations[r["relation"]]["table"], bool(r.get("deferred")), r["name"])
+                        for r in inclusions])
+        if not found:
+            break
+        inc, path = found[0]
+        inclusions = [r for r in inclusions if r["name"] != inc.name]
+        notes.append(f"foreign key {inc.name} on {inc.table} closes a cycle of foreign keys checked after each "
+                     f"statement ({' -> '.join([inc.table, inc.parent] + [f.parent for f in path])}): listed as "
+                     f"foreign, not imported (make it DEFERRABLE INITIALLY DEFERRED, and the import reads it as a "
+                     f"deferred inclusion)")
     rules: list[dict] = list(inclusions)
     lifted_n = opaque_n = 0
 
@@ -854,8 +872,14 @@ def verify_adopted(conn: psycopg.Connection, spec: Spec, schema: str = "public")
     """`mls check --dsn`: every adopted table exists with the columns and types the spec declares,
     every observed table exists, and no owned table is owned by an app role (D45)."""
     errors: list[MlsError] = []
+    from mls.pg.catalog import all_foreign_keys
+    from mls.spec.check import fk_cycle_errors
+    from mls.spec.fkcycle import database_fks
+
     with conn.transaction():
         cat = _read(conn, schema)
+        fks = all_foreign_keys(conn, schema)
+    errors += fk_cycle_errors(spec, database_fks(fks, spec))  # #35: with the database's own keys
     for name, labels in spec.enums.items():
         live_labels = cat["enums"].get(name)
         if live_labels is None:

@@ -187,6 +187,8 @@ def relation_axioms(spec: Spec, enc: Encoder) -> list[Term]:
     out = []
     x, y = int_var("ax.k"), int_var("ax.v")
     for inc in spec.inclusions():
+        if inc.deferred:
+            continue  # #35: it holds only at commit, not while a policy runs
         for aname, a in spec.base_relations().items():
             if a.table == inc.table and list(inc.columns) == [a.key, a.value]:
                 out.append(forall([x, y], implies(enc.rel(aname)(x, y), enc.rel(inc.relation)(x, y))))

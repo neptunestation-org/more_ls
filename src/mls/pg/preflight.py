@@ -44,10 +44,11 @@ class Violation:
 class PreflightResult:
     violations: list[Violation]
     notes: list[str]
+    errors: list = field(default_factory=list)  # MlsError: the spec cannot deploy as it stands (#35)
 
     @property
     def ok(self) -> bool:
-        return not self.violations
+        return not self.violations and not self.errors
 
 
 def _live_columns(cur, schema: str, table: str) -> dict[str, str] | None:
@@ -106,6 +107,11 @@ def preflight(conn: psycopg.Connection, new: Spec, old: Spec | None = None, sche
     with conn.transaction(force_rollback=True):  # nests as a savepoint inside a caller's transaction
         with conn.cursor() as cur:
             cur.execute("set transaction read only")
+            from mls.pg.catalog import all_foreign_keys
+            from mls.spec.check import fk_cycle_errors
+            from mls.spec.fkcycle import database_fks
+
+            errors = fk_cycle_errors(new, database_fks(all_foreign_keys(conn, schema), new))
             cur.execute(psql.SQL("set local search_path to {}, pg_catalog").format(psql.Identifier(schema)))
             live_cols: dict[str, dict[str, str] | None] = {t: _live_columns(cur, schema, t) for t in new.tables}
             for t, cols in live_cols.items():
@@ -193,4 +199,4 @@ def preflight(conn: psycopg.Connection, new: Spec, old: Spec | None = None, sche
                 n, s, sql = _count_and_sample(cur, src, cond, samples)
                 if n:
                     out.append(Violation(c.rule_id, c.table, what, n, s, sql, cond))
-    return PreflightResult(out, notes)
+    return PreflightResult(out, notes, errors)

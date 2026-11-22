@@ -476,8 +476,19 @@ class Checker:
         self.check_hierarchies()
         self.check_opaques()
         self.check_rules()
+        if not self.sink.errors:
+            self.check_fk_cycles()
         self.check_properties()
         return self.sink.errors
+
+    def check_fk_cycles(self, database: list | None = None) -> None:
+        """#35: an inclusion closing a cycle of immediate foreign keys (spec/fkcycle.py); the
+        catalog's own keys join them when the database is read."""
+        from mls.spec.fkcycle import cycle_message, cycles, spec_fks
+
+        for inc, path in cycles(spec_fks(self.spec) + (database or [])):
+            i = next(j for j, r in enumerate(self.spec.rules) if r.id == inc.rule_id)
+            self.err(self.rule_paths[i], *cycle_message(inc, path))
 
     def check_identity(self) -> None:
         ident = self.spec.identity
@@ -1030,6 +1041,22 @@ class Checker:
                 for j, role in enumerate(p.roles):
                     if role not in self.spec.roles:
                         self.err(f"{path}.roles[{j}]", f"unknown role '{role}'")
+
+
+def fk_cycle_errors(spec: Spec, database: list) -> list[MlsError]:
+    """#35, with the database read: the cycles the catalog's own foreign keys close with the
+    spec's inclusions (`database` is `fkcycle.database_fks`); the spec's own are check_spec's."""
+    from mls.spec.fkcycle import cycles, spec_fks
+
+    own = {frozenset((f.table, f.name) for f in [inc, *path]) for inc, path in cycles(spec_fks(spec))}
+    c = Checker(spec)
+    for inc, path in cycles(spec_fks(spec) + database):
+        if frozenset((f.table, f.name) for f in [inc, *path]) not in own:
+            from mls.spec.fkcycle import cycle_message
+
+            i = next(j for j, r in enumerate(spec.rules) if r.id == inc.rule_id)
+            c.err(c.rule_paths[i], *cycle_message(inc, path))
+    return c.sink.errors
 
 
 def check_spec(spec: Spec) -> Spec:

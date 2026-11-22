@@ -21,6 +21,7 @@ CASES = {
     "check": (specs.check_nullable_spec, Mutation.CHECK_NAIVE, None),
     "transition": (specs.transition_nullable_spec, Mutation.TRANSITION_NAIVE, None),
     "fk": (specs.fk_spec, Mutation.FK_MATCH_FULL, None),
+    "fk_deferred": (specs.deferred_spec, Mutation.FK_MATCH_FULL, None),  # #35
     "column": (specs.column_rule_spec, Mutation.COLUMN_TABLE_GRANT, None),
     "time": (specs.time_spec, Mutation.TIME_NULL_CLOSED, None),
     "opaque": (specs.opaque_spec, Mutation.OPAQUE_INVERT, specs.opaque_impl),

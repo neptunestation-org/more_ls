@@ -104,6 +104,13 @@ def fk_spec() -> Spec:
     return make(base())
 
 
+def deferred_spec() -> Spec:
+    """#35: admins ⊆ member_of checked at commit (DEFERRABLE INITIALLY DEFERRED)."""
+    d = base()
+    next(r for r in d["rules"] if r["id"] == "R8")["deferred"] = True
+    return make(d)
+
+
 def column_rule_spec() -> Spec:
     d = base()
     d["rules"].append({"id": "C1", "kind": "column_rule", "role": "authenticated", "table": "docs",

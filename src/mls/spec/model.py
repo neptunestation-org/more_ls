@@ -410,6 +410,9 @@ class InclusionRule(RuleBase):
     columns: list[str] = Field(min_length=2, max_length=2)
     relation: str
     on_delete: Literal["restrict"]
+    # #35: checked when the transaction commits (DEFERRABLE INITIALLY DEFERRED), so a cycle of
+    # foreign keys through it can be written in two statements; the proofs do not assume it
+    deferred: bool | None = None
 
 
 class TransitionRule(RuleBase):

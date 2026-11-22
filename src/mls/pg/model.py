@@ -196,7 +196,7 @@ class Oracle:
         row = self.normalize(table, row, db)
         if row is None or not self.fk_exists(table, row, db):
             return None
-        if not holds(row_constraints(self.spec, table), row, {CONTEXT_NOW: None}, db):
+        if not holds(row_constraints(self.spec, table, at_commit=True), row, {CONTEXT_NOW: None}, db):
             return None
         if not self.cardinality_ok(table, row, db) or self._unique_violation(table, row, db):
             return None
@@ -236,7 +236,7 @@ class Oracle:
             return "error"
         if not holds(effective(self.spec, table, role, "insert", "check"), new, ctx, db):
             return "error"
-        if not holds(row_constraints(self.spec, table), new, ctx, db):
+        if not holds(row_constraints(self.spec, table, at_commit=True), new, ctx, db):
             return "error"
         if not self.fk_exists(table, new, db) or not self.cardinality_ok(table, new, db):
             return "error"
@@ -266,7 +266,7 @@ class Oracle:
             return "error"
         if any(new[c] is None and not col.nullable for c, col in self.spec.tables[table].columns.items()):
             return "error"
-        if not holds(row_constraints(self.spec, table), new, ctx, db):
+        if not holds(row_constraints(self.spec, table, at_commit=True), new, ctx, db):
             return "error"
         if not holds(transition_constraints(self.spec, table), new, ctx, db, old=old, new=new):
             return "error"

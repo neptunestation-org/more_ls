@@ -217,11 +217,14 @@ def hierarchy_checks(spec: Spec, table: str) -> list[Pred]:
     return out
 
 
-def row_constraints(spec: Spec, table: str) -> Pred:
+def row_constraints(spec: Spec, table: str, at_commit: bool = False) -> Pred:
     """Engine-enforced single-row constraints on every stored row of `table`: CHECKs, FKs and
-    the hierarchy depth bound."""
+    the hierarchy depth bound.  A deferred inclusion (#35) holds only at commit: a policy or
+    trigger runs while it may still be unmet, so the proofs do not assume it; `at_commit` (the
+    reference model, whose statements are checked as a commit would) includes it."""
     parts: list[Pred] = [c.predicate for c in spec.checks() if c.table == table]
-    parts += [inclusion_pred(spec, i) for i in spec.inclusions() if i.table == table]
+    parts += [inclusion_pred(spec, i) for i in spec.inclusions()
+              if i.table == table and (at_commit or not i.deferred)]
     parts += hierarchy_checks(spec, table)
     return _and(*parts)
 

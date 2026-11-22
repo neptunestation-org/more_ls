@@ -514,6 +514,7 @@ class Harness:
         self._begin_ctx(cur, role, ctx)
         try:
             self._insert(cur, table, row)
+            cur.execute("set constraints all immediate")  # #35: a deferred FK is checked as at commit
             got = "ok"
         except psycopg.Error as e:
             got = self._classify(e)
@@ -536,6 +537,7 @@ class Harness:
                 psql.SQL(" and ").join(psql.SQL("{} = {}").format(_ident(c), psql.Placeholder()) for c in pk)),
                 [new[c] for c in set_cols] + [old[c] for c in pk])
             got = "ok" if cur.rowcount == 1 else "filtered"
+            cur.execute("set constraints all immediate")
         except psycopg.Error as e:
             got = self._classify(e)
         finally:

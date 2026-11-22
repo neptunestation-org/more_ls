@@ -37,6 +37,11 @@ What a Python change left untranscribed.  Remove an entry when the transcription
   a new evaluation rule.  The subset axiom (#37: a filtered relation's facts are among its
   unfiltered twin's, `obligations.subset_axioms`) follows from that definition and is not
   transcribed either.
+- **Deferred inclusions (#35).**  A deferred inclusion's foreign key (D75) is checked at commit.
+  `Relational.lean`'s inclusion theorems (`inclusion_of` and the per-statement ones) are about the
+  immediate template, where every statement keeps the inclusion; a deferred one holds only on
+  committed states, and no transcription states a transaction.  The proofs leave it out of the
+  stored-row constraints and the relation axioms, which only weakens their assumptions.
 - **The enum domain axiom (#30).**  `props/obligations.py:enum_row_axioms` (an enum column of a
   row an obligation reads is NULL or one of its type's labels, SEMANTICS §7) is not transcribed.
   Columns are `Int`-valued with interned text constants (`Term.const`), so the axiom is an extra

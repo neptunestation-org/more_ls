@@ -200,6 +200,24 @@ order by t.relname, c.conname
 """
 
 
+ALL_FOREIGN_KEYS = """
+select c.conname, t.relname, p.relname, c.condeferrable
+from pg_constraint c
+join pg_class t on t.oid = c.conrelid join pg_namespace n on n.oid = t.relnamespace
+join pg_class p on p.oid = c.confrelid join pg_namespace pn on pn.oid = p.relnamespace
+where c.contype = 'f' and n.nspname = %s and pn.nspname = %s
+order by t.relname, c.conname
+"""
+
+
+def all_foreign_keys(conn: psycopg.Connection, schema: str) -> list[dict]:
+    """Every foreign key between two tables of `schema`, of any width: {name, table, parent,
+    deferrable} (#35: a cycle of immediate ones makes two-statement inserts fail).  A key that is
+    deferrable but initially immediate counts as deferrable: the app can defer it."""
+    return [{"name": n, "table": t, "parent": p, "deferrable": d}
+            for n, t, p, d in conn.execute(ALL_FOREIGN_KEYS, (schema, schema)).fetchall()]
+
+
 def foreign_keys(conn: psycopg.Connection, schema: str, tables: list[str], owned: set[str]) -> list[dict[str, str]]:
     """The single-column foreign keys on `tables` whose names are not in `owned` (the ones the
     spec declares): {name, table, column, parent, parent_column}, the parent schema-qualified

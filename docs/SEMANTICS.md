@@ -179,6 +179,11 @@ obligation, no implicit relation policy and no column grant.
   `CHECK ((p) IS TRUE)` and every trigger test as `IF NOT ((p) IS TRUE)`.
 - FK uses MATCH SIMPLE (any NULL in the referencing columns passes). The inclusion predicate is
   `is_null(c1) ∨ ... ∨ member(rel, c1, c2)` over the nullable columns.
+- A deferred inclusion's FK is `DEFERRABLE INITIALLY DEFERRED`: its predicate holds on every
+  committed state, not while a statement inside the transaction runs, so no obligation assumes
+  it (the stored-row constraints and the relation axioms leave it out).  Its `RESTRICT` side is
+  immediate, as for any inclusion.  An inclusion that closes a cycle of FKs checked after each
+  statement is refused (two inserts would fail in either order).
 - Other targets differ (e.g. Snowflake defaults FKs to MATCH FULL); out of scope for v1.
 
 ## 5. Policy combination (Postgres semantics)

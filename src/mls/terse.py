@@ -22,6 +22,7 @@ approval artifact (D10, D33).  The grammar:
     opaque     := 'opaque' NAME 'on' TABLE '(' [input (',' input)*] ')' 'relations' '(' [names] ')' 'sql' DOLLAR
     input      := COL | '@' CTX                                   DOLLAR := '$$' sql '$$' | '$tag$' sql '$tag$'
     rule       := ID KIND [NAME] ('on' TABLE | 'applies_to' selector) ['from' ID] ':' body ['requirement' STRING]
+                  (an inclusion's body ends `on_delete restrict` [`deferred`])
     selector   := 'has_column' '(' COL [TYPE] ')' | 'named' '(' names ')' | 'tagged' '(' NAME ')' | 'all'
                 | 'and' '(' selector (',' selector)* ')' | 'or' '(' selector (',' selector)* ')'
     property   := ID TEMPLATE [table role command which]: ... ['description' STRING]
@@ -54,7 +55,7 @@ OR, AND, NOT, ATOM = 1, 2, 3, 4
 
 RESERVED = frozenset("""
 mls comment identity roles enum table relation hierarchy opaque rules properties
-on applies_to from requirement description using check for max on_delete restrict max_depth where
+on applies_to from requirement description using check for max on_delete restrict deferred max_depth where
 and or not is null true false in in_group now_between old new
 primary_key unique tags assume sql relations has_column named tagged all
 owned adopted observed select insert update delete permissive restrictive read write
@@ -233,7 +234,8 @@ def rule(r: Rule) -> str:
         return f"{head} {pred(r.predicate)}" + _tail(r)
     if isinstance(r, InclusionRule):
         c1, c2 = r.columns
-        return f"{head} ({ident(c1)}, {ident(c2)}) in {ident(r.relation)} on_delete {r.on_delete}" + _tail(r)
+        return (f"{head} ({ident(c1)}, {ident(c2)}) in {ident(r.relation)} on_delete {r.on_delete}"
+                + (" deferred" if r.deferred else "") + _tail(r))
     if isinstance(r, TransitionRule):
         return f"{head} {pred(r.predicate)}" + _tail(r)
     if isinstance(r, CardinalityRule):

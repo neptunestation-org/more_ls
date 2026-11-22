@@ -269,7 +269,7 @@ def cmd_preflight(a) -> int:
     with psycopg.connect(a.dsn) as conn:
         res = preflight(conn, new, old, schema=a.schema, samples=a.samples)
     if a.json:
-        print(json.dumps({"ok": res.ok, "notes": res.notes,
+        print(json.dumps({"ok": res.ok, "notes": res.notes, "errors": [x.to_dict() for x in res.errors],
                           "violations": [{"rule": v.rule_id, "table": v.table, "what": v.what, "count": v.count,
                                           "samples": v.samples, "sql": v.sql} for v in res.violations]},
                          indent=2, default=str))
@@ -278,8 +278,12 @@ def cmd_preflight(a) -> int:
             print(f"note: {n}")
         for v in res.violations:
             print(str(v))
+        for x in res.errors:
+            print(str(x))
         print("pre-flight: " + ("OK, no existing row violates the new constraints" if res.ok
-                                else f"{len(res.violations)} violation group(s)"))
+                                else ", ".join(s for s in (
+                                    f"{len(res.violations)} violation group(s)" if res.violations else "",
+                                    f"{len(res.errors)} error(s)" if res.errors else "") if s)))
     return 0 if res.ok else 1
 
 

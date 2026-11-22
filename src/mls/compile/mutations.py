@@ -29,4 +29,5 @@ class Mutation(str, Enum):
     LOOKUP_KEY_DROPPED = "lookup_key_dropped"  # a lookup helper that returns the values of every key
     RELATION_NULL_KEY_MATCHES = "relation_null_key_matches"  # a relation's subquery also takes rows with a NULL key
     MEMBER_NULL_PASSES = "member_null_passes"  # a membership that holds when its value is NULL
+    INCLUSION_NOT_DEFERRED = "inclusion_not_deferred"  # a deferred inclusion's foreign key checked per statement
     IDENT_UNQUOTED = "ident_unquoted"                # a predicate's column unquoted, so a mixed-case name folds

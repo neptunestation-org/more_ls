@@ -1411,3 +1411,41 @@ table's select predicate into the relation's condition: that predicate reads the
 membership table with RLS enabled and no policy (the app read no membership at all) and now say
 so; they gained an own-rows policy.  Fixture
 `tests/templates/test_adopt.py::test_a_membership_whose_rows_the_inner_policies_hide_is_not_claimed`.
+
+## D75 — Deferred inclusions, and an immediate foreign-key cycle is refused (#35)
+
+An inclusion compiles to a foreign key checked after each statement.  When it closes a cycle of
+such keys (aural-oss: `organizations(ownerId, id)` into the members relation while
+`organization_members.workspaceId -> organizations.id`), a row of either table needs the other's
+row to exist already.  Postgres still lets one statement insert both (a writable CTE: the RI
+triggers fire at the end of the whole statement, observed on PG 16), but the two-insert code an
+app has (the sign-up trigger, `create_organization`, the Supabase client) fails in either order,
+and nothing said so: the proofs reason about states, not about how one reaches them.
+
+Decision: (1) `InclusionRule.deferred` (JSON `"deferred": true`, terse `on_delete restrict
+deferred`) compiles the key `DEFERRABLE INITIALLY DEFERRED`, checked at commit.  RESTRICT is
+never deferred by Postgres, so the delete side is unchanged.  (2) The proofs do not assume a
+deferred inclusion (`row_constraints` leaves it out, `relation_axioms` skips it): a policy,
+check or trigger runs mid-transaction, while the pair may be missing, so assuming it could prove
+a write that is in fact allowed.  The reference model checks it as a commit would
+(`row_constraints(.., at_commit=True)`), and the harness runs `set constraints all immediate`
+after each statement before its rollback, so the differential test sees the commit's outcome.
+(3) The checker refuses an immediate inclusion that closes a cycle of immediate keys through two
+or more tables (`spec/fkcycle.py`): the spec's inclusions and the template keys in `mls check`;
+plus the catalog's own keys between the spec's tables in `mls check --dsn` and `mls preflight`
+(`catalog.all_foreign_keys`; a `DEFERRABLE` key counts as breakable).  One error per cycle, at
+the first inclusion on it; the fix names `deferred`.  Refused whether or not a column is
+nullable: a NULL-first insert also breaks the cycle, but only for code written that way, and
+`deferred` serves both.  A key onto its own table is no cycle.  (4) Import reads a
+`DEFERRABLE INITIALLY DEFERRED` key of the inclusion shape as a deferred inclusion; an
+initially immediate deferrable key is not an inclusion (listed); a cycle of immediate
+inclusion-shaped keys keeps one key per cycle foreign, with a note (the spec cannot state it).
+
+Rejected: refusing without a flag (rejects specs that insert in one statement, and leaves the
+user no way to state the requirement), and a warning only (a deploy breaks the app if nobody
+reads it).  Deferred: the issue's filtered inclusion target (a constraint trigger checking the
+relation's condition at commit).  Mutation `INCLUSION_NOT_DEFERRED`, caught by
+`tests/templates/test_fkcycle.py` (two inserts in one transaction, child first); the
+per-statement differential cannot see it, since a deferred key checked at the statement's end
+behaves as an immediate one.  Lean: a known gap (the per-statement inclusion theorems cover the
+immediate template).

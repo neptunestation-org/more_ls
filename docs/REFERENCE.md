@@ -538,6 +538,21 @@ the relation's key and value types.  `on_delete` is `restrict` only.  Compiles t
 foreign key `MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT` and an index on the two
 columns.
 
+`"deferred": true` (terse: `... on_delete restrict deferred`) compiles the foreign key
+`DEFERRABLE INITIALLY DEFERRED`: a row may be written before the pair it refers to, within one
+transaction, and the key is checked when the transaction commits.  Removing a referenced pair
+is still refused at once (Postgres never defers `RESTRICT`).  The proofs do not assume a
+deferred inclusion: a policy, check or trigger runs while the pair may still be missing.
+
+An inclusion that closes a cycle of foreign keys checked after each statement is refused: for
+example `orgs(owner_id, id)` into the members relation while `members.org_id` refers to
+`orgs.id`.  A row of either table would need the other's row to exist already, so two inserts
+fail in either order.  The error names the tables and keys of the cycle; the fix is to mark the
+inclusion deferred.  `mls check` sees the cycles among the spec's own inclusions and the
+hierarchy and cardinality keys; `mls check --dsn` and `mls preflight` also see the database's
+own foreign keys between the spec's tables (a key declared `DEFERRABLE` does not count).  A key
+onto its own table is not a cycle.
+
 ### 11.4 `transition`
 
     {"id": "R9", "kind": "transition", "name": "tenant_immutable", "table": "docs",
@@ -585,8 +600,8 @@ obligations and reports each as PROVED, REFUTED (with a counterexample scenario)
 is, else PROVED; a PROVED property whose proof depends on an opaque block is marked
 `conditional on`.
 
-Assumptions shared by every obligation: stored rows satisfy every check, inclusion and
-hierarchy invariant; context values are not NULL; the identity adapter's assumption.
+Assumptions shared by every obligation: stored rows satisfy every check, inclusion (except a
+deferred one) and hierarchy invariant; context values are not NULL; the identity adapter's assumption.
 
 ### 12.1 `tenant_isolation`
 
@@ -870,7 +885,8 @@ With `--dsn`, the spec's tables are also verified against the catalog: an `adopt
 `observed` table must exist; an `adopted` table must have every column the spec declares, with
 the declared type (a missing column is an error here and drift otherwise); an `owned` table
 that exists must not be owned by an app role (the fix names the `adopted` mode and the
-assumption to add).
+assumption to add); and no inclusion may close a cycle with the database's own foreign keys
+(§11.3).
 
 ### `mls prove SPEC [--format md|json] [--out FILE] [--timeout SECONDS]`
 
@@ -947,8 +963,10 @@ json` gives the phases as data.  Exit 1 if refused.
 Counts existing rows that would violate the new (or, with `--old`, the new and changed)
 constraints, with up to `--samples` (default 5) sample rows each, in a READ ONLY transaction on
 `--schema` (default `public`).  Prints each violation as `<rule> on <table>: <n> row(s) <what>`
-with samples, then `pre-flight: OK ...` or the count of violation groups.  JSON: `{"ok",
-"notes", "violations": [{"rule", "table", "what", "count", "samples", "sql"}]}`.  Exit 1 if any.
+with samples, then `pre-flight: OK ...` or the count of violation groups and errors.  An error
+is an inclusion that closes a cycle with the database's own foreign keys (§11.3), printed with
+its path and fix.  JSON: `{"ok", "notes", "errors": [...], "violations": [{"rule", "table",
+"what", "count", "samples", "sql"}]}`.  Exit 1 if any.
 
 ### `mls drift SPEC --dsn DSN [--schema NAME] [--json]`
 
@@ -1005,7 +1023,9 @@ reads.  Every policy becomes a rule, one per role it applies to, whose `using` a
 lifter reads (below); what it cannot read is an opaque block with the policy's catalog
 signature: the columns it depends on or names, the context values whose source it reads, the
 relations on the tables it names.  A foreign key of the inclusion shape (two columns onto a key
-pair, `MATCH SIMPLE`, `ON UPDATE/DELETE RESTRICT`) becomes an inclusion rule; column-level
+pair, `MATCH SIMPLE`, `ON UPDATE/DELETE RESTRICT`, not deferrable or `DEFERRABLE INITIALLY
+DEFERRED`, the latter a deferred inclusion) becomes an inclusion rule, except one per cycle of
+such keys checked after each statement, which is listed as foreign with a note; column-level
 grants become column rules; a CHECK the lifter reads becomes a check rule; a trigger of the
 transition template MLS itself emits becomes a transition rule.  The compiler's own relation
 policies (`mls_rel_<relation>_<role>_<n>`, which give the relation its name back) and relation
@@ -1206,6 +1226,8 @@ Classes of error, with the typical message:
 - **structure**: `a select policy needs 'using'`; `an insert policy has no 'using' (no existing
   row)`; `(key, value) is not unique in 't' ...`; `'parent' must be nullable (roots have no parent)`; `'parent' needs a single-column
   primary key that 'group' ...`; `a second read column rule for role 'r' on 't'`;
+  `inclusion i closes a cycle of foreign keys checked after each statement (a -> b -> a, with
+  ...)` (fix: mark the inclusion deferred, or remove it);
 - **compiler** (soundness obligations): a restrictive policy on a relation table that hides
   rows a membership atom needs, with the policy's path and a fix; for a composed
   relation, the same on each hop table (`... can hide rows whose <key> the previous level

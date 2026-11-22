@@ -169,6 +169,11 @@ union member the renderer does not cover.
 - D74: import keeps a membership read as the caller (`Env.caller_reads`; definer bodies are aliased
   `mls_definer`) only if the visibility obligation holds against the imported policies alone
   (`relation_visibility_obligations(spec, only=..)`); else that subquery is re-read as opaque (`Env.hidden`).
+- D75: `InclusionRule.deferred` compiles `deferrable initially deferred`; proofs leave it out
+  (`row_constraints(.., at_commit=)`, `relation_axioms`); the harness checks it per statement with
+  `set constraints all immediate`.  `spec/fkcycle.py` refuses an immediate inclusion closing a cycle of
+  immediate keys (`check_spec`; with the catalog's keys `check --dsn`/`preflight`); mutation
+  `INCLUSION_NOT_DEFERRED`, `tests/templates/test_fkcycle.py`.
 - D42: row-dependent column visibility is normalization
   (the column is its own table with its own policies); there is no masking construct.
 - M4 (the LLM loop and evals): `src/mls/llm/CLAUDE.md`. Tests never call the API (`MLS_LLM_SCRIPT=<json>`

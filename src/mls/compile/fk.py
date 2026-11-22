@@ -1,4 +1,6 @@
-"""Inclusion template: composite FK, MATCH SIMPLE, ON DELETE RESTRICT (and ON UPDATE RESTRICT)."""
+"""Inclusion template: composite FK, MATCH SIMPLE, ON DELETE RESTRICT (and ON UPDATE RESTRICT);
+a deferred inclusion's FK is DEFERRABLE INITIALLY DEFERRED (#35).  RESTRICT is never deferred by
+Postgres, so removing a referenced pair is refused at once either way."""
 from __future__ import annotations
 
 from mls.compile.mutations import Mutation
@@ -11,7 +13,9 @@ def fk_def(r: InclusionRule, sc: SqlCompiler) -> str:
     rel = sc.spec.relations[r.relation]
     match = "match full" if Mutation.FK_MATCH_FULL in sc.mutations else "match simple"
     return (f"foreign key ({q(r.columns[0])}, {q(r.columns[1])}) references {q(rel.table)} "
-            f"({q(rel.key)}, {q(rel.value)}) {match} on update restrict on delete restrict")
+            f"({q(rel.key)}, {q(rel.value)}) {match} on update restrict on delete restrict"
+            + (" deferrable initially deferred" if r.deferred and Mutation.INCLUSION_NOT_DEFERRED not in sc.mutations
+               else ""))
 
 
 def fk_ddl(r: InclusionRule, sc: SqlCompiler) -> str:

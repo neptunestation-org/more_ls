@@ -515,6 +515,9 @@ class Parser:
             r["relation"] = self.name("a relation")
             self.word("on_delete")
             r["on_delete"] = self.word("restrict")
+            if self.at_word("deferred"):
+                self.advance()
+                r["deferred"] = True
         elif kind == "cardinality":
             r["group"] = self.name("the group column")
             self.eat("->")

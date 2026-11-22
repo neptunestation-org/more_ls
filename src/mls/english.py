@@ -101,7 +101,9 @@ def rule(spec: Spec, r: Rule) -> str:
         c1, c2 = r.columns
         return (f"Every row of {r.table} with both {c1} and {c2} set has ({c1}, {c2}) listed in "
                 f"{r.relation} (table {rel.table}); such a {r.relation} entry cannot be removed or "
-                f"changed while a row of {r.table} refers to it.")
+                f"changed while a row of {r.table} refers to it."
+                + (" It is checked when the transaction commits, so the two rows may be written in either "
+                   "order within one transaction." if r.deferred else ""))
     if isinstance(r, TransitionRule):
         return f"A change to a row of {r.table} is allowed only if {pred(spec, r.predicate)}."
     if isinstance(r, CardinalityRule):
