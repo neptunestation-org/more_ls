@@ -1384,3 +1384,30 @@ too (a helper may be the only place that reads `current_setting('app.uid')`).  R
 import was run), and inlining plpgsql (its control flow is not an expression).  On scarpar:
 81 opaque blocks → 2, and 388 access changes → 54, of which 3 still rest on opaque SQL.  Fixture
 `tests/templates/test_adopt.py::test_one_line_sql_helpers_are_read_inline_and_drift_checks_their_bodies`.
+
+## D74 — Import claims a membership only when the caller sees its rows (#41)
+
+A hand-written membership subquery (`exists (select 1 from members m where m.team_id = t.team_id
+and m.user_id = auth.uid())`, or the same inside an invoker helper) runs as the caller, under the
+membership table's own policies, so it sees only the rows those policies show.  The lifter read it
+as the relation, whose facts are every stored row: when the inner policies hide rows, `before.mls`
+claimed that today's policies allow more than they do, and the diff against a new spec reported
+false "no longer allowed" changes.  The compiler's own shape never had the problem (D21's
+visibility policy and obligation).  Now: (1) the lifter records each membership it reads from a
+subquery that runs as the caller (`Env.caller_reads`; a subquery from a SECURITY DEFINER helper's
+body or from the compiler's lookup helper is aliased `mls_definer` and reads every row, so it is
+not recorded).  (2) After the first pass the import runs the relation-visibility obligation for
+exactly those (rule, relation) pairs against the imported policies alone, without the compiler's
+implicit visibility policies (`relation_visibility_obligations(spec, only=...)`,
+`effective(.., implicit=False)`): a hand-written database has none, and a database MLS deployed
+has its own, imported as rules at that point, so a round trip still lifts.  (3) Refuted or unknown:
+the expression is read again with that relation refused (`Env.hidden`), so only the subquery
+becomes an opaque block, with a note naming the policy and the table; the opaque block is what the
+proof reports and the diff flag.  Chosen over keeping the atom with a note (the proposal's other
+option): a lifted atom that claims more than the policy says is exactly a silently wrong baseline,
+and an opaque block is the construct that states "not modelled".  Rejected: conjoining the inner
+table's select predicate into the relation's condition: that predicate reads the context
+(`user_id = auth.uid()`), which a relation's condition cannot.  Two existing fixtures had a
+membership table with RLS enabled and no policy (the app read no membership at all) and now say
+so; they gained an own-rows policy.  Fixture
+`tests/templates/test_adopt.py::test_a_membership_whose_rows_the_inner_policies_hide_is_not_claimed`.

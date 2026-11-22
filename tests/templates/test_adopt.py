@@ -332,6 +332,8 @@ create table tickets (
 );
 alter table team_members enable row level security;
 alter table tickets enable row level security;
+create policy own_memberships on team_members for select to app using (
+  user_id = (select nullif(current_setting('app.uid', true), '')::bigint));
 create policy member_read on tickets for select to app using (
   team_id = any (array(select team_id from team_members
                        where user_id = (select nullif(current_setting('app.uid', true), '')::bigint))));
@@ -459,6 +461,8 @@ create function is_member_w(t bigint) returns boolean language sql stable securi
                  where team_id = t and user_id = nullif(current_setting('app.uid', true), '')::bigint)
 $f$;
 alter function is_member_w(bigint) owner to mls_weak;
+create policy own_memberships on members for select to app using (
+  user_id = nullif(current_setting('app.uid', true), '')::bigint);
 create policy member_read on tickets for select to app using (is_member(team_id));
 create policy admin_edit on tickets for update to app using (has_role(team_id, array['admin']));
 create policy v_read on tickets for select to app using (level < 0 or is_member_v(team_id));
@@ -505,3 +509,68 @@ def test_one_line_sql_helpers_are_read_inline_and_drift_checks_their_bodies(help
                            security definer as $f$ select true $f$""")
         changed = [i for i in drift(helpers, spec, script).items if "is_member(bigint)" in i.object]
         assert [i.kind for i in changed] == ["differs"] and "has a new body" in changed[0].object
+
+
+HIDDEN_SQL = """
+do $$ begin if not exists (select from pg_roles where rolname = 'app') then create role app; end if; end $$;
+create table members (user_id bigint not null, team_id bigint not null, role text not null,
+                      primary key (user_id, team_id));
+create table tickets (id bigint primary key, team_id bigint not null);
+create table notes (id bigint primary key, team_id bigint not null);
+create table pages (id bigint primary key, team_id bigint not null);
+alter table members enable row level security;
+alter table tickets enable row level security;
+alter table notes enable row level security;
+alter table pages enable row level security;
+create policy not_viewers on members for select to app using (role <> 'viewer');
+create function in_team(t bigint) returns boolean language sql stable security definer as $f$
+  select exists (select 1 from members
+                 where team_id = t and user_id = nullif(current_setting('app.uid', true), '')::bigint)
+$f$;
+create policy member_read on tickets for select to app using (
+  exists (select 1 from members m
+          where m.team_id = tickets.team_id and m.user_id = nullif(current_setting('app.uid', true), '')::bigint));
+create policy helper_read on notes for select to app using (in_team(team_id));
+create policy mixed_read on pages for select to app using (
+  team_id < 0 or exists (select 1 from members m
+                         where m.team_id = pages.team_id and m.user_id = nullif(current_setting('app.uid', true), '')::bigint));
+"""
+
+
+@pytest.fixture
+def hidden(pg_dsn):
+    dbname = "mls_hidden"
+    with psycopg.connect(pg_dsn, autocommit=True) as admin:
+        admin.execute(f'drop database if exists "{dbname}"')
+        admin.execute(f'create database "{dbname}"')
+    conn = psycopg.connect(psycopg.conninfo.make_conninfo(pg_dsn, dbname=dbname), autocommit=True)
+    conn.execute(HIDDEN_SQL)
+    yield conn
+    conn.close()
+    with psycopg.connect(pg_dsn, autocommit=True) as admin:
+        admin.execute(f'drop database if exists "{dbname}"')
+
+
+def test_a_membership_whose_rows_the_inner_policies_hide_is_not_claimed(hidden):
+    """#41: a hand-written subquery runs as the caller, under the membership table's own policies.
+    Here a viewer's membership rows are hidden from the app, so `exists (select .. from members ..)`
+    is narrower than the relation members(user_id, team_id): the import reads it as an opaque block
+    (with a note), never as the membership.  The same subquery in a SECURITY DEFINER helper reads
+    every row and lifts; in a disjunction only the subquery goes opaque.  Once the members' policy
+    shows each user their own rows, the subquery lifts."""
+    res = import_schema(hidden)
+    spec = check_spec(Spec.model_validate(res.spec))
+    rules = {r.name: r for r in spec.policies()}
+    using = {n: json.dumps(r.using.model_dump(by_alias=True, exclude_none=True)) for n, r in rules.items()}
+    assert '"opaque"' in using["member_read"] and '"member"' not in using["member_read"]
+    assert '"member"' in using["helper_read"] and '"opaque"' not in using["helper_read"]
+    assert '"cmp"' in using["mixed_read"] and '"opaque"' in using["mixed_read"] and '"member"' not in using["mixed_read"]
+    flagged = [n for n in res.notes if "hide some of the rows it reads" in n]
+    assert len(flagged) == 2 and any("member_read on tickets" in n for n in flagged), res.notes
+    assert all("exists" in o["sql"].lower() or "EXISTS" in o["sql"] for o in res.spec["opaques"].values())
+
+    hidden.execute("drop policy not_viewers on members; create policy own on members for select to app using ("
+                   "user_id = nullif(current_setting('app.uid', true), '')::bigint)")
+    res = import_schema(hidden)
+    assert res.spec["opaques"] == {}, res.notes
+    assert not [n for n in res.notes if "hide some of the rows" in n]

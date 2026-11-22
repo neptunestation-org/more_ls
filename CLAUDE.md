@@ -166,6 +166,9 @@ union member the renderer does not cover.
 - D73: import inlines a stable one-statement boolean SQL helper (`lift.inline_functions`; a definer one only
   when its owner bypasses the tables' policies); an opaque part keeps the call (`restore_calls`); the table
   assumes `{"inlined": "function f(t) md5 h"}` and drift reports a changed body.
+- D74: import keeps a membership read as the caller (`Env.caller_reads`; definer bodies are aliased
+  `mls_definer`) only if the visibility obligation holds against the imported policies alone
+  (`relation_visibility_obligations(spec, only=..)`); else that subquery is re-read as opaque (`Env.hidden`).
 - D42: row-dependent column visibility is normalization
   (the column is its own table with its own policies); there is no masking construct.
 - M4 (the LLM loop and evals): `src/mls/llm/CLAUDE.md`. Tests never call the API (`MLS_LLM_SCRIPT=<json>`

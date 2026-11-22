@@ -133,7 +133,7 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
         # body names (then its body reads all rows, as a relation does); an invoker one reads as
         # the same subquery written in the policy would.
         cur.execute("""select p.proname, coalesce(p.proargnames, '{}'), p.pronargs, p.prosrc,
-                              oidvectortypes(p.proargtypes), md5(p.prosrc)
+                              oidvectortypes(p.proargtypes), md5(p.prosrc), p.prosecdef
                        from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_language l on l.oid = p.prolang
                          join pg_roles o on o.oid = p.proowner
                        where n.nspname = %s and l.lanname = 'sql' and not p.proretset and p.prorettype = 'bool'::regtype
@@ -146,11 +146,11 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
                          and (select count(*) from pg_proc q where q.proname = p.proname and q.pronamespace = p.pronamespace) = 1""",
                     (schema,))
         cat["functions"] = {}
-        for fname, argnames, nargs, src, types, digest in cur.fetchall():
+        for fname, argnames, nargs, src, types, digest, definer in cur.fetchall():
             expr = function_body(src)
             if expr is not None:
                 cat["functions"][fname] = {"params": (list(argnames) + [""] * nargs)[:nargs], "expr": expr,
-                                           "assume": f"function {fname}({types}) md5 {digest}"}
+                                           "assume": f"function {fname}({types}) md5 {digest}", "definer": definer}
         cur.execute("select rolname, rolsuper, rolcanlogin, rolbypassrls from pg_roles")
         for name, sup, login, bypass in cur.fetchall():
             cat["roles"][name] = {"super": sup, "login": login, "bypassrls": bypass}
@@ -516,6 +516,8 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
     # --- policies through the lifter (D46); what it cannot read is an opaque block
     opaques: dict[str, dict] = {}
     inlined_by: dict[str, set[str]] = {}  # #52: per table, the helpers its policies were read through
+    lifted_exprs: list[dict] = []  # #41: every policy expression lifted, with the memberships read as the caller
+    depcols_of: dict[str, dict[str, list[str]]] = {}
     rules: list[dict] = list(inclusions)
     lifted_n = opaque_n = 0
 
@@ -567,6 +569,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
         depcols = {}
         for p in t["policies"]:
             depcols[p["name"]] = [t["colname"][n] for n in p["depcols"] if n in t["colname"]]
+        depcols_of[name] = depcols
         for p in t["policies"]:
             if discard:
                 text = f"for {p['cmd']} to {', '.join(p['roles']) or 'public'}" + (
@@ -592,8 +595,13 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                     continue
                 if which == "check" and p["cmd"] in ("update", "all") and text == p["using"]:
                     continue  # equal to USING: one predicate, as the compiler writes it
+                env.caller_reads = []
                 r = lift_expr(name, text, f"{p['name']}_{which}", "policy", depcols[p["name"]])
                 preds[which] = r.pred
+                lifted_exprs.append({"table": name, "policy": p, "which": which, "text": text, "result": r,
+                                     "caller": set(env.caller_reads), "rules": [
+                                         (ident(p["name"]) if i == 0 else ident(f"{p['name']}_{role}"), role)
+                                         for i, role in enumerate(pol_roles)]})
                 what = f"policy {p['name']} on {name}, {'with check' if which == 'check' else 'using'}"
                 if r.kind == "lifted":
                     lifted_n += 1
@@ -758,6 +766,29 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
         notes.append(f"relation {cname} proposed: {of} . " + " . ".join(f"{t}({k}, {v})" for t, k, v in hops)
                      + " (a nested membership subquery reads it)")
     checked = finish(rules)
+    hidden = _hidden_memberships(checked, lifted_exprs)
+    for x in lifted_exprs:  # #41: read again, the hidden memberships left to opaque blocks
+        refuse = {rel for rname, role in x["rules"] for rel in hidden.get((x["table"], rname), ())}
+        if not refuse:
+            continue
+        for o in x["result"].opaques:
+            opaques.pop(o, None)
+            env.opaques.pop(o, None)
+        env.hidden, env.caller_reads = refuse, []
+        env.invalidate()
+        p, which = x["policy"], x["which"]
+        r = lift_expr(x["table"], x["text"], f"{p['name']}_{which}_rls", "policy", depcols_of[x["table"]][p["name"]])
+        env.hidden = set()
+        for rname, _ in x["rules"]:
+            rule = next(rr for rr in rules if rr.get("kind") == "policy" and rr["table"] == x["table"]
+                        and rr["name"] == rname)
+            rule[which] = r.pred
+        for rel in sorted(refuse):
+            notes.append(f"policy {p['name']} on {x['table']}, {'with check' if which == 'check' else 'using'}: its "
+                         f"subquery over {rel} runs as the caller, and the policies on that table hide some of the "
+                         f"rows it reads (the relation would claim them): read as an opaque block")
+    if hidden:
+        checked = finish(rules)
     from mls.compile.sql import SqlCompiler
     from mls.identity import get_adapter
 
@@ -873,3 +904,31 @@ def verify_adopted(conn: psycopg.Connection, spec: Spec, schema: str = "public")
                                        f"declare it as {mls_type(lc['type']) or 'a type MLS does not model'}",
                                        "check"))
     return errors
+
+
+def _hidden_memberships(spec: Spec, lifted: list[dict]) -> dict[tuple[str, str], set[str]]:
+    """#41: per (table, rule name), the memberships the policy reads from a subquery that runs as the
+    caller whose rows the relation table's own policies can hide: the relation-visibility
+    obligation against the spec's policies alone (a hand-written database has no visibility
+    policies of the compiler's; a deployed spec's own are imported as rules, so it holds there).
+    A membership read through a SECURITY DEFINER helper reads every row and is not checked."""
+    from mls.props.obligations import relation_visibility_obligations
+    from mls.props.runner import run_obligation
+
+    ids = {(r.table, r.name): r.id for r in spec.policies()}
+    only = {(ids[(x["table"], rname)], rel) for x in lifted for rname, _ in x["rules"]
+            if (x["table"], rname) in ids for rel in x["caller"]}
+    if not only:
+        return {}
+    by_id = {r.id: r for r in spec.policies()}
+    out: dict[tuple[str, str], set[str]] = {}
+    for ob in relation_visibility_obligations(spec, only):
+        if run_obligation(spec, ob).verdict == "PROVED":
+            continue
+        rel = re.match(r"relation (\S+) visible to (\S+)", ob.name)
+        role = rel.group(2)
+        for rid, rn in only:  # the obligation stands for every rule of that role reading the relation
+            r = by_id[rid]
+            if rn == rel.group(1) and r.role == role:
+                out.setdefault((r.table, r.name), set()).add(rn)
+    return out

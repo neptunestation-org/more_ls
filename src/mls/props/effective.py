@@ -150,8 +150,10 @@ def relations_of(spec: Spec, p: Pred | None) -> set[str]:
     return out
 
 
-def all_policies(spec: Spec) -> list[PolicyRule]:
-    return spec.policies() + implicit_policies(spec)
+def all_policies(spec: Spec, implicit: bool = True) -> list[PolicyRule]:
+    """The spec's policies and, unless `implicit` is False, the compiler's visibility policies
+    (False: the policies a hand-written database has, for the import's visibility check, #41)."""
+    return spec.policies() + (implicit_policies(spec) if implicit else [])
 
 
 def implicit_transitions(spec: Spec) -> list[TransitionRule]:
@@ -172,15 +174,16 @@ def all_transitions(spec: Spec) -> list[TransitionRule]:
     return spec.transitions() + implicit_transitions(spec)
 
 
-def policies_for(spec: Spec, table: str, role: str, cmd: str, skip: tuple[str, ...] = ()) -> list[PolicyRule]:
-    return [p for p in all_policies(spec)
+def policies_for(spec: Spec, table: str, role: str, cmd: str, skip: tuple[str, ...] = (),
+                 implicit: bool = True) -> list[PolicyRule]:
+    return [p for p in all_policies(spec, implicit)
             if p.table == table and p.role == role and p.command in (cmd, "all") and p.id not in skip]
 
 
 def effective(spec: Spec, table: str, role: str, cmd: str, which: Which,
-              skip: tuple[str, ...] = ()) -> Pred:
+              skip: tuple[str, ...] = (), implicit: bool = True) -> Pred:
     """Effective predicate for `cmd` on `table` for `role`; which = 'using' | 'check'."""
-    ps = policies_for(spec, table, role, cmd, skip)
+    ps = policies_for(spec, table, role, cmd, skip, implicit)
     perm = [e for p in ps if p.mode == "permissive" and (e := policy_expr(p, which)) is not None]
     rest = [e for p in ps if p.mode == "restrictive" and (e := policy_expr(p, which)) is not None]
     if not perm:

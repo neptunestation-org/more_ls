@@ -685,15 +685,22 @@ def _induction_step(spec: Spec, p: InvariantPreserved, invs: list[Invariant], ta
 
 
 # ----------------------------------------------------------------------------- soundness
-def relation_visibility_obligations(spec: Spec) -> list[Obligation]:
+def relation_visibility_obligations(spec: Spec, only: set[tuple[str, str]] | None = None) -> list[Obligation]:
     """A policy's membership subquery runs as the role under RLS on the relation table.  For every
-    row x of that table with x.key = k, the role's effective SELECT must be TRUE."""
+    row x of that table with x.key = k, the role's effective SELECT must be TRUE.
+
+    `only` (#41, the import): just the (rule id, relation) pairs given, against the spec's own
+    policies without the compiler's visibility policies, which a hand-written database does not
+    have; the import passes the memberships it read from subqueries that run as the caller."""
     out = []
     seen: set[tuple[str, int, str, str]] = set()
     for i, p in enumerate(spec.policies()):
         for e in (p.using, p.check):
             for m in members_in(e, []):
-                if is_routed(spec, p.table, m.relation):
+                if only is not None:
+                    if (p.id, m.relation) not in only:
+                        continue
+                elif is_routed(spec, p.table, m.relation):
                     continue  # D67: the helper reads every row, without the role's policies
                 for lvl, rel in enumerate(levels(spec, m.relation)):
                     # level 0: the rows with key = k; a hop (D56): the rows whose key is a value of
@@ -720,7 +727,8 @@ def relation_visibility_obligations(spec: Spec) -> list[Obligation]:
                         which = f"rows whose {rel.key} the previous level reaches from the key"
                     assumptions = [*relation_axioms(spec, enc), reach,
                                    enc.T(row_constraints(spec, rel.table), "x", rel.table)]
-                    goal = enc.T(effective(spec, rel.table, p.role, "select", "using"), "x", rel.table)
+                    goal = enc.T(effective(spec, rel.table, p.role, "select", "using", implicit=only is None),
+                                 "x", rel.table)
                     idx = spec.rules.index(p)
                     out.append(Obligation(
                         "soundness", f"relation {m.relation} visible to {p.role}"

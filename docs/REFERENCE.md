@@ -1075,7 +1075,13 @@ reads as the membership its `exists` holds).  A `security definer` helper qualif
 owner bypasses the policies of every table its body names, so that it reads every row as a
 relation does.  The table then assumes the helper with the md5 of its body
 (`{"inlined": "function has_org_role(uuid, text[]) md5 ..."}`), and `mls drift` reports a changed
-body; a part of a policy that stays opaque keeps the call as written.  Never read: a call to any
+body; a part of a policy that stays opaque keeps the call as written.  A membership subquery
+written in the policy, or in an invoker helper, runs as the caller, under the policies of the
+table it reads; the import reads it as the relation only when those policies show the caller every
+row the relation would hold for them (the relation-visibility check the proofs run, against the
+table's own policies).  When they can hide some, the subquery is an opaque block, with a note
+naming the policy and the table, because the relation would claim rows the policy never sees.
+Through a `security definer` helper the subquery reads every row and lifts.  Never read: a call to any
 other function that is not an identity source or a compiler helper,
 `like` (an opaque block over the column, which the leakproof lint reports), a negated
 membership (an anti-join), a membership subquery that joins tables other than as a chain of

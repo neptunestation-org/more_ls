@@ -601,6 +601,11 @@ class Env:
     enum_cols: dict[str, dict[str, str]] = field(default_factory=dict)
     # D61: the condition of each relation that has one (name -> its JSON predicate)
     conditions: dict[str, dict] = field(default_factory=dict)
+    # #41: the memberships read from a subquery that runs as the caller (under the relation
+    # table's own policies), in reading order; and the relations the import found those policies
+    # hide rows of, which the lifter then leaves to an opaque block
+    caller_reads: list[str] = field(default_factory=list)
+    hidden: set[str] = field(default_factory=set)
     _spec: Spec | None = field(default=None, repr=False)
 
     @classmethod
@@ -859,6 +864,21 @@ class Lifter:
 
     # --- memberships
     def member(self, value_node: Node, sel: Select, correlated: bool, outer_value: Node | None = None) -> dict:
+        """A membership subquery as its member atom.  A subquery from a SECURITY DEFINER helper's
+        body (`inline_functions` aliases its FROM `mls_definer`) reads every row, as a relation
+        does; any other runs as the caller, under the relation table's policies (#41), so it is
+        recorded, and refused when the import found those policies hide rows of the relation."""
+        atom = self._member(value_node, sel, correlated, outer_value)
+        if DEFINER_ALIAS not in {sel.table_alias, *(a for _, a, _ in sel.joins)}:
+            rel = atom["member"]["relation"]
+            if rel in self.env.hidden:
+                raise Unreadable(f"the subquery runs as the caller, and the policies on {sel.table} hide some of "
+                                 f"the rows of {rel} it reads, so the membership would claim more than the "
+                                 f"policy allows")
+            self.env.caller_reads.append(rel)
+        return atom
+
+    def _member(self, value_node: Node, sel: Select, correlated: bool, outer_value: Node | None = None) -> dict:
         """`select V from R where R.K = <key>`: a relation (R, K, V) and a member atom."""
         if sel.table is None:
             raise Unreadable("a membership subquery needs a FROM table")
@@ -1434,12 +1454,14 @@ def lookup_calls(text: str, bodies: dict[str, str]) -> list[tuple[str, int, int,
         if body is None or tail is None:
             continue
         key = text[m.end():j - 1]
-        out.append((name[len("mls_lookup_"):], m.start(), tail.end(),
-                    "ARRAY(" + _LOOKUP_KEY.sub(lambda _: "= " + key, body.group(1), count=1) + ")"))
+        sub = _LOOKUP_KEY.sub(lambda _: "= " + key, body.group(1), count=1)
+        sub = re.sub(r'(\bfrom "[^"]+")', r"\1 " + DEFINER_ALIAS, sub)  # #41: it reads every row
+        out.append((name[len("mls_lookup_"):], m.start(), tail.end(), "ARRAY(" + sub + ")"))
         i = tail.end()
     return out
 
 
+DEFINER_ALIAS = "mls_definer"  # the FROM alias of an inlined SECURITY DEFINER body (#41)
 _FUNC_SELECT = re.compile(r"^\s*select\s+(.*?)\s*;?\s*$", re.IGNORECASE | re.DOTALL)
 _FUNC_FROM = re.compile(r'\b(from|join)\s+((?:"?[a-z_][a-z0-9_]*"?\.)?"?[a-z_][a-z0-9_]*"?)(?=\s*(?:where\b|\)|$))',
                         re.IGNORECASE)
@@ -1492,7 +1514,8 @@ def inline_functions(text: str, table: str, columns: set[str], functions: dict[s
                 out.append(text[i:j])
                 i = j
                 continue
-            body = _FUNC_FROM.sub(lambda t: f"{t.group(1)} {t.group(2)} mls_inline", f["expr"])
+            alias = DEFINER_ALIAS if f.get("definer") else "mls_inline"
+            body = _FUNC_FROM.sub(lambda t: f"{t.group(1)} {t.group(2)} {alias}", f["expr"])
             for n, (param, arg) in enumerate(zip(f["params"], subst), start=1):
                 body = re.sub(r'(?<![\w."$])(?:"' + re.escape(param) + '"|' + re.escape(param) + r')(?![\w"])|\$'
                               + str(n) + r'(?!\d)', lambda _: f"({arg})", body) if param else re.sub(
@@ -1514,7 +1537,7 @@ def restore_calls(sql: str, calls: list[tuple[str, str]]) -> str | None:
     for body, call in reversed(calls):
         for form in (f"({body})", body):
             sql = sql.replace(form, call)
-    if "mls_inline" in sql or any(sql.strip() in body for body, _ in calls if sql.strip() != body):
+    if "mls_inline" in sql or DEFINER_ALIAS in sql or any(sql.strip() in body for body, _ in calls if sql.strip() != body):
         return None
     return sql
 
