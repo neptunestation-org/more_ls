@@ -807,6 +807,15 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                          f"rows it reads (the relation would claim them): read as an opaque block")
     if hidden:
         checked = finish(rules)
+        # a chain read only by a subquery read again as opaque is no longer used: not proposed
+        used = {rn for p in checked.policies() for rn in relations_in(p.using, relations_in(p.check, set()))}
+        used |= {r for o in checked.opaques.values() for r in o.relations}
+        unused = [c for c in env.composed if c not in used]
+        for c in unused:
+            relations.pop(c)
+            notes[:] = [n for n in notes if not n.startswith(f"relation {c} proposed: ")]
+        if unused:
+            checked = finish(rules)
     from mls.compile.sql import SqlCompiler
     from mls.identity import get_adapter
 

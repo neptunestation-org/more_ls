@@ -51,6 +51,13 @@ def single_keys(spec: Spec, table: str) -> set[str]:
     return {s[0] for s in sets if len(s) == 1}
 
 
+def is_lookup(spec: Spec, lvl: Level) -> bool:
+    """D56: a hop whose value is unique on its own, so that each value has one key and the step back
+    from a value is a function.  Every other hop (up a foreign key, #43, or through a membership
+    table whose pair alone is unique, #33) is read forwards only, as its own relation symbol."""
+    return lvl.value in single_keys(spec, lvl.table)
+
+
 def is_up(spec: Spec, lvl: Level) -> bool:
     """#43: a hop up a foreign key: its key is unique and its value is not (a project's
     organization), so a value may have many rows and the hop is no function from value to key."""

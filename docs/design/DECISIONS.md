@@ -1456,3 +1456,38 @@ relation's condition at commit).  Mutation `INCLUSION_NOT_DEFERRED`, caught by
 per-statement differential cannot see it, since a deferred key checked at the statement's end
 behaves as an immediate one.  Lean: a known gap (the per-statement inclusion theorems cover the
 immediate template).
+
+## D76 — Hops through membership tables: co-membership (#33; amends D56, D69)
+
+**Decision.** A composed relation's hop needs its pair unique in its table, nothing more: its
+value a key (down, a lookup, D56), its key a key (up a foreign key, D69), or only the pair
+(`model.pair_unique`, as D60 asks of a base relation).  The last is a hop through a membership
+table.  "Users who share a team with me" is `member_of . team_members(team_id, user_id)`: the
+base relation followed back through its own table, the self-join Supabase schemas use for team
+directories.  The collect takeover's two cases are the same shape at the end of a chain
+(`... . project_members(project_id, user_id)`, `device_project_status(project_id, device_id)`).
+
+**Encoding.** A hop whose value is not a key has no function back from value to key, whatever its
+key is, so it is read as D69 reads an upward hop: the chain up to the last such hop is its own
+symbol `up.<chain>`, with one-way row axioms (`chain.is_lookup` decides; `is_up` keeps its
+meaning for the harness's data, which draws an up-hop's values the other way round).  The cost
+is D69's: the encoding admits a co-member pair no row produces, so a property that needs "a
+co-member shares some team with me" is refuted with such a pair in its scenario; a property
+stated in the relation's own terms proves.  No new quantifier shape (invariant 6).
+
+**Routing.** A chain that reads a table twice needs a hop visibility policy on that table that
+reads it (Postgres: infinite recursion), so `recursion.routed` routes it to a lookup helper (D67),
+and more generally a lookup whose hop visibility policies close a cycle back to a hop table.  That
+second check runs only once no lookup closes a cycle back to its policy's table, so specs without
+such cycles route as before (`up_spec` included).
+
+**Import.** The lifter accepts the pair-unique hop in nested subqueries, and `exists_join` reads a
+table joined with itself under two aliases (a qualifier names a table by its alias first).  A
+chain the lifter proposed whose only reader is then read again as opaque (D74) is dropped, with
+its "proposed" note: on the collect and scarpar takeovers the new chains are such reads.
+
+Rejected: a dedicated co-membership relation kind (`co of R`), which covers the self-join only and
+leaves collect's chains unexpressible.  Fixture `specs.comember_spec` (the self-join, routed, and a
+chain of lookups ending in a membership hop); the existing mutation `HOP_VISIBILITY_DROPPED` is
+caught by it (the chain through `task_assignees` reads no assignment).  Lean: `Pred.memberVia`
+reads hops relationally already; the one-way encoding is D69's known gap.

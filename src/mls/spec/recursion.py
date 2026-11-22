@@ -13,7 +13,10 @@ that key whoever asks, so a storefront's "is this product active" would list the
 of every shop; the helper answers without granting a row), those whose relation reads the
 policy's own table, then, in order of policy table and relation name,
 each lookup that still closes a cycle once the earlier ones are routed, until none does (an order
-of the names, not of the rules, so that listing the same policies differently changes nothing).  Per role the graph differs (the
+of the names, not of the rules, so that listing the same policies differently changes nothing).
+A chain whose visibility policies close a cycle of their own is routed as well (#33): one that
+reads a table twice (co-members, `member_of . team_members(team_id, user_id)`: the hop's policy
+on team_members would read team_members), or a hop whose visibility leads back to its table.  Per role the graph differs (the
 subqueries run as the caller), but a helper means the same for every role, so a lookup routed for
 one role is routed for all.
 """
@@ -110,16 +113,21 @@ def routed(spec: Spec) -> frozenset[tuple[str, str]]:
     # by table and relation, not rule order: the same policies listed in another order (an import
     # lists them by table) route the same lookups
     all_uses = sorted(uses(spec), key=lambda u: (u.table, u.relation, u.role, u.reads_rows))
-    out = {(u.table, u.relation) for u in all_uses if u.const_key or u.table in u.tables}
+    out = {(u.table, u.relation) for u in all_uses
+           if u.const_key or u.table in u.tables or len(set(u.tables)) < len(u.tables)}
     changed = True
     while changed:
         changed = False
         g = reads(all_uses, out)
-        for u in all_uses:
-            if (u.table, u.relation) in out:
-                continue
-            if any(back_path(g.get(u.role, {}), t, u.table) for t in dict.fromkeys(u.tables)):
-                out.add((u.table, u.relation))
+        # back to the policy's table first; only then (#33) back to a hop table from the levels its
+        # visibility policy reads, so that a spec without such a cycle routes as before
+        for closes in (lambda u, rg: any(back_path(rg, t, u.table) for t in dict.fromkeys(u.tables)),
+                       lambda u, rg: any(back_path(rg, t, u.tables[h])
+                                         for h in range(1, len(u.tables)) for t in u.tables[:h])):
+            hit = next((u for u in all_uses if (u.table, u.relation) not in out
+                        and closes(u, g.get(u.role, {}))), None)
+            if hit is not None:
+                out.add((hit.table, hit.relation))
                 changed = True
                 break
     res = frozenset(out)

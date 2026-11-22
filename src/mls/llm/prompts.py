@@ -50,9 +50,11 @@ triggers, grants).  You never write SQL.
 - {"of": R, "through": [{"table": t1, "key": k1, "value": v1}, ...]}   composed: (u, x) when (u, y) is a
   pair of the base relation R, a t1 row has k1 = y and v1 = x (and so on through each hop); 1 to 3
   hops; each hop's key and value are different NOT NULL columns, the key has the type of the previous
-  value, and the value or the key is the primary key or a unique column of the hop table (a lookup,
-  not a join): down to the rows a value names, or up a foreign key to the row it refers to, e.g. from
-  a floor to its building, {"table": "floors", "key": "id", "value": "building_id"}.
+  value, and the value, the key or the pair (key, value) is the primary key or unique in the hop
+  table: down to the rows a value names, up a foreign key to the row it refers to, e.g. from a floor
+  to its building, {"table": "floors", "key": "id", "value": "building_id"}, or through a membership
+  table keyed by the pair, e.g. the users who share a building with a user: {"of": "staff_of",
+  "through": [{"table": "building_staff", "key": "building_id", "value": "user_id"}]}.
   E.g. the rooms of the floors of the buildings a user works in: {"of": "staff_of", "through":
   [{"table": "floors", "key": "building_id", "value": "id"}, {"table": "rooms", "key": "floor_id", "value": "id"}]}
 - A composed relation is used in member (policies, goals, must_allow) and tenant_isolation only: not in

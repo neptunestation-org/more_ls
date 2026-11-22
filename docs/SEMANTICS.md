@@ -112,7 +112,7 @@ A composed relation is a base relation followed through up to three hops:
 v) ∈ in_task` iff some `t` has `(k, t) ∈ member_of`, a stored `projects` row has `team_id = t`
 and `id = p`, and a stored `tasks` row has `project_id = p` and `id = v`.  Requirements, checked
 with the JSON path of the offending hop: the base is a declared base relation (not composed);
-each hop's `value` or `key` is its table's primary key or a NOT NULL unique column, its `key` and
+each hop's `value`, `key` or pair is its table's primary key or unique, its `key` and
 `value` NOT NULL, and its `key`'s type that of the previous level's value; at most three hops.
 When a hop's value is a key (down to the rows a value names), the hop is a function from value to
 key and the ∃ disappears: the
@@ -123,8 +123,10 @@ reads a stored row of a hop table (any image but `new`) adds `hop.T.v(row.v) ∧
 = row.k`.  NULL behaves as for any membership: a NULL key or value is UNKNOWN; the hop columns
 are NOT NULL.
 
-A hop whose key is a key and whose value is not goes up a foreign key (a project's organization):
-a value may come from many rows, so there is no function back and the ∃ would stay.  The chain
+A hop whose value is not a key goes up a foreign key (its key is one: a project's organization) or
+through a membership table (only the pair is a key: the users who share a team,
+`member_of . team_members(team_id, user_id)`): a value may come from many rows, so there is no
+function back and the ∃ would stay.  The chain
 up to the last such hop is instead its own uninterpreted relation `up.<chain>` (named after its
 definition, so identical chains share it), and every stored row `x` of that hop's table read by an
 obligation (any image but `new`) adds `∀k: prefix(k, x.key) → up(k, x.value)`, where `prefix` is

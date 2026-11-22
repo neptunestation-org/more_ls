@@ -22,7 +22,7 @@ from typing import Iterator
 from mls.logic.term import (
     FALSE, TRUE, FunDecl, Sort, Term, Var, and_, bool_var, eq, fun, int_var, le, lt, not_, or_, IntVal,
 )
-from mls.spec.chain import base_name, hop_prefix, is_up, levels, up_name
+from mls.spec.chain import base_name, hop_prefix, is_lookup, levels, up_name
 from mls.spec.model import (
     CONTEXT_NOW, And, ColRef, Const, CtxRef, Cmp, InGroup, IsNull, Lit, Member, NewRef, Not,
     NowBetween, OldRef, OpaqueRef, Or, Pred, Spec,
@@ -209,14 +209,14 @@ class Encoder:
 
     def chain_fact(self, relation: str, kv: Term, vv: Term) -> Term:
         """(kv, vv) ∈ relation, for non-NULL terms.  D56: from the value back to the base relation's
-        value, one lookup per hop; #43: an upward hop has no lookup back, so the chain up to the
-        last one is its own relation symbol (`up_fun`)."""
+        value, one lookup per hop; #43, #33: a hop up a foreign key or through a membership table
+        has no lookup back, so the chain up to the last such hop is its own relation symbol (`up_fun`)."""
         lv = levels(self.spec, relation)
         node: Term = vv
         guards: list[Term] = []
         for i in range(len(lv) - 1, 0, -1):
             h = lv[i]
-            if is_up(self.spec, h):
+            if not is_lookup(self.spec, h):
                 self.ups_used.add((relation, i))
                 base = base_name(self.spec, relation)
                 return and_(*guards, up_fun(up_name(self.spec, relation, i), self.rel_tags.get(base))(kv, node))

@@ -662,8 +662,9 @@ class Checker:
         return None
 
     def check_composed(self, rname: str, rel: ComposedRelation, path: str) -> None:
-        """D56: the base relation is a base relation; at most MAX_HOPS hops; each hop's value is a
-        key of its table (so the hop is a function) and its key NOT NULL and of the type of the
+        """D56: the base relation is a base relation; at most MAX_HOPS hops; each hop's pair is
+        unique in its table (its value a key, a lookup; its key, up a foreign key, #43; or the pair
+        itself, a membership table, #33) and its columns NOT NULL, its key of the type of the
         previous level's value."""
         base = self.spec.relations.get(rel.of)
         if base is None:
@@ -702,15 +703,13 @@ class Checker:
                 return
             if h.key == h.value:
                 self.err(hp, "key and value must be different columns")
-            if frozenset((h.value,)) not in self.key_sets(h.table) \
-                    and frozenset((h.key,)) not in self.key_sets(h.table):
-                self.err(f"{hp}.value", f"neither '{h.table}.{h.value}' nor '{h.table}.{h.key}' is the primary "
-                                        f"key or a unique column of '{h.table}', so the hop is a join, not a "
-                                        f"lookup (the proofs stay quantifier-free only through a key: down to "
-                                        f"the rows a value names, or up a foreign key to the row it refers to)",
-                         f"make '{h.value}' or '{h.key}' the primary key or unique, or model the step as a "
-                         f"membership table (a base relation), or copy the column onto the referencing "
-                         f"table with an inclusion rule")
+            if not pair_unique(self.key_sets(h.table), h.key, h.value):
+                self.err(f"{hp}.value", f"no primary key or unique constraint of '{h.table}' lies within "
+                                        f"({h.key}, {h.value}), so a pair may occur in many rows (a hop goes "
+                                        f"down to the rows a value names, up a foreign key to the row it "
+                                        f"refers to, or through a membership table whose key is the pair)",
+                         f"make '{h.value}', '{h.key}' or the pair ({h.key}, {h.value}) the primary key or "
+                         f"unique")
             pt, kt = self.col_type(*prev), t.columns[h.key].type
             if pt is not None and not comparable(pt, kt):
                 self.err(f"{hp}.key", f"type of {h.table}.{h.key} ({kt}) does not match the previous "

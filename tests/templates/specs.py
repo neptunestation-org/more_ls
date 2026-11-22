@@ -74,6 +74,48 @@ def up_spec() -> Spec:
     return make(d)
 
 
+def comember_spec() -> Spec:
+    """#33: hops through membership tables, whose pair alone is unique.  A user reads the profiles
+    of their teammates (`member_of . team_members(team_id, user_id)`, the self-join, R9) and of
+    everyone assigned to a task of their teams (`. projects . tasks . task_assignees(task_id,
+    user_id)`, lookups down and then one membership hop, R10), and their own (R11).  Both chains end
+    in a hop with no lookup back, read through its own symbol; the teammate chain's hop visibility
+    policy is on its own base table, so it goes through a lookup helper.  The mutation drops the
+    hop visibility policies: the task chain reads no assignment as the member."""
+    d = composed_spec().model_dump(mode="json", by_alias=True, exclude_none=True)
+    d["tables"]["task_assignees"] = {"columns": {"user_id": {"type": "uuid", "nullable": False},
+                                                 "task_id": {"type": "bigint", "nullable": False}},
+                                     "primary_key": ["user_id", "task_id"]}
+    d["tables"]["profiles"] = {"columns": {"user_id": {"type": "uuid", "nullable": False},
+                                           "name": {"type": "text", "nullable": False}},
+                               "primary_key": ["user_id"]}
+    d["relations"]["teammate"] = {"of": "member_of", "through": [{"table": "team_members", "key": "team_id",
+                                                                  "value": "user_id"}]}
+    d["relations"]["team_assignee"] = {"of": "member_of", "through": [
+        {"table": "projects", "key": "team_id", "value": "id"}, {"table": "tasks", "key": "project_id", "value": "id"},
+        {"table": "task_assignees", "key": "task_id", "value": "user_id"}]}
+    mate = {"member": {"relation": "teammate", "key": {"ctx": "uid"}, "value": {"col": "user_id"}}}
+    assignee = {"member": {"relation": "team_assignee", "key": {"ctx": "uid"}, "value": {"col": "user_id"}}}
+    own = {"cmp": [{"col": "user_id"}, "=", {"ctx": "uid"}]}
+    d["rules"] += [
+        {"id": "R9", "kind": "policy", "name": "teammates_profiles", "table": "profiles",
+         "role": "authenticated", "command": "select", "mode": "permissive", "using": mate},
+        {"id": "R10", "kind": "policy", "name": "assignees_profiles", "table": "profiles",
+         "role": "authenticated", "command": "select", "mode": "permissive", "using": assignee},
+        {"id": "R11", "kind": "policy", "name": "own_profile", "table": "profiles",
+         "role": "authenticated", "command": "select", "mode": "permissive", "using": own},
+    ]
+    d["properties"] += [
+        {"id": "P6", "template": "must_allow", "table": "profiles", "role": "authenticated", "command": "select",
+         "when": mate, "description": "a user reads the profile of everyone who shares a team with them"},
+        {"id": "P7", "template": "must_allow", "table": "profiles", "role": "authenticated", "command": "select",
+         "when": assignee, "description": "a user reads the profile of everyone assigned to a task of their teams"},
+        {"id": "P8", "template": "custom", "table": "profiles", "role": "authenticated", "command": "select",
+         "goal": {"or": [mate, assignee, own]}, "description": "a user reads no other profile"},
+    ]
+    return make(d)
+
+
 def nullable_member_spec() -> Spec:
     """The example with `docs.tenant_id` nullable (#42): a document with no tenant is nobody's
     (the membership is UNKNOWN, so the policies hide it from every member), and its writes are

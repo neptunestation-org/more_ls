@@ -29,13 +29,18 @@ def test_the_example_proves():
     assert {r.id: r.verdict for r in results} == dict.fromkeys(["P1", "P2", "P3", "P4", "P5"], "PROVED")
 
 
-def test_a_hop_through_a_column_that_is_not_a_key_is_refused_with_the_ways_out():
+def test_a_hop_whose_pair_is_not_unique_is_refused_with_the_ways_out():
+    """#33: a hop needs its pair unique: its value a key (down), its key a key (up), or the pair
+    itself the key (a membership table)."""
     d = base()
-    d["tables"]["projects"]["primary_key"] = ["id", "team_id"]
+    d["tables"]["projects"]["primary_key"] = ["id", "name"]
     errs = errors(d)
     e = next(e for e in errs if e.path == "$.relations.in_project.through[0].value")
-    assert "neither 'projects.id' nor 'projects.team_id' is the primary key or a unique column of 'projects'" in e.message
-    assert "membership table" in e.fix and "inclusion rule" in e.fix
+    assert "no primary key or unique constraint of 'projects' lies within (team_id, id)" in e.message
+    assert "the pair (team_id, id)" in e.fix
+    d["tables"]["projects"]["primary_key"] = ["id", "team_id"]
+    assert not any(e.path.startswith("$.relations.in_project") for e in errors(d))
+    d["tables"]["projects"]["primary_key"] = ["id", "name"]
     d["tables"]["projects"]["unique"] = [["id"]]
     assert not any(e.path.startswith("$.relations.in_project") for e in errors(d))
 

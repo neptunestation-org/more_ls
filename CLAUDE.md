@@ -174,6 +174,11 @@ union member the renderer does not cover.
   `set constraints all immediate`.  `spec/fkcycle.py` refuses an immediate inclusion closing a cycle of
   immediate keys (`check_spec`; with the catalog's keys `check --dsn`/`preflight`); mutation
   `INCLUSION_NOT_DEFERRED`, `tests/templates/test_fkcycle.py`.
+- D76: a hop needs only its pair unique (`model.pair_unique`): a membership-table hop (co-members,
+  `member_of . team_members(team_id, user_id)`) is encoded as an up-hop (`chain.is_lookup`; `is_up`
+  stays the harness's); a chain whose hop visibility closes a cycle (a table twice) is routed
+  (`recursion.routed`, after the policy-table check); `exists_join` reads self-joins; fixture
+  `specs.comember_spec`.
 - D42: row-dependent column visibility is normalization
   (the column is its own table with its own policies); there is no masking construct.
 - M4 (the LLM loop and evals): `src/mls/llm/CLAUDE.md`. Tests never call the API (`MLS_LLM_SCRIPT=<json>`

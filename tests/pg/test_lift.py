@@ -406,12 +406,16 @@ def test_nested_memberships_lift_to_a_composed_relation(text, table, hops):
     assert r2.pred["member"]["relation"] == name and len(env.composed) == 1
 
 
-def test_a_nested_membership_through_a_column_that_is_not_a_key_stays_opaque():
+def test_a_nested_membership_through_a_pair_that_is_not_unique_stays_opaque():
     env = composed_env()
-    env.keys["projects"] = [frozenset({"id", "team_id"})]
+    env.keys["projects"] = [frozenset({"id", "name"})]
     r, sink = do(NESTED_ARRAY, env=env, table="tasks")
     assert r.kind == "opaque" and env.composed == {}
-    assert any("selects projects.id by projects.team_id, and neither is the primary key" in x for x in r.reasons), r.reasons
+    assert any("selects projects.id by projects.team_id, and no primary key" in x for x in r.reasons), r.reasons
+    env = composed_env()
+    env.keys["projects"] = [frozenset({"id", "team_id"})]  # #33: the pair is the key, a membership table
+    r, _ = do(NESTED_ARRAY, env=env, table="tasks")
+    assert r.kind == "lifted", r.reasons
     env = composed_env()
     env.tables["projects"]["team_id"] = ("bigint", True)
     r, _ = do(NESTED_ARRAY, env=env, table="tasks")
@@ -459,6 +463,29 @@ def test_an_exists_over_a_join_lifts_to_a_composed_relation(text, base, hops):
     of, chain = env.composed[name]
     assert env.relations[of] == base and list(chain) == hops
     assert r.pred["member"]["key"] == {"ctx": "uid"} and r.pred["member"]["value"] == {"col": "task_id"}
+
+
+CO_MEMBERS = ("(EXISTS ( SELECT 1\n   FROM (team_members a\n     JOIN team_members b ON ((b.team_id = a.team_id)))\n"
+              "  WHERE ((a.user_id = ( SELECT auth.uid() AS uid)) AND (b.user_id = profiles.user_id))))")
+CO_MEMBERS_ARRAY = ("(user_id = ANY (ARRAY( SELECT team_members.user_id\n   FROM team_members\n  WHERE "
+                    "(team_members.team_id = ANY (ARRAY( SELECT team_members_1.team_id\n           FROM team_members "
+                    "team_members_1\n          WHERE (team_members_1.user_id = ( SELECT auth.uid() AS uid))))))))")
+
+
+@pytest.mark.parametrize("text", [CO_MEMBERS, CO_MEMBERS_ARRAY])
+def test_users_who_share_a_team_are_a_composed_relation(text):
+    """#33: the self-join of a membership table (users who share a team with the caller), as an
+    EXISTS over a join or as nested subqueries, is the base relation followed back through the same
+    table, a hop whose pair alone is unique."""
+    env = Env.of_spec(specs.comember_spec())
+    env.composed = {}
+    env.invalidate()
+    r, _ = do(text, env=env, table="profiles")
+    assert r.kind == "lifted", r.reasons
+    of, chain = env.composed[r.pred["member"]["relation"]]
+    assert env.relations[of] == ("team_members", "user_id", "team_id")
+    assert list(chain) == [("team_members", "team_id", "user_id")]
+    assert r.pred["member"]["key"] == {"ctx": "uid"} and r.pred["member"]["value"] == {"col": "user_id"}
 
 
 @pytest.mark.parametrize("text, reason", [

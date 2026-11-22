@@ -534,6 +534,11 @@ create policy helper_read on notes for select to app using (in_team(team_id));
 create policy mixed_read on pages for select to app using (
   team_id < 0 or exists (select 1 from members m
                          where m.team_id = pages.team_id and m.user_id = nullif(current_setting('app.uid', true), '')::bigint));
+create table profiles (user_id bigint primary key);
+alter table profiles enable row level security;
+create policy mates_read on profiles for select to app using (
+  exists (select 1 from members a join members b on b.team_id = a.team_id
+          where a.user_id = nullif(current_setting('app.uid', true), '')::bigint and b.user_id = profiles.user_id));
 """
 
 
@@ -566,14 +571,19 @@ def test_a_membership_whose_rows_the_inner_policies_hide_is_not_claimed(hidden):
     assert '"member"' in using["helper_read"] and '"opaque"' not in using["helper_read"]
     assert '"cmp"' in using["mixed_read"] and '"opaque"' in using["mixed_read"] and '"member"' not in using["mixed_read"]
     flagged = [n for n in res.notes if "hide some of the rows it reads" in n]
-    assert len(flagged) == 2 and any("member_read on tickets" in n for n in flagged), res.notes
+    assert len(flagged) == 3 and any("member_read on tickets" in n for n in flagged), res.notes
+    # #33: the co-members' chain is read, then left to an opaque block, and no longer proposed
+    assert any("mates_read on profiles" in n for n in flagged), flagged
+    assert '"opaque"' in using["mates_read"]
+    assert not [r for r in res.spec["relations"].values() if "through" in r], res.spec["relations"]
+    assert not [n for n in res.notes if " proposed: " in n and " . " in n], res.notes
     assert all("exists" in o["sql"].lower() or "EXISTS" in o["sql"] for o in res.spec["opaques"].values())
 
     hidden.execute("drop policy not_viewers on members; create policy own on members for select to app using ("
                    "user_id = nullif(current_setting('app.uid', true), '')::bigint)")
     res = import_schema(hidden)
-    assert res.spec["opaques"] == {}, res.notes
-    assert not [n for n in res.notes if "hide some of the rows" in n]
+    assert list(res.spec["opaques"]) == ["mates_read_using_rls"], res.notes  # teammates' rows stay hidden
+    assert [n for n in res.notes if "hide some of the rows" in n and "mates_read" not in n] == []
 
 
 UNDEPLOYED_SQL = """

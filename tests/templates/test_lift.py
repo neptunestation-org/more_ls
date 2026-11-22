@@ -40,6 +40,7 @@ ROUND_TRIP = {
     "lookup": specs.lookup_spec,  # D67: a helper call reads back as the membership its body holds
     "nullable_member": specs.nullable_member_spec,  # #42: a membership over a nullable column lifts
     "up": specs.up_spec,  # #43: chains up foreign keys read back as composed relations
+    "comember": specs.comember_spec,  # #33: hops through membership tables (and the self-join) read back
     "nullable_relation": specs.nullable_relation_spec,  # #49: a relation over a nullable key
     "storefront": specs.storefront_spec,  # D70: a constant-keyed helper call reads back as its relation
 }

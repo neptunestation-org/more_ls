@@ -1014,11 +1014,11 @@ class Lifter:
         chain of key lookups from the table the key filters to the table the row correlates with,
         read as a composed relation (D60): A is the base (k, v), every other table a hop whose key
         is the column joined to the previous table and whose value the column joined to the next
-        (the last one's, the correlated column).  Every condition is one of those equalities."""
+        (the last one's, the correlated column).  Every condition is one of those equalities.  A
+        table may occur twice under two aliases (#33: the self-join of a membership table, users who
+        share a team, is the base relation and a hop back through the same table)."""
         tables = [(sel.table, sel.table_alias)] + [(t, a) for t, a, _ in sel.joins]
         names = [t for t, _ in tables]
-        if len(set(names)) != len(names):
-            raise Unreadable("EXISTS joins a table with itself")
         for t in names:
             if t not in self.env.tables:
                 raise Unreadable(f"subquery reads table {t}, which is not in the spec")
@@ -1029,11 +1029,15 @@ class Lifter:
         def side(node: Node) -> tuple[str, Any]:
             if isinstance(node, Col):
                 if node.qual is not None:
-                    for i, (t, a) in enumerate(tables):
-                        if node.qual in (t, a):
-                            if node.name not in self.env.tables[t]:
-                                raise Unreadable(f"column {t}.{node.name} is not modelled")
-                            return "inner", (i, node.name)
+                    hits = ([i for i, (_, a) in enumerate(tables) if a == node.qual]
+                            or [i for i, (t, a) in enumerate(tables) if a is None and t == node.qual])
+                    if len(hits) > 1:
+                        raise Unreadable(f"{node.qual}.{node.name} names more than one table of the join")
+                    if hits:
+                        t = tables[hits[0]][0]
+                        if node.name not in self.env.tables[t]:
+                            raise Unreadable(f"column {t}.{node.name} is not modelled")
+                        return "inner", (hits[0], node.name)
                     if node.qual == self.table:
                         return "outer", self.term(Col(None, node.name))[0]["col"]
                     raise Unreadable(f"column {node.qual}.{node.name} is of none of the tables")
@@ -1156,8 +1160,8 @@ class Lifter:
 
     def composed_relation(self, base: tuple[str, str, str], hops: list[tuple[str, str, str]],
                           where: dict | None = None) -> str:
-        """Declare (or reuse) the composed relation base . hops (D56); every hop must step through
-        a key of its table, else the nesting is a join and stays opaque."""
+        """Declare (or reuse) the composed relation base . hops (D56); every hop's pair must be unique
+        in its table (a key of it lies within the pair), else the nesting stays opaque."""
         rel_table, key_col, val_col = base
         if rel_table not in self.env.governed:
             raise Unreadable(f"the relation table {rel_table} is observed (not governed): no relation can be declared "
@@ -1171,10 +1175,9 @@ class Lifter:
         for t, k, v in hops:
             if t not in self.env.governed:
                 raise Unreadable(f"the nested subquery reads {t}, which is observed (not governed)")
-            keys = self.env.keys.get(t, [])
-            if frozenset((v,)) not in keys and frozenset((k,)) not in keys:  # #43: up a foreign key too
-                raise Unreadable(f"the nested subquery selects {t}.{v} by {t}.{k}, and neither is the primary key "
-                                 f"or a unique column of {t}: the step is a join, not a lookup")
+            if not pair_unique(self.env.keys.get(t, []), k, v):  # #43 up a foreign key, #33 a membership table
+                raise Unreadable(f"the nested subquery selects {t}.{v} by {t}.{k}, and no primary key or unique "
+                                 f"constraint of {t} lies within the pair: a pair may occur in many rows")
             if self.env.tables[t][k][1] or self.env.tables[t][v][1]:
                 raise Unreadable(f"the nested subquery steps through {t}({k}, {v}), and a hop's columns must be "
                                  f"NOT NULL")

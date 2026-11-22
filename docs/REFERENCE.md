@@ -290,7 +290,9 @@ table the policy is on, Postgres applies that table's policies inside themselves
 statement that reads it with "infinite recursion detected in policy" (FINDINGS; every compiled
 policy contains a subquery, the context value `(select ...)`).  That is the case for a policy on a
 relation's own table reading the relation (members see every membership of their teams), for a
-composed relation with a hop through the table, and for policies on several tables that read each
+composed relation with a hop through the table, for a composed relation whose hop visibility
+policies lead back to a hop table (one that reads a table twice: the users who share a team read
+`team_members` through `team_members`), and for policies on several tables that read each
 other (members read their organizations through `organization_members`, and the owner manages
 the members through a relation over `organizations`), for any command, `using` or `check`, one
 role at a time.  The compiler compiles exactly those lookups to a call of a helper,
@@ -320,12 +322,15 @@ grants no row.
 `(k, v) ∈ in_task` when `(k, t) ∈ member_of`, a `projects` row has `team_id = t` and `id = p`, and a
 `tasks` row has `project_id = p` and `id = v`. `of` is a base relation (not composed); at most three
 hops; each hop's `key` and `value` are different NOT NULL columns, the `key` has the type of the
-previous level's value, and the `value` or the `key` is the table's primary key or a unique column
-(so each hop is a lookup, not a join): down to the rows a value names (`projects(team_id, id)`), or
-up a foreign key to the row it refers to (`projects(id, organization_id)`: the members of a
-project reach its organization). A hop where neither is a key is refused at
-`$.relations.R.through[i].value`; the ways out are a membership table (a base relation) or the
-column copied onto the referencing table with an inclusion rule. A composed relation is used with
+previous level's value, and the `value`, the `key` or the pair is the table's primary key or
+unique: down to the rows a value names (`projects(team_id, id)`), up a foreign key to the row it
+refers to (`projects(id, organization_id)`: the members of a project reach its organization), or
+through a membership table keyed by the pair (`team_members(team_id, user_id)`: the users who share
+a team, `relation teammate = member_of . team_members(team_id, user_id)`). A hop whose pair may
+occur in many rows is refused at `$.relations.R.through[i].value`; the fix is a key or unique
+constraint within the pair. A chain whose hop visibility policies would read their own table (a
+table twice in the chain, as `teammate` reads `team_members`) is read through a lookup helper, as
+in the recursion rule above. A composed relation is used with
 `member` like any relation, in policies, goals, `must_allow` and `tenant_isolation`; it is refused
 in an invariant, as an inclusion rule's relation, as a hierarchy's `members`, in an opaque block's
 `relations` and in `monotone_in`. The implicit relation policy above applies to every hop table: a
@@ -1083,12 +1088,12 @@ reports each as `hardening` until it is fixed or the spec assumes it.
 | `col = any (array(select value from rel where key = <ctx>))` | `member` |
 | `col in (select value from rel where key = <ctx>)` | `member` (noted as lifted; the compiler writes the array shape) |
 | `exists (select 1 from rel where rel.key = <ctx> and rel.value = t.col)` | `member` (noted as the slow per-row shape of FINDINGS) |
-| `exists (select 1 from A join B on B.k = A.v ... where A.key = <ctx> and Z.v = t.col)`, inner joins in any order | `member` over a composed relation, when the joins form one chain of key lookups from the table the key filters to the table the row correlates with; otherwise opaque |
+| `exists (select 1 from A join B on B.k = A.v ... where A.key = <ctx> and Z.v = t.col)`, inner joins in any order, a table joined with itself under two aliases included (`from m a join m b on b.org = a.org`: the users who share an organization) | `member` over a composed relation, when the joins form one chain of hops from the table the key filters to the table the row correlates with; otherwise opaque |
 | any of the membership shapes above with more conditions on the relation table (`... and rel.role = any (array[...])`) | `member` over a relation with that condition (one relation per table, pair and condition, named `<table>_by_<columns>` unless the compiler's visibility policy names it); a condition the relation fragment cannot hold keeps the whole membership opaque |
 | `rel.key = 'const'` in a membership subquery with no context value | the membership's key (`member(r, key='const', ...)`); with two such constants and no context value the membership stays opaque |
 | `col = any ((select mls_reach_<h>(<ctx>))::t[])` | `in_group`, when the spec declares hierarchy `h` |
 | `col = any ((select mls_lookup_<r>(<ctx>))::t[])`, a lookup helper the compiler created | `member`, read from the helper's body as the subquery it holds; the relation keeps the helper's name |
-| `col = any (array(select v from T where k = any (array(select ... from rel where key = <ctx>))))`, or the same nesting of `in (select ...)`, up to three levels | `member` over a composed relation: an identical chain in the spec is reused, else one is proposed (named `<base>_<last table>`) with a note; when a hop's value is not a key or a hop column is nullable the policy stays opaque |
+| `col = any (array(select v from T where k = any (array(select ... from rel where key = <ctx>))))`, or the same nesting of `in (select ...)`, up to three levels | `member` over a composed relation: an identical chain in the spec is reused, else one is proposed (named `<base>_<last table>`) with a note; when a hop's pair is not unique or a hop column is nullable the policy stays opaque |
 | `col is [not] null`, `and`, `or`, `not`, `true`, `false` | the same |
 | `(f is null or f <= (select now())) and (u is null or (select now()) < u)` | `now_between` |
 | a bare boolean column `b` | `b = true` |

@@ -67,3 +67,17 @@ def test_a_lookup_keyed_by_a_constant_goes_through_a_helper_and_exposes_nothing(
     plain = specs.storefront_spec()  # a fresh spec: the routing and implicit policies are cached per spec
     monkeypatch.setattr(recursion, "routed", lambda spec: frozenset())
     assert {r.id: r.verdict for r in run_all(plain)}["P7"] == "REFUTED"
+
+
+def test_a_chain_that_reads_its_own_table_twice_goes_through_a_helper():
+    """#33: co-members (`member_of . team_members(team_id, user_id)`) need a hop visibility policy on
+    team_members that reads team_members, which Postgres refuses: the lookup is routed, and no hop
+    policy is generated for it.  The chain through task_assignees closes no cycle and is not."""
+    from mls.props.effective import implicit_policies
+    from tests.templates import specs
+
+    spec = specs.comember_spec()
+    assert routed(spec) == frozenset({("profiles", "teammate")})
+    names = {p.name for p in implicit_policies(spec)}
+    assert not [n for n in names if n.startswith("mls_rel_teammate_")], names
+    assert "mls_rel_team_assignee_h3_authenticated_1" in names, names
