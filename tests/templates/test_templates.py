@@ -42,6 +42,7 @@ CASES = {
     "nullable_member": (specs.nullable_member_spec, Mutation.MEMBER_NULL_PASSES, None),  # #42
     "up": (specs.up_spec, Mutation.HOP_VISIBILITY_DROPPED, None),  # #43
     "storefront": (specs.storefront_spec, Mutation.LOOKUP_KEY_DROPPED, None),  # D70
+    "nullable_relation": (specs.nullable_relation_spec, Mutation.RELATION_NULL_KEY_MATCHES, None),  # #49
     "lookup_condition": (specs.lookup_spec, Mutation.RELATION_CONDITION_DROPPED, None),
 }
 

@@ -92,8 +92,10 @@ class SqlCompiler:
                 # D67: the plain subquery would recurse; the helper reads without the policies
                 return lookup_call_sql(self.spec, m.relation, self.term(m.key, table, kt),
                                        self.term(m.value, table))
-            inner = (f"select {q(lv[0].value)} from {q(lv[0].table)} "
-                     f"where {q(lv[0].key)} = {self.term(m.key, table, kt)}")
+            key_match = f"{q(lv[0].key)} = {self.term(m.key, table, kt)}"
+            if Mutation.RELATION_NULL_KEY_MATCHES in self.mutations:
+                key_match = f"({key_match} or {q(lv[0].key)} is null)"
+            inner = f"select {q(lv[0].value)} from {q(lv[0].table)} where {key_match}"
             cond = condition(self.spec, m.relation)
             if cond is not None and Mutation.RELATION_CONDITION_DROPPED not in self.mutations:
                 # D61: the base relation's rows where its condition is TRUE (WHERE drops UNKNOWN);

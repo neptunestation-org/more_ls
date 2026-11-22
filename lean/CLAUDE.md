@@ -53,3 +53,7 @@ writers) is in `docs/design/archive/ROADMAP.md`, "Parallel track — Lean 4".
   real chain satisfies them.
 - **Lookup helpers (#34) and nullable membership values (#42)** need no transcription: the helper
   is a compilation of the same atom, and `liftCmp` already makes a NULL value UNKNOWN.
+- **Relations over nullable columns (#49, D71).**  `Relational.lean` derives a relation from every
+  stored row; the encoder's NULL filter (`¬null(key) ∧ ¬null(value)` in the row axiom) and the
+  visibility obligation's `¬null(key)` are not transcribed.  Lookups keyed by a constant (D70)
+  need nothing: a helper is a compilation of the same atom.

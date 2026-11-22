@@ -518,3 +518,12 @@ def test_a_relation_condition_is_checked_and_its_in_expanded():
     d["rules"].append({"id": "R9", "kind": "inclusion", "name": "lead_task", "table": "tasks",
                        "columns": ["title", "project_id"], "relation": "lead_of", "on_delete": "restrict"})
     assert has(errors(d), f"$.rules[{len(d['rules']) - 1}].relation", "'lead_of' has a condition")
+
+
+def test_a_relation_over_a_nullable_column_is_accepted_and_its_null_rows_are_no_pairs():
+    """#49: `assigned_to = tasks(assignee_id, id)` with `assignee_id` nullable checks, and the
+    proofs read a task with no assignee as no pair (the isolation property needs exactly that)."""
+    from mls.props.runner import run_all
+    from tests.templates import specs
+
+    assert {r.id: r.verdict for r in run_all(specs.nullable_relation_spec())}["P6"] == "PROVED"

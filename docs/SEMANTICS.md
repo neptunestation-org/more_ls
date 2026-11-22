@@ -248,7 +248,11 @@ All are "assumptions ∧ ¬goal is UNSAT"; SAT yields a counterexample rendered 
   every row an obligation reads of the table of a relation it uses (any image but `new`, which is
   not stored yet when the policies read the table), the encoding asserts `rel(row.key,
   row.value)`; for a relation with a condition `p`, `rel(row.key, row.value) ⇔ T(p(row))`, exact
-  because the table holds each pair at most once.  Without it a property over the relation table itself (`team_id in
+  because the table holds each pair at most once.  When the key or the value column is nullable
+  the fact also needs both to be set: `rel(row.key, row.value) ⇔ ¬null(key) ∧ ¬null(value) [∧
+  T(p(row))]` (a row with NULL in either is no pair; the subquery `key = k` never reads one, and a
+  NULL value matches nothing), and the relation-visibility obligation reads only the rows whose
+  key is set.  Without it a property over the relation table itself (`team_id in
   team_members(@uid)` on `team_members`) is refuted by a row the relation does not contain, a
   state no database can be in.
 - **Enum domain axioms:** an enum column holds one of its type's labels (or NULL when it is

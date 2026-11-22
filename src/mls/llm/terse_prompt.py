@@ -32,8 +32,8 @@ triggers, grants).  You never write SQL.
 
 ## Relations: one `relation` line each, part of the schema
 - relation R = t(k, v)                the (k, v) pairs of table t (the user, the group they belong
-  to); k and v are different NOT NULL columns, and the pair, or one of them, is the primary key or
-  a unique constraint of t.  The owner of a row is one: relation owns_building = buildings(owner_id, id)
+  to); k and v are different columns (a row with NULL in either is no pair), and the pair, or one
+  of them, is the primary key or a unique constraint of t.  The owner of a row is one: relation owns_building = buildings(owner_id, id)
 - relation R = t(k, v) where p        only the rows of t where p is TRUE; p reads t's own columns and
   constants only.  E.g. relation manager_of = building_staff(user_id, building_id) where role = 'manager'.
   Not in inclusion rules, invariants or hierarchies.  In a policy the key is a context value or a

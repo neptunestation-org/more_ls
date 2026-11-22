@@ -244,8 +244,10 @@ roles, so their privileges on a view or function are not a bypass path.
     }
 
 A relation names the `(key, value)` projection of a table, for use in `member`, `inclusion`,
-`tenant_isolation` and `monotone_in`.  `key` and `value` must be different NOT NULL columns of
-the table, and the table must hold each pair at most once: the pair, or one of its two columns,
+`tenant_isolation` and `monotone_in`.  `key` and `value` must be different columns of the table,
+nullable or not: a row with NULL in either is no pair (a courier row whose `user_id` is not set
+yet belongs to nobody), as the subquery `key = <the user>` never matches it.  The table must hold
+each pair at most once: the pair, or one of its two columns,
 is the primary key or a declared unique constraint.  The second case is the owner of a parent
 row, `"owns": {"table": "projects", "key": "owner_id", "value": "id"}` with `id` the primary
 key: `member(owns, key=@uid, value=project_id)` on `tasks` reads "the user owns the task's
@@ -1188,7 +1190,7 @@ Classes of error, with the typical message:
   column op (context | constant)`; `old/new references are only allowed in transition
   predicates and in the ...`;
 - **structure**: `a select policy needs 'using'`; `an insert policy has no 'using' (no existing
-  row)`; `relation column 'c' must be NOT NULL`; `(key, value) is not unique in 't' ...`; `'parent' must be nullable (roots have no parent)`; `'parent' needs a single-column
+  row)`; `(key, value) is not unique in 't' ...`; `'parent' must be nullable (roots have no parent)`; `'parent' needs a single-column
   primary key that 'group' ...`; `a second read column rule for role 'r' on 't'`;
 - **compiler** (soundness obligations): a restrictive policy on a relation table that hides
   rows a membership atom needs, with the policy's path and a fix; for a composed

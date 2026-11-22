@@ -40,7 +40,9 @@ class Dataset:
             rows = self.tables.get(rel.table, [])
             if rel.where is not None:  # D61: the rows where the condition is TRUE
                 rows = [r for r in rows if eval_pred(rel.where, r, {}, bare) is True]
-            rels[name] = {(r[rel.key], r[rel.value]) for r in rows}
+            # #49: a row with NULL in the key or the value is no pair
+            rels[name] = {(r[rel.key], r[rel.value]) for r in rows
+                          if r[rel.key] is not None and r[rel.value] is not None}
         return Database(rels, {t: list(rows) for t, rows in self.tables.items()}, spec=spec)
 
 
@@ -252,7 +254,10 @@ def chained_columns(spec: Spec) -> dict[str, dict[str, tuple[str, str]]]:
             for m in members_in(e, []):
                 lv = levels(spec, m.relation)
                 # (after a hop up a foreign key the chain's values already refer to this column)
-                if len(lv) > 1 and isinstance(m.value, ColRef) and pol.table != lv[-1].table \
+                # #49: a base relation whose key is nullable too, so that rows with a NULL key
+                # are actually named (and a lookup that took them would show)
+                nullable_key = len(lv) == 1 and spec.tables[lv[0].table].columns[lv[0].key].nullable
+                if (len(lv) > 1 or nullable_key) and isinstance(m.value, ColRef) and pol.table != lv[-1].table \
                         and not is_up(spec, lv[-1]):
                     out.setdefault(pol.table, {})[m.value.col] = (lv[-1].table, lv[-1].value)
     return out

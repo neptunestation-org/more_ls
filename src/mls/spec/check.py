@@ -718,9 +718,7 @@ class Checker:
                 if c not in self.spec.tables[rel.table].columns:
                     self.err(f"{path}.{fld}", f"unknown column '{c}' of table '{rel.table}'")
                     ok = False
-                elif self.spec.tables[rel.table].columns[c].nullable:
-                    self.err(f"{path}.{fld}", f"relation column '{c}' must be NOT NULL",
-                             "set nullable to false")
+                # #49: a nullable key or value is allowed; a row with NULL in either is no pair
             if not ok:
                 continue
             if rel.key == rel.value:

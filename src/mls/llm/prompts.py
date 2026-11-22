@@ -36,8 +36,8 @@ triggers, grants).  You never write SQL.
 
 ## Relations (part of the schema: "relations": {name: relation})
 - {"table": t, "key": k, "value": v}   the (k, v) pairs of table t (the user, the group they belong to);
-  k and v are different NOT NULL columns, and the pair, or one of them, is the primary key or a unique
-  constraint of t.  The owner of a row is one: {"table": "buildings", "key": "owner_id", "value": "id"}
+  k and v are different columns (a row with NULL in either is no pair), and the pair, or one of them,
+  is the primary key or a unique constraint of t.  The owner of a row is one: {"table": "buildings", "key": "owner_id", "value": "id"}
 - {"table": t, "key": k, "value": v, "where": p}   only the rows of t where p is TRUE; p reads t's own
   columns and constants only.  E.g. the managers: {"table": "building_staff", "key": "user_id",
   "value": "building_id", "where": {"cmp": [{"col": "role"}, "=", {"const": "manager"}]}}.  Not in

@@ -415,6 +415,32 @@ def lookup_spec() -> Spec:
     return make(d)
 
 
+def nullable_relation_spec() -> Spec:
+    """#49: the composed fixture with tasks assigned to a user or to nobody (`tasks.assignee_id`
+    nullable), and the comments on a task readable only by its assignee (R6, `assigned_to(@uid,
+    task_id)` over `tasks(assignee_id, id)`, in place of the team's R4).  A task with no assignee is
+    no pair: nobody reads its comments.  The mutation lets the subquery take rows with a NULL key,
+    so a member reads the comments on the unassigned tasks of their projects."""
+    d = composed_spec().model_dump(mode="json", by_alias=True, exclude_none=True)
+    d["tables"]["tasks"]["columns"]["assignee_id"] = {"type": "uuid", "nullable": True}
+    d["relations"]["assigned_to"] = {"table": "tasks", "key": "assignee_id", "value": "id"}
+    d["rules"] = [r for r in d["rules"] if r["id"] != "R4"]
+    del d["relations"]["in_task"]  # R4's, unused without it
+    assigned = {"member": {"relation": "assigned_to", "key": {"ctx": "uid"}, "value": {"col": "task_id"}}}
+    d["rules"].append({"id": "R6", "kind": "policy", "name": "assignee_reads_comments", "table": "comments",
+                       "role": "authenticated", "command": "select", "mode": "permissive", "using": assigned})
+    # P1 (tasks by team) goes too: the assignee lookup's visibility policy shows an assignee their
+    # own tasks, in any team's project
+    d["properties"] = [p for p in d["properties"] if p["id"] not in ("P1", "P3", "P4")] + [
+        {"id": "P6", "template": "tenant_isolation", "table": "comments", "column": "task_id",
+         "relation": "assigned_to", "key": {"ctx": "uid"}, "commands": ["select"],
+         "description": "a user only reads the comments on tasks assigned to them"},
+        {"id": "P7", "template": "must_allow", "table": "comments", "role": "authenticated", "command": "select",
+         "when": assigned, "description": "an assignee reads every comment on their tasks"},
+    ]
+    return make(d)
+
+
 def storefront_spec() -> Spec:
     """D70: the composed fixture with a public side, the shape of a shop's storefront: a signed-out
     caller reads the comments on finished tasks (R6), checked with `done_task(true, task_id)` over

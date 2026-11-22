@@ -1313,3 +1313,26 @@ for no leak.  A context-keyed visibility grant reads rows tied to the asker; a c
 does not, which is the difference that matters.  Also rejected: an opt-in marker on the relation
 (a new construct the loop has to learn, for a choice the compiler can make).  No example or
 fixture had a constant key, so nothing else changed.  Fixture `specs.storefront_spec`.
+
+## D71 — Relations over nullable columns (#49)
+
+Found in the scarpar takeover: a courier row exists before the courier has an account
+(`riders.user_id` nullable), and "a rider reads the deliveries assigned to their riders rows"
+needs `riders(user_id, id)`, which the checker refused (relation columns NOT NULL, since D21).
+Chosen by the user: a relation's key and value may be nullable, and a row with NULL in either is
+no pair.  That is what the compiled lookup already reads (`key = k` never matches a NULL key; a
+NULL value in the array matches nothing), so compile, the helper and the visibility policy are
+unchanged; only the proofs and the oracle learn it.  (1) `relation_row_axioms`: for a nullable
+column the fact is `⇔ ¬null(key) ∧ ¬null(value) [∧ T(where)]` instead of the bare fact (an
+encoded row's value variable is arbitrary when its null flag is set).  (2) The
+relation-visibility obligation's "rows with key = k" adds `¬null(key)`: the visibility policy
+rightly hides a NULL-key row, and the obligation was refuted by it.  (3) The oracle
+(`Dataset.database`) drops NULL pairs.  (4) The harness chains a membership's value column to a
+base relation with a nullable key (`chained_columns`; composed relations already were), else the
+comments never named an unassigned task and the mutation went unseen; limited to that case so the
+other fixtures' data stays as it was.  (5) Hops keep NOT NULL columns (the hop functions are
+total on stored rows), and so does a primary key, so an inclusion's key pair cannot be nullable.
+(6) The lifter's refusal of a nullable relation column (#47, added the same day) is gone: the
+atom is a relation.  Fixture `specs.nullable_relation_spec` (tasks assigned to a user or to
+nobody), mutation `RELATION_NULL_KEY_MATCHES` (the subquery also takes NULL-key rows).  Lean:
+`Relational.lean` derives a relation from all rows; the NULL filter is a known gap.

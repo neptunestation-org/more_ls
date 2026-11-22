@@ -296,6 +296,16 @@ def test_unparseable_text_is_one_block():
         parse("(level >")
 
 
+def test_a_subquery_over_a_nullable_column_is_a_relation():
+    """#49: a lookup by a nullable column (a courier's `user_id`, set only once the courier has an
+    account) is a relation; its NULL rows are no pairs (the scarpar takeover, where the import
+    stopped on it)."""
+    env = env_of()
+    env.tables["memberships"]["user_id"] = (env.tables["memberships"]["user_id"][0], True)
+    r, _ = do(MEMBER, env=env)
+    assert r.pred == MEMBER_ATOM and r.kind != "opaque"
+
+
 # ----------------------------------------------------------------------------- composed relations (D56)
 NESTED_ARRAY = ("(project_id = ANY (ARRAY( SELECT projects.id\n   FROM projects\n  WHERE (projects.team_id = ANY "
                 "(ARRAY( SELECT team_members.team_id\n           FROM team_members\n          WHERE "

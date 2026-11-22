@@ -92,7 +92,9 @@ def enum_row_axioms(encs: list[Encoder], rows: dict[str, str]) -> list[Term]:
 
 def relation_row_axioms(enc: Encoder, rows: dict[str, str]) -> list[Term]:
     """A stored row of a relation's table is one of its facts: `rel(row.key, row.value)` (the
-    relation is the table's (key, value) projection; both columns are NOT NULL).  With a condition
+    relation is the table's (key, value) projection).  A row with NULL in a nullable key or value
+    column is no fact (#49: the subquery's `key = k` never matches it, and a NULL value matches
+    nothing), so for those columns the fact is `⇔ ¬null(key) ∧ ¬null(value)`.  With a condition
     (D61) the row is a fact exactly when the condition is TRUE for it: `rel(row.key, row.value) ⇔
     T(cond(row))`, exact because the table holds the pair at most once.  As for the hops,
     `new` is excluded (not yet stored), and so is a relation the obligation reads in a tagged
@@ -106,7 +108,11 @@ def relation_row_axioms(enc: Encoder, rows: dict[str, str]) -> list[Term]:
         for row, rt in rows.items():
             if rt == rel.table and row != "new":
                 fact = rel_fun(name)(col_value_var(row, rel.key), col_value_var(row, rel.value))
-                out.append(fact if rel.where is None else iff(fact, enc.T(rel.where, row, rel.table)))
+                cols = enc.spec.tables[rel.table].columns
+                held = [not_(col_null_var(row, c)) for c in (rel.key, rel.value) if cols[c].nullable]
+                if rel.where is not None:
+                    held.append(enc.T(rel.where, row, rel.table))
+                out.append(iff(fact, and_(*held)) if held else fact)
     return out
 
 
@@ -661,6 +667,8 @@ def relation_visibility_obligations(spec: Spec) -> list[Obligation]:
                     if lvl == 0:
                         kv, _ = enc.term(m.key, "x", rel.table)
                         reach = eq(col_value_var("x", rel.key), kv)
+                        if spec.tables[rel.table].columns[rel.key].nullable:  # #49: a NULL key is no match
+                            reach = and_(reach, not_(col_null_var("x", rel.key)))
                         which = f"rows with {rel.key} = the key"
                         cond = condition(spec, m.relation)
                         if cond is not None:  # D61: only the rows the condition keeps are read
