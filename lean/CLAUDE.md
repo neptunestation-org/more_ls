@@ -57,3 +57,7 @@ writers) is in `docs/design/archive/ROADMAP.md`, "Parallel track — Lean 4".
   stored row; the encoder's NULL filter (`¬null(key) ∧ ¬null(value)` in the row axiom) and the
   visibility obligation's `¬null(key)` are not transcribed.  Lookups keyed by a constant (D70)
   need nothing: a helper is a compilation of the same atom.
+- **Nested filters and a unique value's one row (#51, D72).**  The subset axiom between two
+  filtered relations whose conditions imply each other, and `∀k: rel(k, x.value) → k = x.key` for a
+  unique value, are not transcribed.  Both follow from `Relational.lean`'s derivation of a relation
+  from the stored rows (plus the key constraint), which is where they would be proved.

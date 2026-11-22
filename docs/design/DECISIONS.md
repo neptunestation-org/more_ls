@@ -1336,3 +1336,20 @@ total on stored rows), and so does a primary key, so an inclusion's key pair can
 atom is a relation.  Fixture `specs.nullable_relation_spec` (tasks assigned to a user or to
 nobody), mutation `RELATION_NULL_KEY_MATCHES` (the subquery also takes NULL-key rows).  Lean:
 `Relational.lean` derives a relation from all rows; the NULL filter is a known gap.
+
+## D72 — Nested relation filters, and the one row of a unique value (#51)
+
+Found in the scarpar takeover, whose role ladder is five filtered relations over one membership
+table and whose couriers are `riders(user_id, id)` with a nullable `user_id`.  Eight properties
+were refuted by scenarios no database can be in.  Two axioms, both true of every database and EPR:
+(1) `subset_axioms` (D62) also relates two filtered relations when A's condition implies B's on
+every row of the table, decided by the solver once per pair of conditions under the row
+constraints (`_implies_on_rows`, cached per spec; a timeout means no axiom, which only weakens).
+A syntactic test (B's `or` contains A's disjuncts) was considered: it misses `role in (...)`
+expanded differently and conditions on two columns, and the solver call costs milliseconds.
+(2) `relation_row_axioms`: when the value (or key) is a single-column primary key or unique
+column, a read row is the only row with it, so `∀k: rel(k, x.value) → k = x.key ∧ held`, where
+`held` is the row's own fact conditions (D61's condition, D71's NULL guards).  Before, only the
+row's own pair was asserted and a second pair with the same value stayed possible.  Lean: neither
+is transcribed (`lean/CLAUDE.md`); both are consequences of `Relational.lean`'s derivation of a
+relation from the rows, which is where a transcription would prove them.

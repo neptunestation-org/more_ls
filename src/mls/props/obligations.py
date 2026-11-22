@@ -113,7 +113,23 @@ def relation_row_axioms(enc: Encoder, rows: dict[str, str]) -> list[Term]:
                 if rel.where is not None:
                     held.append(enc.T(rel.where, row, rel.table))
                 out.append(iff(fact, and_(*held)) if held else fact)
+                # #51: a unique value (or key) names this one row, so every fact with it is this
+                # row's (a riders row whose user_id is NULL is nobody's, not someone else's)
+                single = {next(iter(k)) for k in _key_sets(enc.spec, rel.table) if len(k) == 1}
+                for mine, other in ((rel.value, rel.key), (rel.key, rel.value)):
+                    if mine not in single:
+                        continue
+                    o = int_var(f"ax.{name}.{row}.{other}")
+                    pair = (o, col_value_var(row, mine)) if mine == rel.value else (col_value_var(row, mine), o)
+                    set_ = [not_(col_null_var(row, mine))] if cols[mine].nullable else []
+                    out.append(forall([o], implies(and_(*set_, rel_fun(name)(*pair)),
+                                                   and_(eq(o, col_value_var(row, other)), *held))))
     return out
+
+
+def _key_sets(spec: Spec, table: str) -> list[frozenset[str]]:
+    t = spec.tables[table]
+    return [frozenset(k) for k in ([t.primary_key] if t.primary_key else []) + list(t.unique)]
 
 
 def hop_row_axioms(enc: Encoder, rows: dict[str, str]) -> list[Term]:
@@ -180,16 +196,39 @@ def relation_axioms(spec: Spec, enc: Encoder) -> list[Term]:
 def subset_axioms(spec: Spec, enc: Encoder) -> list[Term]:
     """A filtered relation lies within its unfiltered twin (#37): when A has a condition and B has
     none, both over the same table, key and value, every fact of A comes from a row that is also
-    a fact of B, so ∀x,y: A(x,y) → B(x,y).  Composed relations over them follow through the shared
-    hop functions."""
+    a fact of B, so ∀x,y: A(x,y) → B(x,y).  So does one whose condition implies B's on every row
+    (#51: the owners among the admins, `role = 'owner'` within `role in ('owner', 'admin')`),
+    which the solver decides once per pair of conditions.  Composed relations over them follow
+    through the shared hop functions."""
     out = []
     x, y = int_var("ax.k"), int_var("ax.v")
     base = spec.base_relations()
     for aname, a in base.items():
         for bname, b in base.items():
-            if a.where is not None and b.where is None and (a.table, a.key, a.value) == (b.table, b.key, b.value):
+            if aname == bname or a.where is None or (a.table, a.key, a.value) != (b.table, b.key, b.value):
+                continue
+            if b.where is None or _implies_on_rows(spec, a.table, a.where, b.where):
                 out.append(forall([x, y], implies(enc.rel(aname)(x, y), enc.rel(bname)(x, y))))
     return out
+
+
+_implied_cache: dict[tuple[int, str, str, str], tuple[Spec, bool]] = {}
+
+
+def _implies_on_rows(spec: Spec, table: str, a: Pred, b: Pred) -> bool:
+    """T(a(row)) → T(b(row)) for every row of the table (its stored-row constraints assumed)."""
+    from mls.logic.solve import solve
+
+    k = (id(spec), table, a.model_dump_json(by_alias=True), b.model_dump_json(by_alias=True))
+    hit = _implied_cache.get(k)
+    if hit is not None and hit[0] is spec:
+        return hit[1]
+    enc = Encoder(spec)
+    res = solve([enc.T(row_constraints(spec, table), "x", table), enc.T(a, "x", table), *enc.side_conditions],
+                enc.T(b, "x", table), 10000)
+    ok = res.status != "unknown" and res.proved
+    _implied_cache[k] = (spec, ok)
+    return ok
 
 
 def select_assumptions(enc: Encoder, spec: Spec, table: str, role: str, row: str = "r") -> list[Term]:

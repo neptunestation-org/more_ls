@@ -252,9 +252,16 @@ All are "assumptions ∧ ¬goal is UNSAT"; SAT yields a counterexample rendered 
   the fact also needs both to be set: `rel(row.key, row.value) ⇔ ¬null(key) ∧ ¬null(value) [∧
   T(p(row))]` (a row with NULL in either is no pair; the subquery `key = k` never reads one, and a
   NULL value matches nothing), and the relation-visibility obligation reads only the rows whose
-  key is set.  Without it a property over the relation table itself (`team_id in
-  team_members(@uid)` on `team_members`) is refuted by a row the relation does not contain, a
-  state no database can be in.
+  key is set.  When the value (or the key) is a single-column key of the table, the row is the
+  only one with it, so every pair with that value is this row's: `∀k: rel(k, row.value) → k =
+  row.key ∧ <the fact's conditions>` (a courier row whose `user_id` is NULL is nobody's).
+  Without these a property over the relation table itself (`team_id in team_members(@uid)` on
+  `team_members`) is refuted by a row the relation does not contain, a state no database can be
+  in.
+- **Subset axioms:** two base relations over the same table, key and value, where every row
+  that meets A's condition meets B's (B has none, or the solver proves `T(a(row)) → T(b(row))`
+  under the table's row constraints): `∀x,y: A(x,y) → B(x,y)`.  The owners among a shop's admins,
+  `role = 'owner'` within `role = 'owner' or role = 'admin'`.
 - **Enum domain axioms:** an enum column holds one of its type's labels (or NULL when it is
   nullable): Postgres refuses any other value.  For every row an obligation reads, every enum
   column of its table is asserted equal to one of the labels, interned as distinct constants like

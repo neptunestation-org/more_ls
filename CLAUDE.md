@@ -161,6 +161,8 @@ union member the renderer does not cover.
 - D71: a relation's key and value may be nullable (a NULL row is no pair: `relation_row_axioms`, the
   visibility obligation, `Dataset.database`); fixture `specs.nullable_relation_spec`, mutation
   `RELATION_NULL_KEY_MATCHES`.
+- D72: `subset_axioms` also relates nested filters (`_implies_on_rows`, a cached solver call), and a
+  relation's unique value names one row (`relation_row_axioms`); tests in `tests/props/test_properties.py`.
 - D42: row-dependent column visibility is normalization
   (the column is its own table with its own policies); there is no masking construct.
 - M4 (the LLM loop and evals): `src/mls/llm/CLAUDE.md`. Tests never call the API (`MLS_LLM_SCRIPT=<json>`

@@ -399,6 +399,56 @@ def test_a_filtered_relation_is_within_its_unfiltered_twin(monkeypatch):
     assert verdicts(spec) == {"P1": "REFUTED", "P2": "REFUTED", "P3": "PROVED"}
 
 
+def test_a_relation_whose_condition_implies_another_lies_within_it(monkeypatch):
+    """#51: `admin_of` (role 'admin') lies within `staff_of` (role 'admin' or 'staff') over the same
+    table, key and value: the solver decides that the first condition implies the second.  The
+    scarpar takeover's role ladder (owner within admin within manager ...) was refuted without it."""
+    from mls.props import obligations
+    from mls.spec.syntax import parse
+
+    text = SUBSET.replace("relation member_of = members(user_id, org_id)\n",
+                          "relation member_of = members(user_id, org_id) where role = 'admin' or role = 'staff'\n")
+    spec = check_spec(parse(text))
+    assert verdicts(spec)["P1"] == "PROVED"
+    monkeypatch.setattr(obligations, "_implies_on_rows", lambda *a: False)
+    obligations._implied_cache.clear()
+    assert verdicts(check_spec(parse(text)))["P1"] == "REFUTED"
+
+
+UNIQUE_VALUE = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated
+
+table riders adopted {
+  id uuid not null,
+  user_id uuid;
+  primary_key (id)
+}
+
+relation rider_of = riders(user_id, id)
+
+rules {
+  R1 policy rider_reads_own on riders: authenticated select permissive using rider_of(@uid, id)
+}
+
+properties {
+  P1 custom riders authenticated select old: user_id = @uid description 'a rider reads only their own riders row'
+}
+"""
+
+
+def test_a_fact_with_a_unique_value_is_the_one_row_that_has_it(monkeypatch):
+    """#51: `riders.id` is the primary key, so a fact `rider_of(k, x.id)` is row x's own pair: k is
+    x's user_id, and a row whose user_id is NULL is nobody's.  Without the axiom the solver gives
+    the row an arbitrary rider."""
+    from mls.props import obligations
+    from mls.spec.syntax import parse
+
+    assert verdicts(check_spec(parse(UNIQUE_VALUE))) == {"P1": "PROVED"}
+    monkeypatch.setattr(obligations, "_key_sets", lambda spec, table: [])
+    assert verdicts(check_spec(parse(UNIQUE_VALUE))) == {"P1": "REFUTED"}
+
+
 def test_an_unwritable_column_is_immutable():
     """An update by a role leaves every column it may not write unchanged: Postgres refuses the
     statement otherwise.  The upper bounds assume it as the lower bounds and the diff do, so a
