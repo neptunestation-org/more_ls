@@ -292,6 +292,12 @@ proofs' reading.  In a cycle of several lookups, those on the relation's own tab
 helper first, then, in order of table and relation name, each lookup that still closes a cycle;
 the other lookups keep their subqueries.
 
+A lookup keyed by a constant (`product_active('active', product_id)`: is this product active?)
+goes through a helper too, whatever the cycles: its visibility policy would be `key = <constant>`,
+granting every row with that key to whoever asks, so a signed-out shopper checking that a product
+is active could list the active products of every shop.  The helper answers the question and
+grants no row.
+
 **Composed relations** (SEMANTICS §3.4) follow a base relation through up to three tables:
 
     "relations": {

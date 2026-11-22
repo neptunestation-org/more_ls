@@ -8,7 +8,10 @@ instead calls a SECURITY DEFINER helper owned by `mls_internal` (`compile/lookup
 the tables without the caller's policies, so its lookup is no step of the expansion.
 
 `routed(spec)` is the set of (policy table, relation) whose lookups go through a helper: those
-whose relation reads the policy's own table, then, in order of policy table and relation name,
+whose key is a constant (#48: the visibility policy would be `key = <constant>`, every row with
+that key whoever asks, so a storefront's "is this product active" would list the active products
+of every shop; the helper answers without granting a row), those whose relation reads the
+policy's own table, then, in order of policy table and relation name,
 each lookup that still closes a cycle once the earlier ones are routed, until none does (an order
 of the names, not of the rules, so that listing the same policies differently changes nothing).  Per role the graph differs (the
 subqueries run as the caller), but a helper means the same for every role, so a lookup routed for
@@ -18,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mls.spec.model import And, Member, MemberBody, Not, Or, PolicyRule, Pred, Spec
+from mls.spec.model import And, Const, Member, MemberBody, Not, Or, PolicyRule, Pred, Spec
 
 
 @dataclass(frozen=True)
@@ -29,6 +32,7 @@ class Use:
     relation: str
     tables: tuple[str, ...]   # the relation's levels' tables, base first
     reads_rows: bool    # a SELECT (or FOR ALL) policy's USING: a step of a later lookup's expansion
+    const_key: bool = False   # keyed by a constant, not a context value
 
 
 def members(p: Pred | None, out: list[MemberBody]) -> list[MemberBody]:
@@ -56,7 +60,7 @@ def uses(spec: Spec) -> list[Use]:
             for m in members(expr, []):
                 lv = tuple(lvl.table for lvl in levels(spec, m.relation))
                 out.append(Use(r.role, r.table, r.id, m.relation, lv,
-                               which == "using" and r.command in ("select", "all")))
+                               which == "using" and r.command in ("select", "all"), isinstance(m.key, Const)))
     return out
 
 
@@ -106,7 +110,7 @@ def routed(spec: Spec) -> frozenset[tuple[str, str]]:
     # by table and relation, not rule order: the same policies listed in another order (an import
     # lists them by table) route the same lookups
     all_uses = sorted(uses(spec), key=lambda u: (u.table, u.relation, u.role, u.reads_rows))
-    out = {(u.table, u.relation) for u in all_uses if u.table in u.tables}
+    out = {(u.table, u.relation) for u in all_uses if u.const_key or u.table in u.tables}
     changed = True
     while changed:
         changed = False

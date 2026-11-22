@@ -415,6 +415,31 @@ def lookup_spec() -> Spec:
     return make(d)
 
 
+def storefront_spec() -> Spec:
+    """D70: the composed fixture with a public side, the shape of a shop's storefront: a signed-out
+    caller reads the comments on finished tasks (R6), checked with `done_task(true, task_id)` over
+    `tasks(done, id)`, a lookup keyed by a constant.  Its visibility policy would be `done = true`
+    for anon, every finished task of every team (P7 would be refuted), so it goes through a helper
+    and anon reads no task.  Without the example's comment isolation (P3), which anon now crosses.  The mutation drops the helper's key: anon reads every comment."""
+    d = composed_spec().model_dump(mode="json", by_alias=True, exclude_none=True)
+    d["roles"] = ["anon", *d["roles"]]
+    d["properties"] = [p for p in d["properties"] if p["id"] != "P3"]  # isolation, which anon's reads now cross
+    d["relations"]["done_task"] = {"table": "tasks", "key": "done", "value": "id"}
+    done = {"member": {"relation": "done_task", "key": {"const": True}, "value": {"col": "task_id"}}}
+    d["rules"].append({"id": "R6", "kind": "policy", "name": "anon_reads_done_comments", "table": "comments",
+                       "role": "anon", "command": "select", "mode": "permissive", "using": done})
+    d["properties"] += [
+        {"id": "P6", "template": "must_allow", "table": "comments", "role": "anon", "command": "select",
+         "when": done, "description": "a signed-out caller reads the comments on finished tasks"},
+        {"id": "P7", "template": "least_privilege",
+         "allowed": {"anon": {"comments": ["select"]},
+                     "authenticated": {"team_members": ["select"], "projects": ["select"],
+                                       "tasks": ["select", "insert", "update"], "comments": ["select"]}},
+         "description": "a signed-out caller reads nothing but comments"},
+    ]
+    return make(d)
+
+
 # ----------------------------------------------------------------------------- case-sensitive names (D58)
 MIXED_CASE = {"memberships": "Membership", "admins": "Admin", "docs": "Doc", "user_id": "userId",
               "tenant_id": "tenantId", "owner_id": "ownerId", "archived": "isArchived",

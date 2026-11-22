@@ -156,6 +156,8 @@ union member the renderer does not cover.
 - D69: a composed hop may go up a foreign key (key unique, value not: `chain.is_up`); the chain up to
   it is its own symbol `up.<chain>` with one-way row axioms (`obligations.up_row_axioms`; never in
   `hops_used`); fixture `specs.up_spec`.  Routing (D67) is by (table, relation, role), not rule order.
+- D70: a lookup keyed by a constant is routed too (`recursion.Use.const_key`): its visibility policy
+  would grant every row with that key; fixture `specs.storefront_spec`.
 - D42: row-dependent column visibility is normalization
   (the column is its own table with its own policies); there is no masking construct.
 - M4 (the LLM loop and evals): `src/mls/llm/CLAUDE.md`. Tests never call the API (`MLS_LLM_SCRIPT=<json>`

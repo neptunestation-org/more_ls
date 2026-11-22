@@ -36,8 +36,11 @@ triggers, grants).  You never write SQL.
   a unique constraint of t.  The owner of a row is one: relation owns_building = buildings(owner_id, id)
 - relation R = t(k, v) where p        only the rows of t where p is TRUE; p reads t's own columns and
   constants only.  E.g. relation manager_of = building_staff(user_id, building_id) where role = 'manager'.
-  Not in inclusion rules, invariants or hierarchies.  A key column of an enum type takes a label as
-  its key: relation floor_in_state = floors(status, id) read as floor_in_state('open', floor_id)
+  Not in inclusion rules, invariants or hierarchies.  In a policy the key is a context value or a
+  constant, never a column.  A constant key asks about the parent row's state: is the floor open? A
+  relation keyed by the state column, text, bool or enum, read with a constant: relation
+  floor_in_state = floors(status, id) read as floor_in_state('open', floor_id), or a bool column
+  read with true.  It grants no rows: only whether the floor is open.
 - relation C = R . t1(k1, v1) . t2(k2, v2)   composed: (u, x) when (u, y) is a pair of the base
   relation R, a t1 row has k1 = y and v1 = x (and so on through each hop); 1 to 3 hops; each hop's
   key and value are different NOT NULL columns, the key has the type of the previous value, and the

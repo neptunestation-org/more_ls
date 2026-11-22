@@ -41,8 +41,12 @@ triggers, grants).  You never write SQL.
 - {"table": t, "key": k, "value": v, "where": p}   only the rows of t where p is TRUE; p reads t's own
   columns and constants only.  E.g. the managers: {"table": "building_staff", "key": "user_id",
   "value": "building_id", "where": {"cmp": [{"col": "role"}, "=", {"const": "manager"}]}}.  Not in
-  inclusion rules, invariants or hierarchies.  A key column of an enum type takes a label as its key:
-  {"member": {"relation": "floor_in_state", "key": {"const": "open"}, "value": {"col": "floor_id"}}}
+  inclusion rules, invariants or hierarchies.  In a policy the key is a context value or a constant,
+  never a column.  A constant key asks about the parent row's state: is the floor open? A relation
+  keyed by the state column, text, bool or enum, read with a constant: {"table": "floors", "key":
+  "status", "value": "id"} as {"member": {"relation": "floor_in_state", "key": {"const": "open"},
+  "value": {"col": "floor_id"}}}, or keyed by a bool column with {"const": true}.  It grants no rows:
+  only whether the floor is open.
 - {"of": R, "through": [{"table": t1, "key": k1, "value": v1}, ...]}   composed: (u, x) when (u, y) is a
   pair of the base relation R, a t1 row has k1 = y and v1 = x (and so on through each hop); 1 to 3
   hops; each hop's key and value are different NOT NULL columns, the key has the type of the previous

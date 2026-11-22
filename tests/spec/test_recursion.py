@@ -48,3 +48,22 @@ def test_the_routing_does_not_depend_on_the_order_of_the_rules():
     from mls.spec.model import Spec
 
     assert routed(check_spec(Spec.model_validate(d))) == routed(spec)
+
+
+def test_a_lookup_keyed_by_a_constant_goes_through_a_helper_and_exposes_nothing(monkeypatch):
+    """D70: `done_task(true, task_id)` would need the visibility policy `done = true` for anon, every
+    finished task whoever asks; routed, anon reads no task and the least-privilege bound proves.
+    Unrouted (the old rule), the same spec is refuted on that bound."""
+    from mls.props.effective import implicit_policies
+    from mls.props.runner import run_all
+    from mls.spec import recursion
+    from tests.templates import specs
+
+    spec = specs.storefront_spec()
+    assert ("comments", "done_task") in recursion.routed(spec)
+    assert not [p for p in implicit_policies(spec) if p.role == "anon"]
+    assert {r.id: r.verdict for r in run_all(spec)}["P7"] == "PROVED"
+
+    plain = specs.storefront_spec()  # a fresh spec: the routing and implicit policies are cached per spec
+    monkeypatch.setattr(recursion, "routed", lambda spec: frozenset())
+    assert {r.id: r.verdict for r in run_all(plain)}["P7"] == "REFUTED"

@@ -102,7 +102,6 @@ the generated helpers (`SECURITY DEFINER`, `SET search_path FROM CURRENT`); for 
 reads it gets a permissive `SELECT ... USING (true)` policy `mls_internal_<table>` (and `FOR ALL`
 on cardinality parents, which it locks), plus the matching grants.  Nobody can log in as it, no app
 role is a member of it (drift reports both), and the helpers are the only code it runs.  It also
-owns the lookup helpers (§3.5).  It also
 owns the lookup helpers of §3.5.
 
 ### 3.4 Composed relations
@@ -162,7 +161,9 @@ the rule is measured, FINDINGS).  The compiler compiles exactly those lookups to
 the subquery the policy would have had (the base relation's rows for the key where its condition is
 TRUE, then one level per hop), read through `mls_internal_<table>`:
 `v = any((select mls_lookup_R(<k>))::<type>[])`, an uncorrelated InitPlan.  Which lookups: those
-whose relation reads the policy's own table; then, in order of policy table and relation name, each
+keyed by a constant (their visibility policy, `key = <constant>`, would grant every row with that
+key to whoever asks: a shopper checking that a product is active could list the active products
+of every shop); those whose relation reads the policy's own table; then, in order of policy table and relation name, each
 lookup that still closes a cycle once the earlier ones go through a helper, until none does (a lookup through a helper is no
 step of the expansion).  A helper means the same for every role, so the choice is per policy table
 and relation, not per role.

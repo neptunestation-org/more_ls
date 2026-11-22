@@ -1294,3 +1294,22 @@ Found on the way, in D67: the routed lookups depended on the order of the rules 
 rule order that closes a cycle), so an import, which lists policies by table, compiled the same
 policies through different helpers and named a hop visibility policy after another chain.  The
 order is now (policy table, relation, role).
+
+## D70 — A lookup keyed by a constant goes through a helper (#48)
+
+Found in the scarpar takeover.  A signed-out shopper reads a product's images when the product is
+active and its shop is: `product_active('active', product_id)` over `products(status, id)`.  The
+implicit visibility policy (D21) for that lookup is `status = 'active'`, so the shopper could list
+the active products of every shop, inactive shops included, against the requirement; the proofs
+saw it (the upper bound on `products` for anon was refuted) and the loop's only way out was to
+drop the storefront reads.  Chosen by the user: such a lookup calls the D67 helper, which answers
+the question and grants no row.  The rule is syntactic: a key that is a constant (never a context
+value) routes the lookup, before the recursion rule.  Considered and rejected: routing every
+lookup whose visibility policy reads rows the role's own SELECT policies do not (decided by the
+solver).  Measured on the examples, that routes nearly every lookup, because the usual
+visibility grant, `user_id = <the user>` on a membership table, is the user's own membership
+rows and has no explicit policy of its own; it would turn nearly every relation into a helper,
+for no leak.  A context-keyed visibility grant reads rows tied to the asker; a constant-keyed one
+does not, which is the difference that matters.  Also rejected: an opt-in marker on the relation
+(a new construct the loop has to learn, for a choice the compiler can make).  No example or
+fixture had a constant key, so nothing else changed.  Fixture `specs.storefront_spec`.
