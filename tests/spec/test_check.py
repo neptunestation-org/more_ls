@@ -427,13 +427,38 @@ def test_enum_columns_compare_with_their_labels():
         ([st, "=", {"const": 1}], "cmp", "type mismatch: enum = int"),
     ]:
         d = enum_dict()
-        d["rules"][-2]["using"] = {"cmp": cmp}  # R11, a policy (context values allowed)
+        i = next(i for i, r in enumerate(d["rules"]) if r["id"] == "R11")  # a policy (context values allowed)
+        d["rules"][i]["using"] = {"cmp": cmp}
         errs = errors(d)
-        assert has(errs, f"$.rules[{len(d['rules']) - 2}].using.{path}", text), [e.message for e in errs]
+        assert has(errs, f"$.rules[{i}].using.{path}", text), [e.message for e in errs]
     d = enum_dict()
-    d["rules"][-3]["using"]["and"][1]["in"][1][0] = {"const": "draft"}  # labels are case-sensitive
+    i = next(i for i, r in enumerate(d["rules"]) if r["id"] == "R10")
+    d["rules"][i]["using"]["and"][1]["in"][1][0] = {"const": "draft"}  # labels are case-sensitive
     errs = errors(d)
-    assert has(errs, f"$.rules[{len(d['rules']) - 3}].using.and[1].in[1][0]", "'draft' is not a label")
+    assert has(errs, f"$.rules[{i}].using.and[1].in[1][0]", "'draft' is not a label")
+    assert any("'Draft', 'In review'" in e.fix for e in errs)
+
+
+def test_two_references_of_one_enum_type_compare():
+    """#39: old and new of an enum column, or two columns of one enum type, compare by = and <>
+    (the fixture's T1); another enum type or an ordering operator is an error."""
+    from tests.templates.specs import enum_dict
+
+    def t1(d):
+        return next(i for i, r in enumerate(d["rules"]) if r["id"] == "T1")
+
+    d = enum_dict()
+    i = t1(d)
+    d["rules"][i]["predicate"]["or"][0]["cmp"][1] = "<"
+    assert has(errors(d), f"$.rules[{i}].predicate.or[0].cmp", "operator < is not allowed on enum values")
+    d = enum_dict()
+    d["enums"]["Phase"] = ["Draft", "Done"]
+    d["tables"]["docs"]["columns"]["phase"] = {"type": "enum", "enum": "Phase", "nullable": True}
+    i = t1(d)
+    d["rules"][i]["predicate"]["or"][0]["cmp"][2] = {"old": "phase"}
+    errs = errors(d)
+    assert has(errs, f"$.rules[{i}].predicate.or[0].cmp",
+               "type mismatch: enum DocStatus = enum Phase: values of different enum types do not compare")
     assert any("'Draft', 'In review'" in e.fix for e in errs)
 
 

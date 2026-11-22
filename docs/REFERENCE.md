@@ -88,7 +88,10 @@ In the terse syntax, `enum MemberRole ('OWNER', 'ADMIN', 'MEMBER', 'VIEWER')` an
 `role enum MemberRole not null`.  The type name is a catalog name (case-sensitive).  An enum
 column compares with constants that are labels of its type, by `=`, `<>` and `in`, and is
 tested with `is_null`; a string that is not a label is an error listing them, and so is a
-comparison with another column, a context value or an ordering operator.  The proofs know that
+comparison with a column of another type, a context value or an ordering operator.  Where a
+predicate compares two columns (transitions and update conditions), an enum column
+compares by `=` and `<>` with another of the same type: `new.role = old.role` says the role
+stays.  The proofs know that
 the column holds nothing but its labels (or NULL), as Postgres guarantees: `role <> 'VIEWER'`
 and `role in ('OWNER', 'ADMIN', 'MEMBER')` are the same predicate.  An enum column cannot be a
 membership, inclusion, cardinality or hierarchy column, and a context value cannot be an enum.

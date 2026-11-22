@@ -206,13 +206,18 @@ class Checker:
         self.err(path, "unknown term")
         return None
 
-    def enum_labels(self, term, scope: Scope) -> list[str] | None:
-        """The labels of the enum column `term` names (D59), or None when it names no enum column."""
+    def enum_name(self, term, scope: Scope) -> str | None:
+        """The enum type of the column `term` names (D59), or None when it names no enum column."""
         col = term.col if isinstance(term, ColRef) else term.old if isinstance(term, OldRef) else \
             term.new if isinstance(term, NewRef) else None
         t = self.spec.tables.get(scope.table) if col is not None and scope.table else None
         c = t.columns.get(col) if t else None
-        return self.spec.enums.get(c.enum) if c is not None and c.type == "enum" and c.enum else None
+        return c.enum if c is not None and c.type == "enum" and c.enum else None
+
+    def enum_labels(self, term, scope: Scope) -> list[str] | None:
+        """The labels of the enum column `term` names (D59), or None when it names no enum column."""
+        name = self.enum_name(term, scope)
+        return self.spec.enums.get(name) if name else None
 
     def const_ok_for(self, term, ty: ColType, path: str) -> bool:
         """Constants: int<->int|bigint (within the type's range), bool<->bool, str<->text|uuid
@@ -262,7 +267,17 @@ class Checker:
                 self.err(path, "comparing two constants is meaningless", "")
         if lt is None or rt is None:
             return
-        if "enum" in (lt, rt):  # an enum column compares with its own labels only (D59)
+        if lt == "enum" and rt == "enum":  # two references of one enum type compare (#39)
+            ln, rn = self.enum_name(l, scope), self.enum_name(r, scope)
+            if ln != rn:
+                self.err(path, f"type mismatch: enum {ln} {op} enum {rn}: values of different enum types "
+                               f"do not compare", f"compare a column with another of type {ln}, or with one "
+                               f"of its labels: {', '.join(map(repr, self.spec.enums.get(ln, [])))}")
+            elif op not in ("=", "<>"):
+                self.err(path, f"operator {op} is not allowed on enum values (v1 compares enum for "
+                               f"equality only)", "use = or <>")
+            return
+        if "enum" in (lt, rt):  # otherwise an enum column compares with its own labels only (D59)
             col, const, cpath = (l, r, rpath) if lt == "enum" else (r, l, lpath)
             labels = self.enum_labels(col, scope) or []
             if not isinstance(const, Const) or not isinstance(const.const, str) or isinstance(const.const, bool):

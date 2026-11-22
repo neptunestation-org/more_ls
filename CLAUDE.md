@@ -126,7 +126,8 @@ union member the renderer does not cover.
 - D59: enum columns (`Spec.enums`, `Column.enum`; adopted tables only) compare with their labels
   by `=`/`<>`/`in`; the proofs add `obligations.enum_row_axioms` (Lean: known gap); the harness and
   drift's shadow create the types (`compile/sql.py:enum_ddl`), `sql_type(col)` is a column's SQL
-  type; fixture `specs.enum_spec`, mutation `IN_DROP_LAST`, lift shapes in `tests/pg/test_lift.py`.
+  type; fixture `specs.enum_spec`, mutation `IN_DROP_LAST`, lift shapes in `tests/pg/test_lift.py`.  #39: two references of one enum type compare by `=`/`<>`
+  (`check._cmp`; `comparable` still refuses enums), fixture T1, case `enum_transition`.
 - D60: a base relation's pair need only be unique (`model.pair_unique`: some key lies within it),
   so the owner of a parent row is `projects(owner_id, id)`; an inclusion into one still needs a
   key on exactly the pair; an enum key column is read with a label key.  The lifter reads an

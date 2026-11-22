@@ -38,7 +38,8 @@ INT_RANGE: dict[str, tuple[int, int]] = {"int": (-2**31, 2**31 - 1), "bigint": (
 
 def comparable(a: str, b: str) -> bool:
     """Whether values of the two column types compare (equal types, or both integer types).  An
-    enum compares only with its own labels (D59), never with another column or context value."""
+    enum is never comparable here: a comparison checks it apart (`check._cmp`: its own labels, or
+    another reference of the same enum type, #39), and a relation's key or value never matches one."""
     if a == "enum" or b == "enum":
         return False
     return a == b or (a in INT_RANGE and b in INT_RANGE)

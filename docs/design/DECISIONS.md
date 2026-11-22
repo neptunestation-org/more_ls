@@ -1066,6 +1066,17 @@ of `props/obligations.py` the Lean transcription does not state (lean/CLAUDE.md,
 Rejected: ordering (`<` by declaration order; nothing needs it yet, and it would tie the proofs
 to the label order); enums on owned tables (MLS would have to create, migrate and drop types);
 reading an enum as plain `text` without the axiom (spurious refutations, above).
+*Same-type comparisons (2026-11-22, #39):* "never with a column" was broader than the reason for
+it.  Two references of one enum type (`new.role = old.role` in a transition or an update
+condition) compare by `=` and `<>`: Postgres accepts
+them, and the encoding, labels interned as constants of one sort, makes them the equality it
+already is for text.  The aural-oss loop had stated "a member's role stays the same" one label at a
+time, which goes stale when a label is added.  Two different enum types still do not compare
+(Postgres has no such operator), and the message says so; a policy still compares a column only
+with a context value or constant.  `model.comparable` keeps refusing enums, so a relation's key or
+value still never matches one; `check._cmp` handles both enum cases.  The fixture's transition T1
+(only a draft changes state; a NULL status makes it UNKNOWN, which the mutation lets through) and P10's `new.status = old.status` exercise it, with the case
+`enum_transition` (mutation `TRANSITION_NAIVE`).
 
 **D60. A relation's pair is unique when one of its columns is a key: the owner of a parent row
 (#31).**  The most common hand-written Supabase policy is "the user owns the parent row",

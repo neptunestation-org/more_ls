@@ -552,7 +552,9 @@ def enum_dict(labels: list[str] | None = None) -> dict:
     """D59: `docs` adopted with a column of a mixed-case enum type whose labels need quoting.
     Members read the documents in the listed states whatever their clearance (an `in` the
     mutation shortens, hiding 'Published' ones), nobody reads one in review, and a draft stays at
-    level 0 or 1 (a check rule).  P11 holds only because the column holds nothing but its labels:
+    level 0 or 1 (a check rule).  Only a draft changes state, and a document with no state is never
+    edited (T1, comparing the old and new status, #39; its NULLs are what `TRANSITION_NAIVE` lets
+    through), so P10's edit keeps the status.  P11 holds only because the column holds nothing but its labels:
     `status <> 'In review'` leaves exactly the states R10 lists.  R2 and P8 go as in `in_spec`; P5
     and P7 go because R11 hides documents in review from their writers and their members."""
     d = base()
@@ -573,7 +575,12 @@ def enum_dict(labels: list[str] | None = None) -> dict:
         {"id": "C1", "kind": "check", "name": "drafts_low", "table": "docs",
          "predicate": {"or": [{"is_null": st}, {"cmp": [st, "<>", {"const": "Draft"}]},
                               {"cmp": [{"col": "level"}, "<=", {"const": 1}]}]}},
+        {"id": "T1", "kind": "transition", "name": "only_drafts_move", "table": "docs",
+         "predicate": {"or": [{"cmp": [{"new": "status"}, "=", {"old": "status"}]},
+                              {"cmp": [{"old": "status"}, "=", {"const": "Draft"}]}]}},
     ]
+    p10 = next(p for p in d["properties"] if p["id"] == "P10")
+    p10["when"]["and"].append({"cmp": [{"new": "status"}, "=", {"old": "status"}]})
     d["properties"].append(
         {"id": "P11", "template": "must_allow", "table": "docs", "role": "authenticated", "command": "select",
          "when": {"and": [{"member": {"relation": "member_of", "key": {"ctx": "uid"},
