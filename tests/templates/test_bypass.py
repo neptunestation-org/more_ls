@@ -3,7 +3,8 @@
 function a superuser owns whose body names the table, and one the table's owner owns while row
 level security is not forced.  Not found: an invoker view, a view no app role may use, a function
 that is not SECURITY DEFINER, one whose body does not name the table, one whose EXECUTE is
-revoked, one whose owner the policies bind.  Drift reports the found ones as `hardening` with the
+revoked, one whose owner the policies bind, a view or function in a schema the app role has no
+USAGE on (unless a definer function it reaches calls that function), a trigger function.  Drift reports the found ones as `hardening` with the
 fix, `assumed` when the table assumes them (a stale assumption is a note); `mls status --dsn`
 fails on them; `mls import` lists them."""
 from __future__ import annotations
@@ -27,7 +28,7 @@ pytestmark = pytest.mark.pg
 
 DB = "mls_bypass"
 FOUND = {"view doc_titles": "view", "view outer_titles": "view", "view doc_counts": "materialized view",
-         "function count_docs()": "function"}
+         "function count_docs()": "function", "function private.count_reached()": "function"}
 OBJECTS = """
 create view doc_titles as select id, tenant_id from docs;
 create view inner_titles with (security_invoker = true) as select id from docs;
@@ -47,6 +48,15 @@ do $$ begin
 end $$;
 create function count_docs_plain() returns bigint language sql security definer as $$ select count(*) from docs $$;
 alter function count_docs_plain() owner to mls_plain;
+
+create schema private;
+create view private.titles as select id from docs;
+grant select on private.titles to authenticated;
+create function private.count_hidden() returns bigint language sql security definer as $$ select count(*) from docs $$;
+create function private.count_reached() returns bigint language sql security definer as $$ select count(*) from docs $$;
+create function reach() returns bigint language sql security definer as $$ select private.count_reached() $$;
+create function stamp_docs() returns trigger language plpgsql security definer as $$
+  begin update docs set id = id where false; return new; end $$;
 """
 
 
@@ -123,7 +133,7 @@ def test_status_fails_on_an_unassumed_path_and_import_lists_them(bypassed, tmp_p
     assert main(["status", str(p), "--dsn", dsn]) == 2
     out = capsys.readouterr().out
     assert ("docs: proved (P1, P2, P3, P4, P5, P6, P7, P8, P9, P10); bypassed by view doc_counts, view doc_titles, "
-            "view outer_titles, function count_docs()") in out, out
+            "view outer_titles, function private.count_reached(), function count_docs()") in out, out
     assert out.strip().endswith("status: 3 proved; 1 bypassed (see mls drift)")
     notes = import_schema(h.conn).notes
     assert {n.split(" reaches")[0] for n in notes if n.startswith("bypass path: ")} == {

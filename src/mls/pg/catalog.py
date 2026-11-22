@@ -139,7 +139,8 @@ with recursive dep(view, tbl) as (
 select dep.tbl, vn.nspname, v.relname, v.relkind,
        array(select ro.rolname from pg_roles ro
              where ro.rolname = any(%(roles)s)
-               and has_table_privilege(ro.oid, v.oid, 'SELECT, INSERT, UPDATE, DELETE') order by 1)
+               and has_table_privilege(ro.oid, v.oid, 'SELECT, INSERT, UPDATE, DELETE')
+               and has_schema_privilege(ro.oid, v.relnamespace, 'USAGE') order by 1)
 from dep join pg_class v on v.oid = dep.view join pg_namespace vn on vn.oid = v.relnamespace
 where v.relkind = 'm'
    or (v.relkind = 'v' and not coalesce((select o.option_value::boolean from pg_options_to_table(v.reloptions) o
@@ -149,10 +150,18 @@ order by 1, 2, 3"""
 _BYPASS_FUNCTIONS = r"""
 select t.relname, n.nspname, p.proname, oidvectortypes(p.proargtypes), pg_get_userbyid(p.proowner),
        array(select ro.rolname from pg_roles ro
-             where ro.rolname = any(%(roles)s) and has_function_privilege(ro.oid, p.oid, 'EXECUTE') order by 1)
+             where ro.rolname = any(%(roles)s) and has_function_privilege(ro.oid, p.oid, 'EXECUTE')
+               and (has_schema_privilege(ro.oid, n.oid, 'USAGE')
+                    or exists (select from pg_proc w join pg_namespace wn on wn.oid = w.pronamespace
+                               where w.prosecdef and w.oid <> p.oid
+                                 and has_schema_privilege(ro.oid, wn.oid, 'USAGE')
+                                 and has_function_privilege(ro.oid, w.oid, 'EXECUTE')
+                                 and w.prosrc ~* ('\m' || p.proname || '\M')))
+             order by 1)
 from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_roles o on o.oid = p.proowner,
      pg_class t join pg_namespace tn on tn.oid = t.relnamespace
 where p.prosecdef and n.nspname not in ('pg_catalog', 'information_schema')
+  and p.prorettype not in ('trigger'::regtype, 'event_trigger'::regtype)
   and tn.nspname = %(schema)s and t.relname = any(%(tables)s) and t.relkind in ('r', 'p')
   and (o.rolsuper or o.rolbypassrls or (pg_has_role(o.oid, t.relowner, 'USAGE') and not t.relforcerowsecurity))
   and p.prosrc ~* ('\m' || regexp_replace(t.relname, '([^a-zA-Z0-9_])', '\\\1', 'g') || '\M')
@@ -166,7 +175,10 @@ def bypass_paths(conn: psycopg.Connection, schema: str, tables: list[str], roles
     usually do not bind; a materialized view was filled by its owner); and every SECURITY DEFINER
     function an app role may execute whose owner bypasses the table's policies (a superuser, a
     BYPASSRLS role, or the table's owner while row level security is not forced) and whose body
-    names the table (a conservative text match, as for D47's setters).  Each is `{"path": "view v"
+    names the table (a conservative text match, as for D47's setters).  A role reaches a view or
+    function only with USAGE on its schema, except a function that the body of another SECURITY
+    DEFINER function it reaches names (that call runs as the other's owner; one level, by text
+    match); a trigger function is never one, since nobody calls it outside its trigger (#44).  Each is `{"path": "view v"
     | "function f(types)", "kind", "roles", "owner"?}`; a name outside `schema` is qualified."""
     out: dict[str, list[dict]] = {t: [] for t in tables}
     args = {"schema": schema, "tables": list(tables), "roles": list(roles)}

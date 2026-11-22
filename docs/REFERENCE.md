@@ -230,6 +230,13 @@ report, for every governed table:
   not forced) and whose body names the table (a text match, so a function that only mentions
   the name is reported too).
 
+An app role reaches a view or function only with `USAGE` on its schema: a helper in a schema
+the app roles cannot use (`private`) is no path, even with the default `EXECUTE` for `PUBLIC`,
+unless the body of a `SECURITY DEFINER` function they do reach names it (that call runs as the
+other function's owner).  A policy calling such a helper is not a path either: the policy is
+the rule.  A trigger function (`returns trigger`) is never a path, since nobody can call it
+outside its trigger.
+
 The path is spelled `view <name>` or `function <name>(<argument types>)` (the types as
 Postgres prints them, `function is_team_member(bigint)`), schema-qualified outside `--schema`.
 Each is `hardening` with the fix (`alter view <v> set (security_invoker = true)` or revoking

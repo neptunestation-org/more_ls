@@ -832,6 +832,13 @@ every schema but `pg_catalog` and `information_schema`; the path is `view <v>` /
 <f>(<argument types>)` as `oidvectortypes` prints them, qualified outside the governed schema,
 compared ignoring whitespace.  `mls status --dsn` fails on an unassumed path whatever the proofs
 say, and the import lists paths but never assumes one (a takeover should see them as drift).
+*Reachability (2026-11-22, #44):* "may use" also needs USAGE on the view's or function's schema;
+without it a function is still a path when the body of another SECURITY DEFINER function the
+role reaches names it (that call runs as the other's owner; one level, by the same text match).
+A function returning `trigger` or `event_trigger` is never a path: Postgres refuses to call it
+outside a trigger.  Found in the collect takeover, whose 21 reported paths were all helpers in
+`private` (no USAGE for `anon`/`authenticated`) or trigger functions.  A policy calling a
+`private` helper is no path either (schema USAGE is checked when the policy is created).
 
 **D55. Supabase is a target platform, not only an identity adapter.** Every test so far ran on
 `postgres:15..18` as a true superuser with `auth.uid()` defined by the fixture. On a Supabase
