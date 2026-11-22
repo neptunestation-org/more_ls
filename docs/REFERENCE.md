@@ -464,6 +464,7 @@ predicate; "col key" means the membership key may be a column instead of a conte
 | policy `using` / `check` | yes | yes | no | yes¹ | no | yes¹ | yes | yes | yes |
 | `check` rule | yes | no | no | no | – | no | no | yes | no |
 | `transition` rule | no | no | yes | no | – | no | no | no | no |
+| `always_on_update` predicate | no | no | yes | no | – | no | no | no | no |
 | invariant (`invariant_preserved` inline) | yes | no | no | yes | yes | no | no | no | no |
 | `custom.goal` | yes | yes | no | yes | yes | yes | yes | yes | yes |
 | `must_allow.when` | yes | yes | update only | yes | yes | yes | yes | yes | yes |
@@ -632,7 +633,9 @@ update) has `(key, column)` in the relation.  One obligation per command and rol
 
 No admitted update changes the column: for every role with an update policy,
 `new.column = old.column` (NULL-aware: NULL stays NULL).  A role that may not write the column
-(a column rule that leaves it out) cannot change it.
+(a column rule that leaves it out) cannot change it.  Trusted roles are not covered; for a column
+nobody may change, `always_on_update` with `new.column = old.column` (§12.10; for a nullable column
+`(old.column is null and new.column is null) or new.column = old.column`).
 
 ### 12.3 `monotone_in`
 
@@ -706,6 +709,22 @@ written row, with the transition rules) are unsatisfiable together.  Both roles 
 with the same context values, so it states that no user acting under either role reaches the
 same row.  A counterexample is a row (and user) both roles may touch.  Two different declared
 roles are required.
+
+### 12.10 `always_on_update`
+
+    {"id": "P8", "template": "always_on_update", "table": "sessions",
+     "predicate": {"or": [{"cmp": [{"old": "status"}, "<>", {"const": "completed"}]},
+                          {"cmp": [{"new": "status"}, "=", {"const": "completed"}]}]}}
+
+Terse: `P8 always_on_update sessions: old.status <> 'completed' or new.status = 'completed'`.
+Every update of a row of the table, by any writer, satisfies the predicate (TRUE): the app's
+roles and the trusted roles that bypass the policies alike.  The predicate is in transition
+scope (§10.2).  One obligation: the checks and inclusions on the old and the new row and the
+transition rules imply it; the policies and column privileges are not assumed, since trusted
+roles bypass them.  It is the two-state counterpart of `invariant_preserved`, and the property
+for a requirement that says "whoever", "the server included" or "ever": a refutation means no
+transition rule or check enforces it.  `column_immutable` is the same promise for the
+policy-bound roles only.
 
 ## 13. Renderings: English and terse
 

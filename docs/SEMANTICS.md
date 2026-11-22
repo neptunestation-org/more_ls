@@ -237,6 +237,11 @@ All are "assumptions ∧ ¬goal is UNSAT"; SAT yields a counterexample rendered 
   every table the invariant mentions, including referenced tables):
   `I(state) ∧ guards(τ) → I(τ(state))`. Referenced-table deletes are modeled with two copies of
   the relation (`small(x,y) ⇔ big(x,y) ∧ ¬(x=u ∧ y=t)`) plus the FK RESTRICT guard.
+- **Every writer's update (`always_on_update`):** `constraints(old) ∧ constraints(new) ∧
+  transitions(old, new) → p(old, new)`, one step, with no policy and no column privilege among
+  the assumptions: the trusted roles bypass both, and the CHECKs, foreign keys and transition
+  triggers bind them too.  It holds for every writer as long as the triggers fire, which the
+  hardening keeps (no app role may set `session_replication_role`).
 - **Access diff (v1 → v2):** for each table × command × role, check SAT of `v2 ∧ ¬v1` (new grants)
   and `v1 ∧ ¬v2` (new denials) over shared relation symbols; each model is a scenario.  Two base
   relations of the two versions over the same table, key and value are the same pairs when their

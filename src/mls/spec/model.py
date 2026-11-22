@@ -507,6 +507,15 @@ class InvariantPreserved(PropBase):
     invariants: list[InvariantRef] = Field(min_length=1)
 
 
+class AlwaysOnUpdate(PropBase):
+    """Every update of a row of `table` by any writer, the trusted roles that bypass the policies
+    included, satisfies `predicate` (old/new): the two-state counterpart of invariant_preserved,
+    proved from the stored-row constraints and the transition rules alone (#40)."""
+    template: Literal["always_on_update"]
+    table: str
+    predicate: Pred
+
+
 class Custom(PropBase):
     """For `role` and `command` on `table`: effective(row) -> goal(row).
     `which` selects the row image for update: 'old' (USING) or 'new' (WITH CHECK)."""
@@ -550,7 +559,7 @@ class RoleSeparation(PropBase):
 
 Property = Annotated[
     Union[TenantIsolation, ColumnImmutable, MonotoneIn, WriteSubsetRead, LeastPrivilege,
-          InvariantPreserved, Custom, MustAllow, RoleSeparation],
+          InvariantPreserved, AlwaysOnUpdate, Custom, MustAllow, RoleSeparation],
     Field(discriminator="template"),
 ]
 

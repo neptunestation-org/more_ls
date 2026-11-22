@@ -83,6 +83,10 @@ the key and value columns of R's table (the membership lookup runs as the user),
   privilege above)
 - P6 invariant_preserved: R2; t: p                            every admitted change keeps the
   invariants (rule ids or table: predicate; inductive proof)
+- P10 always_on_update t: p                                   every update of t by anyone, the server's
+  roles that bypass the policies included, satisfies p (old.c / new.c only); only transition rules
+  and checks can make it hold.  Use it for a requirement that says "whoever", "the server
+  included", "nobody ever"; column_immutable and custom cover the app's roles only
 - P7 custom t role command old|new: p                         every row the role can <command>
   satisfies p (an upper bound on access)
 - P8 role_separation t command: a | b                         no row is admitted to <command> for

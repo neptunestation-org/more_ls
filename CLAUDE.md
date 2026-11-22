@@ -180,6 +180,9 @@ union member the renderer does not cover.
   stays the harness's); a chain whose hop visibility closes a cycle (a table twice) is routed
   (`recursion.routed`, after the policy-table check); `exists_join` reads self-joins; fixture
   `specs.comember_spec`.
+- D77: `always_on_update <table>: p` (`AlwaysOnUpdate`, `obligations.always_on_update`) is a
+  property for every writer, trusted roles included: constraints on both images and the transitions
+  imply `p`, no policies or column privileges assumed; test in `tests/props/test_properties.py`.
 - D42: row-dependent column visibility is normalization
   (the column is its own table with its own policies); there is no masking construct.
 - M4 (the LLM loop and evals): `src/mls/llm/CLAUDE.md`. Tests never call the API (`MLS_LLM_SCRIPT=<json>`

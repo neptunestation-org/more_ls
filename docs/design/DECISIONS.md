@@ -1502,3 +1502,27 @@ leaves collect's chains unexpressible.  Fixture `specs.comember_spec` (the self-
 chain of lookups ending in a membership hop); the existing mutation `HOP_VISIBILITY_DROPPED` is
 caught by it (the chain through `task_assignees` reads no assignment).  Lean: `Pred.memberVia`
 reads hops relationally already; the one-way encoding is D69's known gap.
+
+**D77. A property for every writer's update: `always_on_update` (#40).**
+The aural-oss requirements "a completed session stays completed, whoever changes it" and
+"nobody, the app's server included, changes which interview a session belongs to" bind the
+trusted roles that bypass the policies.  The rules pass enforced them with transition rules
+(triggers fire for every role), but the properties pass had nothing to state them with:
+`column_immutable` and `custom` are per app role under its policies, and `invariant_preserved`
+covers every writer but only one-state invariants.  So the approved properties covered signed-in
+users only, and the server side was enforced without a proof.  `always_on_update <table>: p`, with
+`p` in transition scope (old/new and constants), is one obligation: `row_constraints(old) ∧
+row_constraints(new) ∧ transition_constraints(new) → T(p)`, plus the relation axioms, with no
+policy and no column privilege (`unwritable_unchanged`) assumed, since a trusted role is bound by
+neither.  It stays in the fragment (one step, no induction) and is a pure upper bound: no
+witness, no lower bound.  A refutation means no transition rule or check implies it; the column
+rule that proves `column_immutable` for the app role does not (the test pins that contrast).  The
+trusted roles' bypass of the triggers themselves (`session_replication_role`) is the hardening's
+concern and drift's report, as for every trigger template.  The properties prompts name it for
+requirements that say "whoever", "the server included" or "nobody ever".  Lean: the obligation
+builder is not transcribed (lean/CLAUDE.md, Known gaps); it is `invariant_preserved`'s update step
+on the written row with a two-state goal.  Rejected: an `everyone` form of `column_immutable`
+(`new.c = old.c`, or for a nullable column `(old.c is null and new.c is null) or new.c = old.c`, is
+the same property in this template; one way to say it is enough);
+extending `invariant_preserved` with two-state invariants (its induction over every table and
+statement kind is meaningless for a predicate over one update).

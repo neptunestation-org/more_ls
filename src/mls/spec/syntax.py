@@ -20,7 +20,7 @@ from mls.spec.model import Spec
 
 KINDS = ("policy", "check", "inclusion", "transition", "cardinality", "column_rule")
 TEMPLATES = ("tenant_isolation", "column_immutable", "monotone_in", "write_subset_read", "least_privilege",
-             "invariant_preserved", "custom", "must_allow", "role_separation")
+             "invariant_preserved", "always_on_update", "custom", "must_allow", "role_separation")
 COMMANDS = ("select", "insert", "update", "delete", "all")
 MODES = ("permissive", "restrictive")
 TYPES = ("int", "bigint", "text", "bool", "timestamp", "uuid", "enum")
@@ -642,6 +642,10 @@ class Parser:
                 else:
                     break
             p["invariants"] = invs
+        elif t == "always_on_update":
+            p["table"] = self.name("a table")
+            self.eat(":")
+            p["predicate"] = self.pred(f"{base}.predicate")
         elif t == "custom":
             p["table"] = self.name("a table")
             p["role"] = self.name("a role")

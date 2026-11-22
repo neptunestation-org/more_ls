@@ -21,7 +21,7 @@ from mls.props.effective import (
     effective, inclusion_pred, members_in, relations_of, row_constraints, transition_constraints,
 )
 from mls.spec.model import (
-    And, CardinalityRule, CheckRule, Cmp, ColRef, ColumnImmutable, ComposedRelation, Custom, InclusionRule,
+    AlwaysOnUpdate, And, CardinalityRule, CheckRule, Cmp, ColRef, ColumnImmutable, ComposedRelation, Custom, InclusionRule,
     InvariantPreserved, IsNull, LeastPrivilege, Lit, Member, MemberBody, MonotoneIn, MustAllow, NewRef,
     Not, OldRef, Or, Pred, Property, RoleSeparation, Spec, TenantIsolation, WriteSubsetRead,
 )
@@ -362,6 +362,20 @@ def column_immutable(spec: Spec, p: ColumnImmutable) -> list[Obligation]:
             assumptions, goal, _rows_for("update", p.table),
             _all_relations(spec, p.table, role, "update"), [enc]).finish())
     return out
+
+
+def always_on_update(spec: Spec, p: AlwaysOnUpdate) -> list[Obligation]:
+    """Every update by any writer keeps `p.predicate` (#40).  The trusted roles bypass the
+    policies and hold every column privilege, so only what binds them too is assumed: the
+    stored-row constraints on both images (CHECKs, foreign keys) and the transition triggers."""
+    enc = Encoder(spec)
+    rc = row_constraints(spec, p.table)
+    assumptions = [*relation_axioms(spec, enc), _T(enc, rc, "old", p.table), _T(enc, rc, "new", p.table),
+                   _T(enc, transition_constraints(spec, p.table), "new", p.table)]
+    return [Obligation(
+        p.id, f"update on {p.table} by any writer: the change satisfies the condition",
+        assumptions, _T(enc, p.predicate, "new", p.table), _rows_for("update", p.table),
+        _relations_of(spec, rc), [enc]).finish()]
 
 
 def monotone_in(spec: Spec, p: MonotoneIn) -> list[Obligation]:
@@ -761,6 +775,8 @@ def obligations_for(spec: Spec, prop: Property) -> list[Obligation]:
         return least_privilege(spec, prop)
     if isinstance(prop, InvariantPreserved):
         return invariant_preserved(spec, prop)
+    if isinstance(prop, AlwaysOnUpdate):
+        return always_on_update(spec, prop)
     if isinstance(prop, Custom):
         return custom(spec, prop)
     if isinstance(prop, MustAllow):

@@ -91,6 +91,10 @@ the key and value columns of R's table (the membership lookup runs as the user),
   privilege above)
 - invariant_preserved: {"invariants": [{"rule": id} | {"table", "predicate"}]}  every admitted change
   keeps the invariants (inductive proof)
+- always_on_update: {"table", "predicate": p over {"old": c} / {"new": c}}  every update of the table by
+  anyone, the server's roles that bypass the policies included, satisfies p; only transition rules and
+  checks can make it hold.  Use it for a requirement that says "whoever", "the server included",
+  "nobody ever"; column_immutable and custom cover the app's roles only
 - custom: {"table", "role", "command", "which": old|new, "goal": p}  every row the role can <command>
   satisfies goal (an upper bound on access)
 - role_separation: {"table", "roles": [a, b], "command"}  no row is admitted to <command> for both roles

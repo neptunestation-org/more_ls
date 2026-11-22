@@ -24,7 +24,7 @@ from mls.errors import ErrorSink, MlsError, SpecError
 from mls.spec.model import (
     MAX_HOPS, ComposedRelation, Relation,
     CONTEXT_NOW, And, BypassAssumed, CardinalityRule, CheckRule, ColRef, ColType, ColumnRule, Cmp, Const, CtxRef,
-    INT_RANGE, In, Custom, InclusionRule, InGroup, InvariantPreserved, IsNull, Lit, Member, MonotoneIn, MustAllow, NewRef, Not,
+    INT_RANGE, In, AlwaysOnUpdate, Custom, InclusionRule, InGroup, InvariantPreserved, IsNull, Lit, Member, MonotoneIn, MustAllow, NewRef, Not,
     RoleSeparation,
     NowBetween, OldRef, OpaqueRef, Or, OwnerAssumed, PathAssumed, InlinedAssumed, PolicyRule, RlsAssumed, Spec, TenantIsolation,
     ColumnImmutable, WriteSubsetRead, LeastPrivilege, TransitionRule, comparable, pair_unique,
@@ -163,8 +163,9 @@ class Checker:
     def term_type(self, term, scope: Scope, path: str) -> ColType | None:
         if isinstance(term, ColRef):
             if not scope.cols:
-                self.err(path, f"a column reference is not allowed in a {scope.name} predicate",
-                         "use {\"old\": col} / {\"new\": col} in transitions" if scope.old_new else
+                self.err(path, f"a column reference is not allowed in {'an' if scope.name[0] in 'aeiou' else 'a'} "
+                               f"{scope.name} predicate",
+                         f"use {{\"old\": col}} / {{\"new\": col}} in {scope.name} predicates" if scope.old_new else
                          "remove the column reference")
                 return None
             ty = self.col_type(scope.table, term.col)
@@ -174,8 +175,9 @@ class Checker:
             return ty
         if isinstance(term, (OldRef, NewRef)):
             if not scope.old_new:
-                self.err(path, f"old/new references are only allowed in transition predicates and in the "
-                               f"condition of a must_allow property on update",
+                self.err(path, f"old/new references are only allowed in transition predicates, in an "
+                               f"always_on_update property and in the condition of a must_allow property "
+                               f"on update",
                          "use {\"col\": name} here")
                 return None
             col = term.old if isinstance(term, OldRef) else term.new
@@ -983,7 +985,8 @@ class Checker:
             if p.id in ids:
                 self.err(path + ".id", f"duplicate property id '{p.id}'")
             ids.add(p.id)
-            if isinstance(p, (TenantIsolation, ColumnImmutable, WriteSubsetRead, Custom, MustAllow, RoleSeparation)):
+            if isinstance(p, (TenantIsolation, ColumnImmutable, WriteSubsetRead, AlwaysOnUpdate, Custom, MustAllow,
+                              RoleSeparation)):
                 if p.table not in self.spec.tables:
                     self.err(path + ".table", f"unknown table '{p.table}'")
                     continue
@@ -1043,6 +1046,8 @@ class Checker:
                         if not self.governed(inv.table, ipath + ".table", "an invariant"):
                             continue
                         self.pred(inv.predicate, invariant_scope(inv.table), ipath + ".predicate")
+            elif isinstance(p, AlwaysOnUpdate):
+                self.pred(p.predicate, Scope("always_on_update property", p.table, old_new=True), path + ".predicate")
             elif isinstance(p, Custom):
                 if p.role not in self.spec.roles:
                     self.err(path + ".role", f"unknown role '{p.role}'")

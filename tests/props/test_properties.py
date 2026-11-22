@@ -478,3 +478,52 @@ properties {
 """
     spec = check_spec(parse(text))
     assert verdicts(spec) == {"P1": "PROVED", "P2": "REFUTED"}
+
+
+ALWAYS = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated
+
+table profiles adopted {
+  id uuid not null,
+  name text,
+  role text,
+  status text;
+  primary_key (id)
+}
+
+rules {
+  R1 policy own_profile on profiles: authenticated update permissive using id = @uid check id = @uid
+  R2 column_rule no_role_write on profiles: authenticated write id, name
+  R3 check known_status on profiles: status in ('active', 'closed')
+%s}
+
+properties {
+  P1 column_immutable profiles: role
+  P2 always_on_update profiles: new.role = old.role description 'nobody, the server included, changes a role'
+  P3 always_on_update profiles: new.status <> 'deleted'
+  P4 always_on_update profiles: old.status <> 'closed' or new.status = 'closed'
+}
+"""
+
+
+def test_an_update_by_every_writer_is_proved_from_the_triggers_and_checks_alone():
+    """#40: always_on_update binds the trusted roles too, so the column rule that proves
+    column_immutable for the app's role proves nothing for it; a transition rule does, and a
+    check on the written row does for a predicate over the new row."""
+    from mls.english import prop
+    from mls.spec.syntax import parse
+    from mls.terse import render
+
+    spec = check_spec(parse(ALWAYS % ""))
+    assert verdicts(spec) == {"P1": "PROVED", "P2": "REFUTED", "P3": "PROVED", "P4": "REFUTED"}
+    sc = run_property(spec, spec.properties[1]).obligations[0].scenario
+    assert sc.rows["old"]["values"]["role"] != sc.rows["new"]["values"]["role"]
+    rules = ("  R4 transition role_kept on profiles: new.role = old.role\n"
+             "  R5 transition closed_stays on profiles: old.status <> 'closed' or new.status = 'closed'\n")
+    spec = check_spec(parse(ALWAYS % rules))
+    assert set(verdicts(spec).values()) == {"PROVED"}
+    assert prop(spec, spec.properties[1]) == (
+        "Every change to a row of profiles, by anyone (the roles that bypass the policies included), "
+        "keeps this true: the new role is the previous role.")
+    assert parse(render(spec)) == spec

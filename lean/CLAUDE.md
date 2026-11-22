@@ -57,6 +57,10 @@ writers) is in `docs/design/archive/ROADMAP.md`, "Parallel track — Lean 4".
   not transcribed, nor is `chain_fact`'s split between lookups and `up` symbols.  Its soundness
   argument is the base relation's: the proofs hold for every relation the axioms allow, and the
   real chain satisfies them.
+- **Every writer's update (#40, D77).**  `obligations.always_on_update` (the constraints on both
+  images and the transition rules imply a two-state predicate, no policies) is not transcribed in
+  `Policy.lean`.  It is the update case of `Transition.lean`'s step with a goal over both images
+  instead of an invariant of the new one.
 - **Lookup helpers (#34) and nullable membership values (#42)** need no transcription: the helper
   is a compilation of the same atom, and `liftCmp` already makes a NULL value UNKNOWN.
 - **Relations over nullable columns (#49, D71).**  `Relational.lean` derives a relation from every

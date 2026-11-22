@@ -558,3 +558,17 @@ def test_a_relation_over_a_nullable_column_is_accepted_and_its_null_rows_are_no_
     from tests.templates import specs
 
     assert {r.id: r.verdict for r in run_all(specs.nullable_relation_spec())}["P6"] == "PROVED"
+
+
+def test_an_always_on_update_predicate_names_the_old_and_new_rows_only():
+    """#40: the predicate is in transition scope: no bare column, context value or membership."""
+    d = base()
+    d["properties"].append({"id": "P20", "template": "always_on_update", "table": "docs",
+                            "predicate": {"cmp": [{"col": "tenant_id"}, "=", {"old": "tenant_id"}]}})
+    d["properties"].append({"id": "P21", "template": "always_on_update", "table": "nope",
+                            "predicate": {"cmp": [{"new": "level"}, "=", {"old": "level"}]}})
+    errs = errors(d)
+    n = len(d["properties"])
+    assert has(errs, f"$.properties[{n - 2}].predicate.cmp[0]",
+               "a column reference is not allowed in an always_on_update property predicate")
+    assert has(errs, f"$.properties[{n - 1}].table", "unknown table 'nope'")
