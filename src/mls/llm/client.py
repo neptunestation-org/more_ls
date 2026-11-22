@@ -65,7 +65,7 @@ class AnthropicClient:
     `output_config.format` anyway (for an API that accepts it); if rejected, the request is retried
     without it and `schema_rejected` keeps the reason."""
 
-    def __init__(self, model: str = DEFAULT_MODEL, effort: str = "high", max_tokens: int = 16000,
+    def __init__(self, model: str = DEFAULT_MODEL, effort: str = "high", max_tokens: int = 64000,
                  use_schema: bool = False):
         import anthropic
 
@@ -104,7 +104,9 @@ class AnthropicClient:
         output_config: dict[str, Any] = {"effort": self.effort}
         if with_schema:
             output_config["format"] = {"type": "json_schema", "schema": req.schema}
-        return self._client.beta.messages.create(
+        # streamed: the answer for a large schema (dozens of tables, thinking included) needs far
+        # more than the ~16k tokens a non-streaming request can take before it times out
+        with self._client.beta.messages.stream(
             model=self.model,
             max_tokens=self.max_tokens,
             betas=["server-side-fallback-2026-07-01"],
@@ -112,7 +114,8 @@ class AnthropicClient:
             system=[{"type": "text", "text": req.system, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": req.user}],
             output_config=output_config,
-        )
+        ) as stream:
+            return stream.get_final_message()
 
 
 def client_from_env(model: str = DEFAULT_MODEL, effort: str = "high") -> Client:
