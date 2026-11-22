@@ -970,7 +970,12 @@ its path and fix.  JSON: `{"ok", "notes", "errors": [...], "violations": [{"rule
 
 ### `mls drift SPEC --dsn DSN [--schema NAME] [--json]`
 
-Shadow-deploys the spec in a transaction it rolls back, then compares catalogs.  Items are
+Shadow-deploys the spec in a transaction it rolls back, then compares catalogs.  The shadow
+schema comes first on the search path and the live schema (`--schema`) after it, so an opaque
+block's unqualified call of one of the schema's functions resolves.  A role the spec needs and the
+server lacks (before the first deploy, the helpers' owner `mls_internal`) is reported `missing`;
+the shadow creates it inside the rolled-back transaction, which needs CREATEROLE, and without it
+drift stops with an error naming the role.  Items are
 `<kind>: <object> (expected ..., found ...)` with kinds `missing`, `unexpected`, `differs`,
 `hardening` (drift; the bypass paths of §5 among them), `assumed` (hardening the spec's `assume` accounts for, §5) and `foreign`
 (an object on an adopted table that the spec does not declare and that cannot grant access: a

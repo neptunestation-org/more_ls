@@ -39,6 +39,10 @@ from mls.spec.model import BypassAssumed, InlinedAssumed, OwnerAssumed, PathAssu
 FAILING = ("missing", "unexpected", "differs", "hardening")
 
 
+class DriftError(Exception):
+    """The shadow deploy could not run on this connection."""
+
+
 @dataclass
 class DriftItem:
     kind: str        # missing | unexpected | differs | hardening | assumed | foreign
@@ -68,15 +72,30 @@ class DriftResult:
 
 
 def shadow_snapshot(conn: psycopg.Connection, spec: Spec, script: Script,
-                    live_types: dict[str, dict[str, str]] | None = None) -> Snapshot:
+                    live_types: dict[str, dict[str, str]] | None = None, live: str = "public",
+                    missing_roles: list[str] = ()) -> Snapshot:
     """Deploy the script into a throwaway schema inside the current transaction and snapshot it.
     `live_types` are the catalog types an adopted table's stand-in takes in place of the spec's
     (a `character varying(n)` column the spec reads as text, D53), so that its constraints and
-    indexes deparse as the live ones do."""
+    indexes deparse as the live ones do.  The live schema follows the shadow on the search path, so
+    an opaque block's unqualified call of one of its functions resolves (#53).  `missing_roles` are
+    the spec's roles the server lacks (the deploy creates them; drift reports them missing): the
+    shadow creates them for its own statements, and the rollback drops them again."""
     shadow = "mls_shadow_" + secrets.token_hex(4)
     with conn.cursor() as cur:
         cur.execute(psql.SQL("create schema {}").format(psql.Identifier(shadow)))
-        cur.execute(psql.SQL("set local search_path to {}, pg_catalog").format(psql.Identifier(shadow)))
+        cur.execute(psql.SQL("set local search_path to {}, {}, pg_catalog").format(
+            psql.Identifier(shadow), psql.Identifier(live)))
+        for r in missing_roles:
+            try:
+                cur.execute(psql.SQL("create role {} nologin").format(psql.Identifier(r)))
+            except psycopg.errors.InsufficientPrivilege:
+                raise DriftError(f"role {r} does not exist and this connection may not create it, so the spec "
+                                 f"cannot be deployed into the shadow schema (fix: run drift as a role with "
+                                 f"CREATEROLE, or create the role {r} first; the deploy creates it too)") from None
+            if r == INTERNAL_ROLE:  # the helpers' owner: transferring them needs the membership
+                cur.execute(psql.SQL("grant {} to {}").format(psql.Identifier(r), psql.Identifier(
+                    cur.execute("select current_user").fetchone()[0])))
         for name, labels in spec.enums.items():  # the stand-ins' types, named as the live ones print
             cur.execute(enum_ddl(name, labels))
         for name, t in spec.tables.items():
@@ -89,7 +108,7 @@ def shadow_snapshot(conn: psycopg.Connection, spec: Spec, script: Script,
             if st.section == "roles":
                 continue  # roles are global; their attributes are compared directly
             cur.execute(st.sql)
-    return snapshot(conn, shadow, list(spec.governed()), _roles(spec), _observed(spec))
+    return snapshot(conn, shadow, list(spec.governed()), _roles(spec), _observed(spec), also=live)
 
 
 def _live_types(spec: Spec, actual: Snapshot) -> dict[str, dict[str, str]]:
@@ -305,7 +324,8 @@ def drift(conn: psycopg.Connection, spec: Spec, script: Script, schema: str = "p
         actual["bodies"] = {path_key(f"function {n}({types})"): digest for n, types, digest in conn.execute(
             """select p.proname, oidvectortypes(p.proargtypes), md5(p.prosrc) from pg_proc p
                join pg_namespace n on n.oid = p.pronamespace where n.nspname = %s""", (schema,)).fetchall()}
-        expected = shadow_snapshot(conn, spec, script, _live_types(spec, actual))
+        missing = [r for r in _roles(spec) if actual["roles"].get(r) is None]
+        expected = shadow_snapshot(conn, spec, script, _live_types(spec, actual), schema, missing)
     items, notes = compare(spec, expected, actual)
     notes += [f"table '{t}' in schema '{schema}' is not in the spec" for t in actual["other_tables"]]
     return DriftResult(items, notes)

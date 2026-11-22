@@ -16,7 +16,7 @@ from mls.cli import main
 from mls.compile import compile_spec
 from mls.errors import SpecError
 from mls.pg.adopt import import_schema, verify_adopted
-from mls.pg.drift import drift
+from mls.pg.drift import DriftError, drift
 from mls.pg.harness import Harness, run_differential
 from mls.props.diff import behaviour_diff
 from mls.props.report import to_markdown
@@ -574,3 +574,59 @@ def test_a_membership_whose_rows_the_inner_policies_hide_is_not_claimed(hidden):
     res = import_schema(hidden)
     assert res.spec["opaques"] == {}, res.notes
     assert not [n for n in res.notes if "hide some of the rows" in n]
+
+
+UNDEPLOYED_SQL = """
+do $$ begin if not exists (select from pg_roles where rolname = 'app') then create role app; end if; end $$;
+create table members (user_id bigint not null, team_id bigint not null, primary key (user_id, team_id));
+create table docs (id bigint primary key, team_id bigint not null);
+alter table members enable row level security;
+alter table docs enable row level security;
+create policy team_read on members for select to app using (
+  team_id in (select m.team_id from members m where m.user_id = nullif(current_setting('app.uid', true), '')::bigint));
+create function may_read(d bigint) returns boolean language plpgsql stable as $f$ begin return d > 0; end $f$;
+create policy doc_read on docs for select to app using (may_read(id));
+"""
+
+
+@pytest.fixture
+def undeployed(pg_dsn):
+    dbname = "mls_undeployed"
+    with psycopg.connect(pg_dsn, autocommit=True) as admin:
+        admin.execute(f'drop database if exists "{dbname}"')
+        admin.execute(f'create database "{dbname}"')
+    conn = psycopg.connect(psycopg.conninfo.make_conninfo(pg_dsn, dbname=dbname), autocommit=True)
+    conn.execute(UNDEPLOYED_SQL)
+    yield conn
+    conn.close()
+    with psycopg.connect(pg_dsn, autocommit=True) as admin:
+        admin.execute(f'drop database if exists "{dbname}"')
+
+
+def test_drift_of_an_import_mls_never_deployed(undeployed):
+    """#53: drift on an imported spec before any deploy.  A role the spec needs and the server
+    lacks (here an app role renamed to one that does not exist; on a real takeover the helpers'
+    owner) is reported missing, not a crash: the shadow creates it inside its rolled-back
+    transaction.  An opaque block's unqualified call of the schema's own function resolves in the
+    shadow and deparses as the live policy does."""
+    res = import_schema(undeployed)
+    assert "may_read(id)" in json.dumps(res.spec["opaques"]), res.spec["opaques"]
+    spec = check_spec(Spec.model_validate(res.spec))
+    items = [str(i) for i in drift(undeployed, spec, compile_spec(spec)).items]
+    assert not [i for i in items if "doc_read" in i], items
+
+    absent = "mls_absent_role"
+    spec = check_spec(Spec.model_validate(json.loads(json.dumps(res.spec).replace('"app"', f'"{absent}"'))))
+    items = [str(i) for i in drift(undeployed, spec, compile_spec(spec)).items]
+    assert f"missing: role {absent}" in items, items
+    assert undeployed.execute("select count(*) from pg_roles where rolname = %s", (absent,)).fetchone()[0] == 0
+
+    # a connection that may not create the role gets an error naming the fix
+    undeployed.execute("do $$ begin if not exists (select from pg_roles where rolname = 'mls_no_createrole') then "
+                       "create role mls_no_createrole; end if; end $$; "
+                       "grant create on database mls_undeployed to mls_no_createrole; set role mls_no_createrole")
+    try:
+        with pytest.raises(DriftError, match=f"role {absent} does not exist .* CREATEROLE"):
+            drift(undeployed, spec, compile_spec(spec))
+    finally:
+        undeployed.execute("reset role")

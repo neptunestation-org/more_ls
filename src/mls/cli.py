@@ -291,7 +291,7 @@ def cmd_drift(a) -> int:
     import psycopg
 
     from mls.compile import compile_spec
-    from mls.pg.drift import drift
+    from mls.pg.drift import DriftError, drift
 
     try:
         spec = _load(a.spec)
@@ -300,7 +300,12 @@ def cmd_drift(a) -> int:
         _print_errors(e, a.json)
         return 1
     with psycopg.connect(a.dsn) as conn:
-        res = drift(conn, spec, script, schema=a.schema)
+        try:
+            res = drift(conn, spec, script, schema=a.schema)
+        except DriftError as e:
+            print(json.dumps({"ok": False, "error": str(e)}) if a.json else f"error: {e}",
+                  file=sys.stdout if a.json else sys.stderr)
+            return 1
     if a.json:
         print(json.dumps({"ok": res.ok, "notes": res.notes,
                           "drift": [{"kind": i.kind, "object": i.object, "expected": i.expected, "actual": i.actual}

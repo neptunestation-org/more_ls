@@ -21,11 +21,14 @@ def _strip_schema(s: str | None, schema: str) -> str | None:
 
 
 def snapshot(conn: psycopg.Connection, schema: str, tables: list[str], roles: list[str],
-             observed: list[str] = ()) -> Snapshot:
-    """`tables` are snapshotted in full; `observed` ones (D45) only for their existence."""
+             observed: list[str] = (), also: str | None = None) -> Snapshot:
+    """`tables` are snapshotted in full; `observed` ones (D45) only for their existence.  `also` is a
+    schema on the search path after `schema` (a shadow's live schema), so that a function of it
+    deparses unqualified, as it does in the live snapshot."""
     out: Snapshot = {"tables": {}, "roles": {}, "other_tables": [], "observed": {}}
     with conn.cursor() as cur:
-        cur.execute(psql.SQL("set local search_path to {}, pg_catalog").format(psql.Identifier(schema)))
+        cur.execute(psql.SQL("set local search_path to {}, pg_catalog").format(
+            psql.SQL(", ").join(psql.Identifier(x) for x in [schema, also] if x)))
         cur.execute("""select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
                        where n.nspname = %s and c.relkind in ('r', 'p') order by 1""", (schema,))
         present = [r[0] for r in cur.fetchall()]

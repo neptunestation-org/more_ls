@@ -1423,7 +1423,8 @@ NOT VALID, a changed grant) and hardening violations (an app role with `BYPASSRL
 forced, a login-capable `mls_internal`).  On an adopted table (section 10.1) it also lists, without
 failing, the objects MLS did not create and the hardening the spec assumes.  Run it from CI
 against production; it needs only read access to the catalog plus the ability to create and roll
-back the shadow schema.
+back the shadow schema (and, before the first deploy, CREATEROLE for the roles the deploy will
+create).
 
 ### 10.1 Adopting an existing schema
 
