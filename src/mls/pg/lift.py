@@ -1151,9 +1151,10 @@ class Lifter:
         for t, k, v in hops:
             if t not in self.env.governed:
                 raise Unreadable(f"the nested subquery reads {t}, which is observed (not governed)")
-            if frozenset((v,)) not in self.env.keys.get(t, []):
-                raise Unreadable(f"the nested subquery selects {t}.{v}, which is not the primary key or a unique "
-                                 f"column of {t}: the step is a join, not a lookup")
+            keys = self.env.keys.get(t, [])
+            if frozenset((v,)) not in keys and frozenset((k,)) not in keys:  # #43: up a foreign key too
+                raise Unreadable(f"the nested subquery selects {t}.{v} by {t}.{k}, and neither is the primary key "
+                                 f"or a unique column of {t}: the step is a join, not a lookup")
             if self.env.tables[t][k][1] or self.env.tables[t][v][1]:
                 raise Unreadable(f"the nested subquery steps through {t}({k}, {v}), and a hop's columns must be "
                                  f"NOT NULL")

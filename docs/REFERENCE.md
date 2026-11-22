@@ -289,8 +289,8 @@ role at a time.  The compiler compiles exactly those lookups to a call of a help
 policies, once per statement.  Such a lookup needs no visibility policy and no grant on the
 relation's tables, and it means what any membership means: the relation's stored rows, the
 proofs' reading.  In a cycle of several lookups, those on the relation's own table go through a
-helper first, then, in rule order, each lookup that still closes a cycle; the other lookups keep
-their subqueries.
+helper first, then, in order of table and relation name, each lookup that still closes a cycle;
+the other lookups keep their subqueries.
 
 **Composed relations** (SEMANTICS §3.4) follow a base relation through up to three tables:
 
@@ -304,8 +304,10 @@ their subqueries.
 `(k, v) ∈ in_task` when `(k, t) ∈ member_of`, a `projects` row has `team_id = t` and `id = p`, and a
 `tasks` row has `project_id = p` and `id = v`. `of` is a base relation (not composed); at most three
 hops; each hop's `key` and `value` are different NOT NULL columns, the `key` has the type of the
-previous level's value, and the `value` is the table's primary key or a unique column (so each hop
-is a lookup, not a join). A hop through a column that is not a key is refused at
+previous level's value, and the `value` or the `key` is the table's primary key or a unique column
+(so each hop is a lookup, not a join): down to the rows a value names (`projects(team_id, id)`), or
+up a foreign key to the row it refers to (`projects(id, organization_id)`: the members of a
+project reach its organization). A hop where neither is a key is refused at
 `$.relations.R.through[i].value`; the ways out are a membership table (a base relation) or the
 column copied onto the referencing table with an inclusion rule. A composed relation is used with
 `member` like any relation, in policies, goals, `must_allow` and `tenant_isolation`; it is refused
@@ -406,8 +408,8 @@ compiles the same way.
 
 **`{"member": {"relation": R, "key": k, "value": v}}`**: `(k, v)` is a stored pair of relation
 `R`.  `k` is a context value (or, in invariants and goals, a column); `v` is a column of the
-relation's value type and must be NOT NULL when the predicate is a policy atom.  UNKNOWN if `v`
-is NULL.  Compiled as `v = any(array(select value from <table> where key = <k>))`; over a
+relation's value type, nullable or not.  UNKNOWN if `v` is NULL, so a policy denies the row and
+a CHECK passes it: a row with no tenant is nobody's.  Compiled as `v = any(array(select value from <table> where key = <k>))`; over a
 composed relation, one nested `= any(array(select ...))` per hop, innermost the base relation.
 
 **`{"in_group": {"hierarchy": H, "key": k, "value": v}}`**: the group `v` is one of the key's

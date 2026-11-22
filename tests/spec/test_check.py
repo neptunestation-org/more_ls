@@ -73,11 +73,17 @@ def test_negated_membership_rejected_in_policy():
     assert "anti-join" in e.message and "opaque" in e.fix
 
 
-def test_nullable_membership_column_rejected():
+def test_a_nullable_membership_value_is_accepted_and_hides_the_row():
+    """A NULL value makes the membership UNKNOWN, which a policy denies: the row with no tenant is
+    nobody's, and every property of the example still proves (tenant isolation over a nullable
+    column included).  `specs.nullable_member_spec` ties it to Postgres."""
+    from mls.props.runner import run_all
+
     d = base()
     d["tables"]["docs"]["columns"]["tenant_id"]["nullable"] = True
-    errs = errors(d)
-    assert has(errs, "$.rules[0].using.and[0].member.value", "must be NOT NULL")
+    assert errors(d) == []
+    res = run_all(check_spec(Spec.model_validate(d)))
+    assert res and all(r.verdict == "PROVED" for r in res), [(r.id, r.verdict) for r in res]
 
 
 def test_type_mismatch_and_ordering_on_uuid():

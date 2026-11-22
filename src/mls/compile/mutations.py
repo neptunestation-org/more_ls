@@ -27,4 +27,5 @@ class Mutation(str, Enum):
     HOP_VISIBILITY_DROPPED = "hop_visibility_dropped"  # omit a composed relation's hop visibility policies
     RELATION_CONDITION_DROPPED = "relation_condition_dropped"  # a relation's subquery without its condition
     LOOKUP_KEY_DROPPED = "lookup_key_dropped"  # a lookup helper that returns the values of every key
+    MEMBER_NULL_PASSES = "member_null_passes"  # a membership that holds when its value is NULL
     IDENT_UNQUOTED = "ident_unquoted"                # a predicate's column unquoted, so a mixed-case name folds

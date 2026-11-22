@@ -46,3 +46,10 @@ What a Python change left untranscribed.  Remove an entry when the transcription
 What each step states rather than proves (sets rather than bags outside `Cardinality.lean`,
 self-referencing FKs, the `SECURITY DEFINER` helper seeing every row, `FOR UPDATE` serializing
 writers) is in `docs/design/archive/ROADMAP.md`, "Parallel track — Lean 4".
+- **Hops up a foreign key (#43).**  `Pred.memberVia` is the exact chain; the encoder's upward hop
+  (an uninterpreted `up.<chain>` with the one-way row axioms `obligations.up_row_axioms`, D69) is
+  not transcribed, nor is `chain_fact`'s split between lookups and `up` symbols.  Its soundness
+  argument is the base relation's: the proofs hold for every relation the axioms allow, and the
+  real chain satisfies them.
+- **Lookup helpers (#34) and nullable membership values (#42)** need no transcription: the helper
+  is a compilation of the same atom, and `liftCmp` already makes a NULL value UNKNOWN.

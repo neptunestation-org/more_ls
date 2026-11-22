@@ -14,8 +14,8 @@ from mls.compile.column import privileges
 from mls.logic.term import (
     FALSE, TRUE, Sort, Term, Var, and_, eq, forall, fun, iff, implies, int_var, le, not_, or_,
 )
-from mls.logic.tvl import Encoder, col_null_var, col_value_var, ctx_var, hop_exists_fun, hop_key_fun, rel_fun
-from mls.spec.chain import condition, hop_prefix, levels
+from mls.logic.tvl import Encoder, col_null_var, col_value_var, ctx_var, hop_exists_fun, hop_key_fun, rel_fun, up_fun
+from mls.spec.chain import base_name, condition, hop_prefix, levels, up_name
 from mls.spec.recursion import is_routed
 from mls.props.effective import (
     effective, inclusion_pred, members_in, relations_of, row_constraints, transition_constraints,
@@ -57,8 +57,8 @@ class Obligation:
 
     def finish(self) -> "Obligation":
         for e in self.encoders:
-            self.assumptions = (self.assumptions + e.side_conditions + hop_row_axioms(e, self.rows)
-                                + relation_row_axioms(e, self.rows))
+            self.assumptions = (self.assumptions + e.side_conditions + up_row_axioms(e, self.rows)
+                                + hop_row_axioms(e, self.rows) + relation_row_axioms(e, self.rows))
         self.assumptions = self.assumptions + enum_row_axioms(self.encoders, self.rows)
         return self
 
@@ -121,6 +121,32 @@ def hop_row_axioms(enc: Encoder, rows: dict[str, str]) -> list[Term]:
                 v = col_value_var(row, value)
                 out.append(and_(hop_exists_fun(table, value)(v),
                                 eq(hop_key_fun(table, key, value)(v), col_value_var(row, key))))
+    return out
+
+
+def up_row_axioms(enc: Encoder, rows: dict[str, str]) -> list[Term]:
+    """#43: a stored row x of an upward hop's table puts its value in the chain for every key that
+    reaches its key: ∀k: prefix(k, x.key) → up(k, x.value).  One way only (a value of the chain
+    needs some row behind it, an existential the encoding leaves out), so the chain is an
+    over-approximation: sound, and a scenario may hold a pair no row produces.  `new` is excluded
+    as in `hop_row_axioms`.  The prefix may read further hops and chains, whose axioms are added in
+    turn (runs before `hop_row_axioms`, which reads what this adds)."""
+    out: list[Term] = []
+    done: set[tuple[str, int, str]] = set()
+    todo = True
+    while todo:
+        todo = False
+        for relation, i in sorted(enc.ups_used):
+            h = levels(enc.spec, relation)[i]
+            for row, rt in sorted(rows.items()):
+                if rt != h.table or row == "new" or (relation, i, row) in done:
+                    continue
+                done.add((relation, i, row))
+                todo = True
+                k = int_var(f"up.k#{len(done)}")
+                before = enc.chain_fact(hop_prefix(enc.spec, relation, i), k, col_value_var(row, h.key))
+                tag = enc.rel_tags.get(base_name(enc.spec, relation))
+                out.append(forall([k], implies(before, up_fun(up_name(enc.spec, relation, i), tag)(k, col_value_var(row, h.value)))))
     return out
 
 
@@ -309,10 +335,17 @@ def monotone_in(spec: Spec, p: MonotoneIn) -> list[Obligation]:
                 e_small = Encoder(spec, {p.relation: "small"}, consts=consts)
                 row = _image(cmd, "old" if which == "using" else "new")
                 goal = implies(_T(e_small, pred, row, table), _T(e_big, pred, row, table))
+                # #43: a chain up a foreign key from this relation is its own symbol per copy; the
+                # real chains grow with the base relation (the hop tables are the same in both)
+                ups = []
+                for rel_name, i in sorted(e_small.ups_used | e_big.ups_used):
+                    if base_name(spec, rel_name) == p.relation:
+                        name = up_name(spec, rel_name, i)
+                        ups.append(forall([u, t], implies(up_fun(name, "small")(u, t), up_fun(name, "big")(u, t))))
                 out.append(Obligation(
                     p.id, f"{cmd} {which} on {table} as {role}: admitted with fewer "
                           f"{p.relation} facts ⇒ admitted with more",
-                    [shrink, *relation_axioms(spec, e_big), *relation_axioms(spec, e_small)], goal, {row: table},
+                    [shrink, *ups, *relation_axioms(spec, e_big), *relation_axioms(spec, e_small)], goal, {row: table},
                     [(p.relation, "small"), (p.relation, "big")] + _relations_of(spec, pred),
                     [e_big, e_small]).finish())
     return out

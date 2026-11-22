@@ -8,8 +8,9 @@ instead calls a SECURITY DEFINER helper owned by `mls_internal` (`compile/lookup
 the tables without the caller's policies, so its lookup is no step of the expansion.
 
 `routed(spec)` is the set of (policy table, relation) whose lookups go through a helper: those
-whose relation reads the policy's own table, then, in rule order, each lookup that still closes a
-cycle once the earlier ones are routed, until none does.  Per role the graph differs (the
+whose relation reads the policy's own table, then, in order of policy table and relation name,
+each lookup that still closes a cycle once the earlier ones are routed, until none does (an order
+of the names, not of the rules, so that listing the same policies differently changes nothing).  Per role the graph differs (the
 subqueries run as the caller), but a helper means the same for every role, so a lookup routed for
 one role is routed for all.
 """
@@ -102,7 +103,9 @@ def routed(spec: Spec) -> frozenset[tuple[str, str]]:
     hit = _cache.get(id(spec))
     if hit is not None and hit[0] is spec:
         return hit[1]
-    all_uses = uses(spec)
+    # by table and relation, not rule order: the same policies listed in another order (an import
+    # lists them by table) route the same lookups
+    all_uses = sorted(uses(spec), key=lambda u: (u.table, u.relation, u.role, u.reads_rows))
     out = {(u.table, u.relation) for u in all_uses if u.table in u.tables}
     changed = True
     while changed:

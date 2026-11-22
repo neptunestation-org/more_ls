@@ -22,7 +22,7 @@ from typing import Iterator
 from mls.logic.term import (
     FALSE, TRUE, FunDecl, Sort, Term, Var, and_, bool_var, eq, fun, int_var, le, lt, not_, or_, IntVal,
 )
-from mls.spec.chain import base_name, levels
+from mls.spec.chain import base_name, hop_prefix, is_up, levels, up_name
 from mls.spec.model import (
     CONTEXT_NOW, And, ColRef, Const, CtxRef, Cmp, InGroup, IsNull, Lit, Member, NewRef, Not,
     NowBetween, OldRef, OpaqueRef, Or, Pred, Spec,
@@ -72,6 +72,12 @@ def hop_key_fun(table: str, key: str, value: str) -> FunDecl:
     return fun(f"hop.{table}.{value}.{key}", Sort.INT, ret=Sort.INT)
 
 
+def up_fun(name: str, tag: str | None = None) -> FunDecl:
+    """up.<chain>(k, v): (k, v) is in the chain cut after an upward hop (#43), an uninterpreted
+    relation tied to the stored rows of that hop's table by `obligations.up_row_axioms`."""
+    return fun(f"up.{name}" + (f"@{tag}" if tag else ""), Sort.INT, Sort.INT)
+
+
 def parent_fun(hierarchy: str, tag: str | None = None) -> FunDecl:
     """parent(x): the parent node of x (meaningful where has_parent(x))."""
     return fun(f"hier.{hierarchy}" + (f"@{tag}" if tag else "") + ".parent", Sort.INT, ret=Sort.INT)
@@ -95,6 +101,7 @@ class Encoder:
     opaque_axioms: set[Term] = field(default_factory=set)  # `not (T and F)` per block use: no dependency
     hops_used: set[tuple[str, str, str]] = field(default_factory=set)  # (table, key, value) read by a chain
     rels_used: set[str] = field(default_factory=set)  # base relations whose symbol was emitted
+    ups_used: set[tuple[str, int]] = field(default_factory=set)  # (relation, upward hop) read (#43)
 
     # ------------------------------------------------------------------ symbols
     def rel(self, name: str) -> FunDecl:
@@ -181,13 +188,7 @@ class Encoder:
             kv, kn = self.term(m.key, row, table)
             vv, vn = self.term(m.value, row, table)
             ok = not_(or_(kn, vn))
-            node: Term = vv
-            guards: list[Term] = []
-            for h in reversed(lv[1:]):  # D56: from the value back to the base relation's value
-                self.hops_used.add((h.table, h.key, h.value))
-                guards.append(hop_exists_fun(h.table, h.value)(node))
-                node = hop_key_fun(h.table, h.key, h.value)(node)
-            fact = and_(*guards, self.rel(base_name(self.spec, m.relation))(kv, node))
+            fact = self.chain_fact(m.relation, kv, vv)
             return and_(ok, fact), and_(ok, not_(fact))
         if isinstance(p, InGroup):
             return self._in_group(p, row, table)
@@ -205,6 +206,24 @@ class Encoder:
         if isinstance(p, OpaqueRef):
             return self._opaque(p.opaque, row, table)
         raise TypeError(p)
+
+    def chain_fact(self, relation: str, kv: Term, vv: Term) -> Term:
+        """(kv, vv) ∈ relation, for non-NULL terms.  D56: from the value back to the base relation's
+        value, one lookup per hop; #43: an upward hop has no lookup back, so the chain up to the
+        last one is its own relation symbol (`up_fun`)."""
+        lv = levels(self.spec, relation)
+        node: Term = vv
+        guards: list[Term] = []
+        for i in range(len(lv) - 1, 0, -1):
+            h = lv[i]
+            if is_up(self.spec, h):
+                self.ups_used.add((relation, i))
+                base = base_name(self.spec, relation)
+                return and_(*guards, up_fun(up_name(self.spec, relation, i), self.rel_tags.get(base))(kv, node))
+            self.hops_used.add((h.table, h.key, h.value))
+            guards.append(hop_exists_fun(h.table, h.value)(node))
+            node = hop_key_fun(h.table, h.key, h.value)(node)
+        return and_(*guards, self.rel(base_name(self.spec, relation))(kv, node))
 
     def _in_group(self, p: InGroup, row: str, table: str) -> tuple[Term, Term]:
         """key ∈ members(ancestor_i(value)) for some i ≤ max_depth, where ancestor_0 = value and

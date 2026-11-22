@@ -1218,7 +1218,7 @@ relation (the checker would keep refusing until it is marked) and a helper for e
 (changes every compiled spec, and loses the planner's view of the subquery on the common path).
 
 (1) Which lookups: `spec/recursion.py:routed`, (policy table, relation) pairs: every lookup whose
-relation's levels include the policy's table, then, in rule order, the first lookup that still
+relation's levels include the policy's table, then, in order of (policy table, relation, role), the first lookup that still
 closes a cycle in D66's per-role graph with the routed ones removed, repeated until none does.
 A helper means the same for every role, so the choice is per (table, relation), not per role:
 another role's lookup of the same relation from the same table goes through it too, which is
@@ -1240,3 +1240,57 @@ helper's condition; `tests/templates/test_recursion.py` deploys D66's ten shapes
 checks every one runs, and that compiled with plain subqueries exactly the routed ones recurse;
 `test_lift.py` and `test_migrate.py` (into and out of the helpers) carry the fixture.  A
 `security invoker` mutation was tried and dropped: on this fixture it is equivalent (FINDINGS).
+
+## D68 — A membership's value column may be nullable in a policy (#42)
+
+The checker refused a nullable `member` or `in_group` value column in any policy, a restriction
+carried over from the prototype with no recorded reason; its fix text suggested a NULL guard
+that the check never accepted.  The encoding (`ok = ¬(key null ∨ value null)`), the oracle and the
+Lean `liftCmp` already read a NULL value as UNKNOWN, which a policy denies, and the compiled
+`v = any(array(...))` is NULL in Postgres, so the refusal guarded nothing: it is dropped.  A row
+whose value is NULL is nobody's (the collect takeover's audit events without an organization;
+aural-oss's sessions before `participantId` became NOT NULL).  Fixture
+`specs.nullable_member_spec` (the example with `docs.tenant_id` nullable; every property still
+proves), mutation `MEMBER_NULL_PASSES` (`v is null or ...`); the lift round trip carries it.
+Hop columns of a composed relation stay NOT NULL (D56): a NULL hop column breaks the lookup
+function the encoding uses.
+
+## D69 — A composed relation may go up a foreign key (#43)
+
+A hop's `value` had to be a key of its table (D56), which fits a step down a tree (team → its
+projects) and refuses a step up one (project → its organization), where the `key` is the table's
+key and the value is not.  Such a hop is accepted.  Chosen by the user over an exact encoding
+(`∃ row: prefix(k, row.key) ∧ row.value = v`, which under negation becomes a ∀ over a function of
+the same sort and leaves the decidable fragment, invariant 6) and over keeping the refusal.
+(1) Encoding (`tvl.Encoder.chain_fact`): walking back from the value, a downward hop stays the
+`hop.T.v`/`hop.T.v.k` lookup; at the last upward hop the chain so far is an uninterpreted
+`up.<chain>` (named after the definition, so two relations with the same chain share it;
+tagged like its base relation in state copies).  (2) Axioms (`obligations.up_row_axioms`): each
+stored row of an upward hop's table that the obligation reads (not `new`) adds
+`∀k: prefix(k, x.key) → up(k, x.value)`, the prefix encoded the same way (its own hops and chains
+add their axioms in turn).  One direction only: the chain over-approximates the relation, sound,
+EPR, and a scenario may show a pair no row produces.  Upward hops never enter `hops_used`: their
+lookup axiom (`hop.T.v.k(row.v) = row.k`) would assert one key per value, which two projects of
+one organization contradict, and every proof would hold vacuously.  (3) Compile, the visibility
+policies, routing and the oracle are unchanged (the nested subquery and the oracle's join do not
+care about the direction).  `monotone_in` encodes the base relation twice; the `up` symbol is
+tagged per copy and the copies' order is stated for it too (`∀k,v: up@small → up@big`): no row
+of the hop table is read there, so without it the two chains were unrelated and the collect
+takeover's "removing project memberships never grants" was refuted.  (4) The harness draws an upward hop's previous value from the hop's
+keys (a foreign key's direction), and does not draw the policy column from the chain's last values
+after an upward hop (it is the parent the chain already points at); otherwise the table order is
+cyclic.  (5) The lifter accepts a nested subquery whose key is a key.  (6) Fixture
+`specs.up_spec` (team_tasks with task assignees reading the projects of their tasks, one hop up,
+and every project of those projects' teams, two hops up through a lookup helper), mutation
+`HOP_VISIBILITY_DROPPED`; `tests/spec/test_composed.py` shows the row axiom is what proves "a
+project member reads the project" when the policy reads the chain (REFUTED without it).
+(7) An `up` symbol is named after the chain's definition, the base relation's table, key, value
+and condition included, never a relation name: the diff ties base relations across versions by
+definition (D65), and an imported spec names the base relation after its table where the source
+named it after its meaning, which the lift round trip of `up_spec` caught.  (8) Lean:
+`Pred.memberVia` is exact; the over-approximation is not transcribed (`lean/CLAUDE.md`).
+
+Found on the way, in D67: the routed lookups depended on the order of the rules (the first lookup in
+rule order that closes a cycle), so an import, which lists policies by table, compiled the same
+policies through different helpers and named a hop visibility policy after another chain.  The
+order is now (policy table, relation, role).

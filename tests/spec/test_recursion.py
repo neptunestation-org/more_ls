@@ -35,3 +35,16 @@ def test_a_lookup_on_its_own_table_is_routed_for_every_command():
     spec = _spec(["R1 policy p on a: authenticated select permissive using rel_a(@uid, b_id)",
                   "R2 policy q on a: authenticated delete permissive using rel_a(@uid, b_id)"])
     assert routed(spec) == {("a", "rel_a")}
+
+
+def test_the_routing_does_not_depend_on_the_order_of_the_rules():
+    """The import lists policies by table: the same policies in another order route the same
+    lookups, so a deployed spec reads back to the same helpers."""
+    from tests.templates import specs
+
+    spec = specs.up_spec()
+    d = spec.model_dump(mode="json", by_alias=True, exclude_none=True)
+    d["rules"] = d["rules"][::-1]
+    from mls.spec.model import Spec
+
+    assert routed(check_spec(Spec.model_validate(d))) == routed(spec)

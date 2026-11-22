@@ -40,8 +40,10 @@ triggers, grants).  You never write SQL.
   its key: relation floor_in_state = floors(status, id) read as floor_in_state('open', floor_id)
 - relation C = R . t1(k1, v1) . t2(k2, v2)   composed: (u, x) when (u, y) is a pair of the base
   relation R, a t1 row has k1 = y and v1 = x (and so on through each hop); 1 to 3 hops; each hop's
-  key and value are different NOT NULL columns, the key has the type of the previous value, the
-  value is the primary key or a unique column of the hop table (a lookup, not a join).  E.g. the
+  key and value are different NOT NULL columns, the key has the type of the previous value, and the
+  value or the key is the primary key or a unique column of the hop table (a lookup, not a join):
+  down to the rows a value names, or up a foreign key to the row it refers to, e.g. from a floor to
+  its building, floors(id, building_id).  E.g. the
   rooms of the floors of the buildings a user works in: relation in_room = staff_of . floors(building_id, id) . rooms(floor_id, id)
 - A composed relation is used as C(@c, v) in policies, goals, must_allow and tenant_isolation only:
   not in inclusion rules, invariants, hierarchies or monotone_in.

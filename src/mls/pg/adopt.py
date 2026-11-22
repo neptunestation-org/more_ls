@@ -359,6 +359,26 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
     relations: dict[str, dict] = {}
     rel_by_pair: dict[tuple[str, str, str, str | None], str] = {}
     rel_names: dict[tuple[str, str, str | None], str] = {}  # (table, key, condition) -> the policy's name
+    # D67: a lookup helper's name is its relation's, exactly; read first, so that a hop visibility
+    # policy named after a longer chain (the shorter one reads through the helper) cannot claim it
+    for name, t in tables.items():
+        if name not in governed:
+            continue
+        for p in t["policies"]:
+            for text in (p["using"], p["check"]):
+                for rel, start, end, sub in lookup_calls(text or "", cat["lookups"]):
+                    col = re.search(r'("[^"]+"|[a-z_][a-z0-9_]*) = ANY \($', text[:start])
+                    if col is None:
+                        continue
+                    hops = sub.count("= any (array(")
+                    last = re.match(r'ARRAY\(select "[^"]+" from "([^"]+)"', sub)
+                    base = _hop_base(env, name, f"({col.group(1)} = ANY ({sub}))")
+                    if hops == 0 and base is not None:
+                        rel_names.setdefault((base[0], base[1], base[3]), rel)
+                    elif last is not None:
+                        env.composed_names.setdefault((last.group(1), hops), rel)
+                        if base is not None:
+                            env.composed_names.setdefault((last.group(1), hops, base), rel)
     for name, t in tables.items():
         if name not in governed:
             continue
@@ -381,20 +401,6 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                     if r.kind == "lifted" and "cmp" in pr and pr["cmp"][1] == "=" and "col" in pr["cmp"][0]:
                         rel_names.setdefault((name, pr["cmp"][0]["col"], _cond_key(cond)), m.group(1))
                     break
-            for text in (p["using"], p["check"]):  # D67: a lookup helper's name is its relation's
-                for rel, start, end, sub in lookup_calls(text or "", cat["lookups"]):
-                    col = re.search(r'("[^"]+"|[a-z_][a-z0-9_]*) = ANY \($', text[:start])
-                    if col is None:
-                        continue
-                    hops = sub.count("= any (array(")
-                    last = re.match(r'ARRAY\(select "[^"]+" from "([^"]+)"', sub)
-                    base = _hop_base(env, name, f"({col.group(1)} = ANY ({sub}))")
-                    if hops == 0 and base is not None:
-                        rel_names.setdefault((base[0], base[1], base[3]), rel)
-                    elif last is not None:
-                        env.composed_names.setdefault((last.group(1), hops), rel)
-                        if base is not None:
-                            env.composed_names.setdefault((last.group(1), hops, base), rel)
 
     def propose(table: str, key: str, value: str, why: str, where: dict | None = None) -> str | None:
         if table not in governed:
@@ -430,13 +436,20 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
         for con in t["constraints"]:
             if con["type"] != "f":
                 continue
-            shape_ok = (len(con["colnames"]) == 2 and con["reftable"] in spec_tables
-                        and con["refcolnames"] in key_sets(con["reftable"]) and con["match"] == "s"
-                        and con["upd"] == "r" and con["del"] == "r"
-                        and set(con["colnames"]) <= modelled[name])
-            if not shape_ok:
-                notes.append(f"foreign key {con['name']} on {name} is not an inclusion (two columns onto a key pair, "
-                             f"MATCH SIMPLE, ON UPDATE/DELETE RESTRICT): listed as foreign, not imported")
+            actions = {"a": "NO ACTION", "r": "RESTRICT", "c": "CASCADE", "n": "SET NULL", "d": "SET DEFAULT"}
+            unmet = [why for bad, why in (
+                (len(con["colnames"]) != 2, f"{len(con['colnames'])} column(s), not a pair"),
+                (con["reftable"] not in spec_tables, f"it refers to {con['reftable']}, outside the spec"),
+                (con["reftable"] in spec_tables and con["refcolnames"] not in key_sets(con["reftable"]),
+                 "the referenced columns are not a key"),
+                (con["match"] != "s", "not MATCH SIMPLE"),
+                (con["upd"] != "r", f"ON UPDATE {actions.get(con['upd'], con['upd'])}"),
+                (con["del"] != "r", f"ON DELETE {actions.get(con['del'], con['del'])}"),
+                (not set(con["colnames"]) <= modelled[name], "a column of it is not modelled")) if bad]
+            if unmet:
+                notes.append(f"foreign key {con['name']} on {name} is not an inclusion ({', '.join(unmet)}; an "
+                             f"inclusion is two columns onto a key pair, MATCH SIMPLE, ON UPDATE/DELETE RESTRICT): "
+                             f"listed as foreign, not imported")
                 continue
             rel = propose(con["reftable"], con["refcolnames"][0], con["refcolnames"][1], f"foreign key {con['name']}")
             if rel is None:

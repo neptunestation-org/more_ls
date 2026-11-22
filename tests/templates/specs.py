@@ -39,6 +39,51 @@ def in_spec() -> Spec:
     return make(d)
 
 
+def up_spec() -> Spec:
+    """#43: team_tasks with task assignees, whose chains go up foreign keys: an assignee reads the
+    projects of their tasks (`assigned . tasks(id, project_id)`, one hop up, R6) and every project
+    of those projects' teams (`. projects(id, team_id)`, two hops up; its chain reads `projects`, so
+    R7 goes through a lookup helper).  Projects are readable only through those and the team
+    policies' hop visibility; R5 is the composed fixture's update policy (filtered updates).  The
+    mutation drops the hop visibility policies: the team chains read no project as the member."""
+    d = composed_spec().model_dump(mode="json", by_alias=True, exclude_none=True)
+    d["tables"]["task_assignees"] = {"columns": {"user_id": {"type": "uuid", "nullable": False},
+                                                 "task_id": {"type": "bigint", "nullable": False}},
+                                     "primary_key": ["user_id", "task_id"]}
+    d["relations"]["assigned"] = {"table": "task_assignees", "key": "user_id", "value": "task_id"}
+    d["relations"]["assigned_project"] = {"of": "assigned", "through": [{"table": "tasks", "key": "id", "value": "project_id"}]}
+    d["relations"]["assigned_team"] = {"of": "assigned", "through": [{"table": "tasks", "key": "id", "value": "project_id"},
+                                                                     {"table": "projects", "key": "id", "value": "team_id"}]}
+    by_task = {"member": {"relation": "assigned_project", "key": {"ctx": "uid"}, "value": {"col": "id"}}}
+    by_team = {"member": {"relation": "assigned_team", "key": {"ctx": "uid"}, "value": {"col": "team_id"}}}
+    d["rules"] += [
+        {"id": "R6", "kind": "policy", "name": "assignee_reads_projects", "table": "projects",
+         "role": "authenticated", "command": "select", "mode": "permissive", "using": by_task},
+        {"id": "R7", "kind": "policy", "name": "assignee_reads_team_projects", "table": "projects",
+         "role": "authenticated", "command": "select", "mode": "permissive", "using": by_team},
+        {"id": "R8", "kind": "policy", "name": "own_assignments", "table": "task_assignees",
+         "role": "authenticated", "command": "select", "mode": "permissive",
+         "using": {"cmp": [{"col": "user_id"}, "=", {"ctx": "uid"}]}},
+    ]
+    d["properties"] += [
+        {"id": "P6", "template": "must_allow", "table": "projects", "role": "authenticated", "command": "select",
+         "when": by_task, "description": "an assignee reads the projects of their tasks"},
+        {"id": "P7", "template": "must_allow", "table": "projects", "role": "authenticated", "command": "select",
+         "when": by_team, "description": "an assignee reads every project of the teams of their tasks' projects"},
+    ]
+    return make(d)
+
+
+def nullable_member_spec() -> Spec:
+    """The example with `docs.tenant_id` nullable (#42): a document with no tenant is nobody's
+    (the membership is UNKNOWN, so the policies hide it from every member), and its writes are
+    refused.  The mutation compiles the membership as `tenant_id is null or ...`, which shows those
+    rows to everyone."""
+    d = base()
+    d["tables"]["docs"]["columns"]["tenant_id"]["nullable"] = True
+    return make(d)
+
+
 def check_nullable_spec() -> Spec:
     d = base()
     d["tables"]["docs"]["columns"]["flag"] = {"type": "int", "nullable": True}

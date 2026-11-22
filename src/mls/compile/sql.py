@@ -101,7 +101,10 @@ class SqlCompiler:
                 inner += f" and {self.pred(cond, lv[0].table)}"
             for h in lv[1:]:  # D56: one uncorrelated InitPlan per level
                 inner = f"select {q(h.value)} from {q(h.table)} where {q(h.key)} = any (array({inner}))"
-            return f"({self.term(m.value, table)} = any (array({inner})))"
+            out = f"({self.term(m.value, table)} = any (array({inner})))"
+            if Mutation.MEMBER_NULL_PASSES in self.mutations:
+                out = f"({self.term(m.value, table)} is null or {out})"
+            return out
         if isinstance(p, InGroup):
             from mls.compile.hierarchy import reach_fn_name
 

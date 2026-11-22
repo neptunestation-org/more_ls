@@ -44,6 +44,35 @@ def levels(spec: Spec, name: str) -> list[Level]:
     return out if cut is None else out[:cut + 1]
 
 
+def single_keys(spec: Spec, table: str) -> set[str]:
+    """The columns that are a key of `table` on their own (the primary key or a unique set)."""
+    t = spec.tables[table]
+    sets = ([t.primary_key] if t.primary_key else []) + list(t.unique or [])
+    return {s[0] for s in sets if len(s) == 1}
+
+
+def is_up(spec: Spec, lvl: Level) -> bool:
+    """#43: a hop up a foreign key: its key is unique and its value is not (a project's
+    organization), so a value may have many rows and the hop is no function from value to key."""
+    keys = single_keys(spec, lvl.table)
+    return lvl.value not in keys and lvl.key in keys
+
+
+def up_name(spec: Spec, name: str, i: int) -> str:
+    """The relation symbol of the chain `name` cut after its upward hop `i` (#43): named after its
+    definition, the base relation's table, key, value and condition and then the hops, never a
+    relation's name, so identical chains share it (in a spec, and across the two versions a diff
+    compares, where an import and the loop name the same relation differently)."""
+    import hashlib
+    import json
+
+    lv = levels(spec, name)
+    cond = condition(spec, name)
+    tag = "" if cond is None else "#" + hashlib.sha1(
+        json.dumps(cond.model_dump(mode="json", by_alias=True, exclude_none=True), sort_keys=True).encode()).hexdigest()[:10]
+    return ".".join(f"{h.table}.{h.key}.{h.value}" for h in lv[:i + 1]) + tag
+
+
 def base_name(spec: Spec, name: str) -> str:
     """The base relation a relation (or a prefix of one) starts from."""
     rname, _ = split(name)

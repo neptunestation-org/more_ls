@@ -138,7 +138,7 @@ def test_a_relation_the_checker_refuses_is_repaired(tmp_path, monkeypatch, capsy
     and goes back to the relations pass; restating the schema's relation is not an error,
     changing it is."""
     spec, bare, written = _bare(tmp_path)
-    wrong = "relation in_project = team_members . projects(id, team_id)"  # team_id is not a key of projects
+    wrong = "relation in_project = team_members . team_members(team_id, user_id)"  # neither column is a key of team_members
     changed = "relation team_members = team_members(team_id, user_id)"
     restated = "relation team_members = team_members(user_id, team_id)"
     answers = [f"relations {{\n  {wrong}\n}}",
@@ -158,7 +158,7 @@ def test_a_relation_the_checker_refuses_is_repaired(tmp_path, monkeypatch, capsy
 
 def test_relation_errors_left_after_the_budget_are_invalid(tmp_path, monkeypatch, capsys):
     spec, bare, written = _bare(tmp_path)
-    wrong = "relations {\n  relation in_project = team_members . projects(id, team_id)\n}"
+    wrong = "relations {\n  relation in_project = team_members . team_members(team_id, user_id)\n}"
     code, got, exchanges = _generate_on(tmp_path, monkeypatch, bare, [wrong] * 4)
     out = capsys.readouterr().out
     assert code == 1 and "status: invalid after 3 repair round(s)" in out and "$.relations.in_project" in out

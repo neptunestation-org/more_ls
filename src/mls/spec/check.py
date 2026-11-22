@@ -370,12 +370,6 @@ class Checker:
             if not isinstance(m.value, (ColRef, OldRef, NewRef)):
                 self.err(f"{path}.member.value", "the membership value must be a column",
                          "use {\"col\": name}")
-            elif isinstance(m.value, ColRef) and self.col_type(scope.table, m.value.col) is not None \
-                    and self.col_nullable(scope.table, m.value.col) and scope.is_policy:
-                self.err(f"{path}.member.value", f"membership value column '{m.value.col}' must be "
-                                                 f"NOT NULL in a policy (NULL makes the atom UNKNOWN "
-                                                 f"and the row invisible)",
-                         "declare the column NOT NULL, or guard with {\"is_null\": ...} in an or")
             ends = self.relation_ends(m.relation)
             if ends is None:
                 return
@@ -420,12 +414,6 @@ class Checker:
                                                  "constant", "use {\"ctx\": name}")
             if not isinstance(g.value, (ColRef, OldRef, NewRef)):
                 self.err(f"{path}.in_group.value", "the in_group value must be a column", "use {\"col\": name}")
-            elif isinstance(g.value, ColRef) and self.col_type(scope.table, g.value.col) is not None \
-                    and self.col_nullable(scope.table, g.value.col) and scope.is_policy:
-                self.err(f"{path}.in_group.value", f"in_group value column '{g.value.col}' must be "
-                                                   f"NOT NULL in a policy (NULL makes the atom UNKNOWN "
-                                                   f"and the row invisible)",
-                         "declare the column NOT NULL, or guard with {\"is_null\": ...} in an or")
             rel = self.spec.relations.get(h.members)
             if isinstance(rel, Relation) and rel.table in self.spec.tables:
                 rkt = self.col_type(rel.table, rel.key)
@@ -695,14 +683,15 @@ class Checker:
                 return
             if h.key == h.value:
                 self.err(hp, "key and value must be different columns")
-            if frozenset((h.value,)) not in self.key_sets(h.table):
-                self.err(f"{hp}.value", f"'{h.table}.{h.value}' is not the primary key or a unique column "
-                                        f"of '{h.table}', so a value may have several '{h.key}'s and the "
-                                        f"hop is a join, not a lookup (the proofs stay quantifier-free "
-                                        f"only through a key)",
-                         f"make '{h.value}' the primary key or unique, or model the step as a membership "
-                         f"table (a base relation), or copy the column onto the referencing table with an "
-                         f"inclusion rule")
+            if frozenset((h.value,)) not in self.key_sets(h.table) \
+                    and frozenset((h.key,)) not in self.key_sets(h.table):
+                self.err(f"{hp}.value", f"neither '{h.table}.{h.value}' nor '{h.table}.{h.key}' is the primary "
+                                        f"key or a unique column of '{h.table}', so the hop is a join, not a "
+                                        f"lookup (the proofs stay quantifier-free only through a key: down to "
+                                        f"the rows a value names, or up a foreign key to the row it refers to)",
+                         f"make '{h.value}' or '{h.key}' the primary key or unique, or model the step as a "
+                         f"membership table (a base relation), or copy the column onto the referencing "
+                         f"table with an inclusion rule")
             pt, kt = self.col_type(*prev), t.columns[h.key].type
             if pt is not None and not comparable(pt, kt):
                 self.err(f"{hp}.key", f"type of {h.table}.{h.key} ({kt}) does not match the previous "

@@ -39,8 +39,9 @@ condition over the same table, key and value, and the proofs assume so.
 Restrictions checked by the fragment checker: right-hand sides of comparisons are context or
 constants; membership keys are context or constants, not columns (no per-row correlated
 subqueries in policies), and a key read through an enum column is one of its labels;
-negated membership is rejected in policies (anti-join) unless inside an `opaque` block; membership
-value columns are NOT NULL.  `in_group` follows the membership rules (key is context, value is a
+negated membership is rejected in policies (anti-join) unless inside an `opaque` block.  A
+membership value column may be nullable: a NULL value makes the atom UNKNOWN, so the policy hides
+the row.  `in_group` follows the membership rules (key is context, value is a
 column of the hierarchy's id type, no negation in policies) and is not allowed in checks and
 transitions (it reads other tables).  NULL key or value makes it UNKNOWN; the walk-up stops at a
 missing parent row (the FK makes that impossible for stored data) or at a root.
@@ -112,15 +113,29 @@ A composed relation is a base relation followed through up to three hops:
 v) ∈ in_task` iff some `t` has `(k, t) ∈ member_of`, a stored `projects` row has `team_id = t`
 and `id = p`, and a stored `tasks` row has `project_id = p` and `id = v`.  Requirements, checked
 with the JSON path of the offending hop: the base is a declared base relation (not composed);
-each hop's `value` is its table's primary key or a NOT NULL unique column, its `key` and `value`
-NOT NULL, and its `key`'s type that of the previous level's value; at most three hops.  Because
-each hop's value is a key, the hop is a function from value to key and the ∃ disappears: the
+each hop's `value` or `key` is its table's primary key or a NOT NULL unique column, its `key` and
+`value` NOT NULL, and its `key`'s type that of the previous level's value; at most three hops.
+When a hop's value is a key (down to the rows a value names), the hop is a function from value to
+key and the ∃ disappears: the
 encoding is `hop.T.v(x)` (a row with `v = x` exists) and `hop.T.v.k(x)` (its key), so
 `(k, v) ∈ base . T(key, value)` is `hop.T.value(v) ∧ base(k, hop.T.value.key(v))`, unrolled
 per hop, quantifier-free with uninterpreted functions (invariant 6).  An obligation that also
 reads a stored row of a hop table (any image but `new`) adds `hop.T.v(row.v) ∧ hop.T.v.k(row.v)
 = row.k`.  NULL behaves as for any membership: a NULL key or value is UNKNOWN; the hop columns
 are NOT NULL.
+
+A hop whose key is a key and whose value is not goes up a foreign key (a project's organization):
+a value may come from many rows, so there is no function back and the ∃ would stay.  The chain
+up to the last such hop is instead its own uninterpreted relation `up.<chain>` (named after its
+definition, so identical chains share it), and every stored row `x` of that hop's table read by an
+obligation (any image but `new`) adds `∀k: prefix(k, x.key) → up(k, x.value)`, where `prefix` is
+the chain before the hop.  That is one direction of the definition: the encoding allows a pair in
+the chain that no row produces, so it over-approximates the relation.  Proofs stay sound (they hold
+for every relation the axioms allow, the real one among them) and in EPR (`k` is only ever an
+argument of a relation); a property that reaches the same access by another path than the rules
+may be refuted with such a pair in its scenario.  Where an obligation compares two copies of the
+base relation (`monotone_in`: fewer facts, more facts, the hop tables the same), the chain is a
+symbol per copy, ordered as the copies are: `∀k,v: up_small(k, v) → up_big(k, v)`.
 
 A composed relation is a policy atom (and may appear in goals, `must_allow` and `tenant_isolation`).
 It is refused, with the alternative, in an invariant (a write to a hop table changes it, which the
@@ -147,8 +162,8 @@ the rule is measured, FINDINGS).  The compiler compiles exactly those lookups to
 the subquery the policy would have had (the base relation's rows for the key where its condition is
 TRUE, then one level per hop), read through `mls_internal_<table>`:
 `v = any((select mls_lookup_R(<k>))::<type>[])`, an uncorrelated InitPlan.  Which lookups: those
-whose relation reads the policy's own table; then, in rule order, each lookup that still closes a
-cycle once the earlier ones go through a helper, until none does (a lookup through a helper is no
+whose relation reads the policy's own table; then, in order of policy table and relation name, each
+lookup that still closes a cycle once the earlier ones go through a helper, until none does (a lookup through a helper is no
 step of the expansion).  A helper means the same for every role, so the choice is per policy table
 and relation, not per role.
 

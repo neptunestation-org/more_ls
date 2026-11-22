@@ -337,7 +337,7 @@ def test_a_nested_membership_through_a_column_that_is_not_a_key_stays_opaque():
     env.keys["projects"] = [frozenset({"id", "team_id"})]
     r, sink = do(NESTED_ARRAY, env=env, table="tasks")
     assert r.kind == "opaque" and env.composed == {}
-    assert any("projects.id, which is not the primary key or a unique column of projects" in x for x in r.reasons), r.reasons
+    assert any("selects projects.id by projects.team_id, and neither is the primary key" in x for x in r.reasons), r.reasons
     env = composed_env()
     env.tables["projects"]["team_id"] = ("bigint", True)
     r, _ = do(NESTED_ARRAY, env=env, table="tasks")

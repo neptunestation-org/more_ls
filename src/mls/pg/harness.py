@@ -231,21 +231,29 @@ def user_columns(spec: Spec, adapter: Adapter) -> set[tuple[str, str]]:
 
 def chained_columns(spec: Spec) -> dict[str, dict[str, tuple[str, str]]]:
     """D56: table -> column -> (table, column) whose values it should mostly take: each hop's key
-    takes the previous level's values, and the value column of a membership on a composed relation
-    in a policy takes the last level's values."""
+    takes the previous level's values (a hop up a foreign key the other way round, #43), and the
+    value column of a membership on a composed relation (or on a base relation with a nullable key,
+    #49) in a policy takes the last level's values."""
     from mls.props.effective import members_in
     from mls.spec.model import ColRef
+
+    from mls.spec.chain import is_up
 
     out: dict[str, dict[str, tuple[str, str]]] = {}
     for name in spec.relations:
         lv = levels(spec, name)
         for prev, h in zip(lv, lv[1:]):
-            out.setdefault(h.table, {})[h.key] = (prev.table, prev.value)
+            if is_up(spec, h):  # #43: the previous value refers to the hop's row, as a foreign key does
+                out.setdefault(prev.table, {})[prev.value] = (h.table, h.key)
+            else:
+                out.setdefault(h.table, {})[h.key] = (prev.table, prev.value)
     for pol in spec.policies():
         for e in (pol.using, pol.check):
             for m in members_in(e, []):
                 lv = levels(spec, m.relation)
-                if len(lv) > 1 and isinstance(m.value, ColRef) and pol.table != lv[-1].table:
+                # (after a hop up a foreign key the chain's values already refer to this column)
+                if len(lv) > 1 and isinstance(m.value, ColRef) and pol.table != lv[-1].table \
+                        and not is_up(spec, lv[-1]):
                     out.setdefault(pol.table, {})[m.value.col] = (lv[-1].table, lv[-1].value)
     return out
 

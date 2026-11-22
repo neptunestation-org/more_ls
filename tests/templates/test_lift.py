@@ -38,6 +38,8 @@ ROUND_TRIP = {
     "condition": specs.condition_spec,  # D61: the condition comes back from the subquery and the policy name
     "mixed_case": specs.mixed_case_spec,  # D58: quoted mixed-case tables, columns and role read back as such
     "lookup": specs.lookup_spec,  # D67: a helper call reads back as the membership its body holds
+    "nullable_member": specs.nullable_member_spec,  # #42: a membership over a nullable column lifts
+    "up": specs.up_spec,  # #43: chains up foreign keys read back as composed relations
 }
 
 

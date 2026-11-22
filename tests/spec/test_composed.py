@@ -34,7 +34,7 @@ def test_a_hop_through_a_column_that_is_not_a_key_is_refused_with_the_ways_out()
     d["tables"]["projects"]["primary_key"] = ["id", "team_id"]
     errs = errors(d)
     e = next(e for e in errs if e.path == "$.relations.in_project.through[0].value")
-    assert "is not the primary key or a unique column of 'projects'" in e.message
+    assert "neither 'projects.id' nor 'projects.team_id' is the primary key or a unique column of 'projects'" in e.message
     assert "membership table" in e.fix and "inclusion rule" in e.fix
     d["tables"]["projects"]["unique"] = [["id"]]
     assert not any(e.path.startswith("$.relations.in_project") for e in errors(d))
@@ -138,3 +138,78 @@ def test_the_compiled_shape():
     assert 'create index "mls_ix_projects_team_id_id" on "projects" ("team_id", "id")' in sql
     mutated = compile_spec(spec, {Mutation.HOP_VISIBILITY_DROPPED}).sql()
     assert "_h1_" not in mutated and "_h2_" not in mutated and "mls_rel_member_of_authenticated_1" in mutated
+
+
+UP = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated
+
+table organizations owned {
+  id bigint not null;
+  primary_key (id)
+}
+
+table projects owned {
+  id bigint not null,
+  organization_id bigint not null;
+  primary_key (id)
+}
+
+table project_members owned {
+  user_id uuid not null,
+  project_id bigint not null;
+  primary_key (user_id, project_id)
+}
+
+relation member_of = project_members(user_id, project_id)
+relation org_of = member_of . projects(id, organization_id)
+
+rules {
+  R1 policy own_memberships on project_members: authenticated select permissive using user_id = @uid
+  R2 policy org_reads_projects on projects: authenticated select permissive using org_of(@uid, organization_id)
+%s}
+
+properties {
+  P1 must_allow projects authenticated select: member_of(@uid, id) description 'a project member reads the project'
+%s}
+"""
+
+
+def test_a_hop_up_a_foreign_key_is_accepted_and_tied_to_the_rows():
+    """#43: `projects(id, organization_id)` has a unique key and a non-unique value, so the chain
+    is its own relation symbol; the row axiom puts a stored project's organization in it for every
+    member of the project, which P1 needs (R2 reads the chain through `projects` itself, so it goes
+    through a lookup helper and no visibility policy admits the members' rows)."""
+    from mls.props import obligations
+    from mls.spec.syntax import parse
+
+    spec = check_spec(parse(UP % ("", "")))
+    assert {r.id: r.verdict for r in run_all(spec)} == {"P1": "PROVED"}
+    real = obligations.up_row_axioms
+    try:
+        obligations.up_row_axioms = lambda enc, rows: []
+        assert {r.id: r.verdict for r in run_all(spec)} == {"P1": "REFUTED"}
+    finally:
+        obligations.up_row_axioms = real
+
+
+def test_a_hop_up_a_foreign_key_proves_isolation_and_reach_of_the_parent():
+    from mls.spec.syntax import parse
+
+    spec = check_spec(parse(UP % (
+        "  R3 policy member_reads_org on organizations: authenticated select permissive using org_of(@uid, id)\n",
+        "  P2 tenant_isolation organizations: id in org_of(@uid) for select description 'a user only reads the organizations of their projects'\n"
+        "  P3 must_allow organizations authenticated select: org_of(@uid, id) description 'a project member reads its organization'\n")))
+    assert {r.id: r.verdict for r in run_all(spec)} == dict.fromkeys(["P1", "P2", "P3"], "PROVED")
+
+
+def test_a_chain_up_a_foreign_key_grows_with_its_base_relation():
+    """`monotone_in` compares two copies of the base relation; the upward chain is its own symbol in
+    each, and the obligation reads no `projects` row that would tie them, so the chains need the
+    copies' order stated (the collect takeover's "removing project memberships never grants")."""
+    from mls.spec.syntax import parse
+
+    spec = check_spec(parse(UP % (
+        "  R3 policy member_reads_org on organizations: authenticated select permissive using org_of(@uid, id)\n",
+        "  P2 monotone_in: member_of description 'removing project memberships never grants access'\n")))
+    assert {r.id: r.verdict for r in run_all(spec)} == {"P1": "PROVED", "P2": "PROVED"}
