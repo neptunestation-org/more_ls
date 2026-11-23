@@ -810,7 +810,9 @@ A selector rule (§11) is printed once, *applies to every governed table that ha
 tenant_id: docs, files*, with its expansion as an indented list of concrete rules.  A composed
 relation (§6) gets a sentence of its own under *Relations read through other tables*: *a user's
 in_task are the id of every tasks row whose project_id is the id of a projects row whose team_id
-is among that user's member_of*.  A context value reads as *the current user* when the adapter
+is among that user's member_of*.  A relation the spec never looks up by the current user (only
+by a constant or a column) reads by its key instead: *products (status → id): for each status,
+product_in_state are the id of every products row with that status*.  A context value reads as *the current user* when the adapter
 names it as the user (`auth.uid`, `current_user`, or on `session_setting` the one context value
 the policies use as a membership key), and as *the user's <name>* otherwise.
 

@@ -280,6 +280,37 @@ def selector_line(spec: Spec, rule_id: str) -> str:
             f"{', '.join(r.table for r in exp)}")
 
 
+def user_keyed(spec: Spec, name: str) -> bool:
+    """#55: whether the spec looks the relation up by the current user anywhere (directly, or as
+    the base of a composed relation that is).  A relation looked up only by a constant or a column
+    (the products in one status, the shop of a rider) is not about users, and its sentence must
+    not say it is."""
+    from mls.identity.base import get_adapter
+
+    user = {"ctx": get_adapter(spec).user_context_name()}
+    found = False
+
+    def walk(x):
+        nonlocal found
+        if isinstance(x, dict):
+            if x.get("relation") == name and x.get("key") == user:
+                found = True
+            for v in x.values():
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+
+    walk(spec.model_dump(by_alias=True, exclude_none=True, include={"rules", "properties"}))
+    return found or any(isinstance(r, ComposedRelation) and r.of == name and user_keyed(spec, n)
+                        for n, r in spec.relations.items() if n != name)
+
+
+def _base_key(spec: Spec, name: str) -> str:
+    r = spec.relations[name]
+    return _base_key(spec, r.of) if isinstance(r, ComposedRelation) else r.key
+
+
 def composed_line(spec: Spec, name: str) -> str:
     """A composed relation (D56), from the value back to the base relation."""
     r = spec.relations[name]
@@ -288,7 +319,10 @@ def composed_line(spec: Spec, name: str) -> str:
     phrase = f"the {hops[0].value} of every {hops[0].table} row"
     for prev, h in zip(hops, hops[1:]):
         phrase += f" whose {prev.key} is the {h.value} of a {h.table} row"
-    return f"{steps}: a user's {name} are {phrase} whose {hops[-1].key} is among that user's {r.of}."
+    if user_keyed(spec, name):
+        return f"{steps}: a user's {name} are {phrase} whose {hops[-1].key} is among that user's {r.of}."
+    k = _base_key(spec, name)
+    return f"{steps}: for each {k}, {name} are {phrase} whose {hops[-1].key} is among the {r.of} for that {k}."
 
 
 def relation_line(spec: Spec, name: str) -> str:
@@ -297,8 +331,11 @@ def relation_line(spec: Spec, name: str) -> str:
     if isinstance(r, ComposedRelation):
         return composed_line(spec, name)
     cond = "" if r.where is None else f", where {pred(spec, r.where, f'the {r.table} row')}"
-    return (f"{r.table} ({r.key} → {r.value}): a user's {name} are the {r.value} of every {r.table} row "
-            f"whose {r.key} is that user{cond}.")
+    if user_keyed(spec, name):
+        return (f"{r.table} ({r.key} → {r.value}): a user's {name} are the {r.value} of every {r.table} row "
+                f"whose {r.key} is that user{cond}.")
+    return (f"{r.table} ({r.key} → {r.value}): for each {r.key}, {name} are the {r.value} of every "
+            f"{r.table} row with that {r.key}{cond}.")
 
 
 def spec_summary(spec: Spec) -> str:

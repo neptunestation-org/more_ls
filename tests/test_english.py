@@ -68,3 +68,16 @@ def test_composed_relations_english():
     assert ("in_task**: member_of, then projects (team_id → id), then tasks (project_id → id): a user's in_task "
             "are the id of every tasks row whose project_id is the id of a projects row whose team_id is among "
             "that user's member_of." in text)
+
+
+def test_a_relation_not_looked_up_by_the_user_does_not_say_it_is():
+    """#55: a relation looked up only by a constant (the storefront's done tasks) or a column reads
+    by its key; one the spec looks up by the current user, directly or through a composed relation,
+    still reads as the user's."""
+    from tests.templates import specs
+
+    spec = specs.storefront_spec()
+    assert english.relation_line(spec, "done_task") == (
+        "tasks (done → id): for each done, done_task are the id of every tasks row with that done.")
+    assert english.relation_line(spec, "member_of").startswith("team_members (user_id → team_id): a user's member_of")
+    assert english.relation_line(spec, "in_project").endswith("whose team_id is among that user's member_of.")
