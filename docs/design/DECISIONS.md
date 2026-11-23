@@ -511,6 +511,14 @@ only when the pair is a key of a governed table. `NOT IN (c1, ...)` deparses as 
 as the negated `in`. The generated index set is made order-independent (a key that is a prefix
 of another wanted key is dropped) so that an imported spec, whose rules are in catalog order,
 compiles to the indexes of the source.
+*Notes that say why (2026-11-22, #45):* on collect, a CHECK calling `position` or `char_length` was
+reported as a user function never inlined, `TRIM(BOTH FROM name)` failed to parse, and a key of two
+uuid columns referring to `devices` and `projects` was said to "refer to the user table" (the
+fallback by type matched both).  The tokenizer's parser reads the SQL-standard special forms
+(`TRIM`, `POSITION`, `SUBSTRING`, `EXTRACT`, `OVERLAY`) as calls, the import reads pg_catalog's
+function names (`Env.builtins`) so a call of one is named a built-in, and the membership note says
+which test failed and what each column refers to.  The CHECKs stay listed, not imported: the
+fragment has no functions.
 
 **D47. `session_setting` identity adapter (amends D1).** `current_setting('app.<name>', true)`
 as a context source, typed by the spec, wrapped `(select … ::t)` for InitPlan evaluation, NULL

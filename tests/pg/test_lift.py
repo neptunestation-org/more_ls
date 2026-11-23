@@ -223,6 +223,27 @@ def test_user_function_is_never_inlined():
     assert r.kind == "opaque" and r.pred == {"opaque": "op1"} and sink.blocks["op1"]["sql"].startswith("is_member")
 
 
+def test_a_builtin_function_is_named_as_one_and_special_forms_parse():
+    """#45: a call of a pg_catalog function says it is a built-in (the fragment calls no
+    functions), not a user function; the SQL-standard special forms the deparser prints
+    (`TRIM(BOTH FROM x)`, `POSITION(a IN b)`, `SUBSTRING(x FROM i FOR n)`, `EXTRACT(f FROM x)`)
+    parse as calls, so the CHECK is kept with that reason instead of a parse error."""
+    env = env_of(name=("text", True))
+    env.builtins = frozenset({"length", "btrim", "trim", "position", "char_length", "substring", "extract"})
+    for text, fn in [("((length(TRIM(BOTH FROM name)) >= 1) AND (level < 3))", "length"),
+                     ("(POSITION(('@'::text) IN (name)) > 1)", "position"),
+                     ("(SUBSTRING(name FROM 1 FOR 3) = 'abc'::text)", "substring"),
+                     ("(TRIM(LEADING 'x'::text FROM name) = 'a'::text)", "trim"),
+                     ("(EXTRACT(year FROM now()) > (2000)::numeric)", "extract")]:
+        r, _ = do(text, "check", env=env)
+        assert r.kind in ("partial", "opaque"), (text, r)
+        assert f"calls {fn}(), a Postgres built-in function" in r.reasons[0], (text, r.reasons)
+    r, _ = do("((level < 1) OR is_member(tenant_id, auth.uid()))", env=env)
+    assert "a function the lifter does not read" in r.reasons[0]
+    r, _ = do("(public.length(name) > 1)", "check", env=env)  # a schema's own function of that name
+    assert "a function the lifter does not read" in r.reasons[0]
+
+
 def test_negated_membership_stays_opaque():
     r, sink = do(f"(NOT {MEMBER})")
     assert r.kind == "partial" and r.pred == {"not": {"opaque": "op1"}}

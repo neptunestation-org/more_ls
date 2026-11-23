@@ -406,6 +406,26 @@ def test_discard_import_of_the_brownfield_fixture(brownfield):
     assert import_schema(brownfield).spec["tables"]["audit_log"]["mode"] == "observed"
 
 
+def test_import_notes_name_builtins_special_forms_and_the_user_column(brownfield):
+    """#45: a CHECK calling a built-in (through a special form too) is kept with that reason, and
+    a two-column key whose columns both have the user id's type but refer elsewhere says so."""
+    with brownfield.transaction(force_rollback=True):
+        brownfield.execute("""
+            create table devices (id uuid primary key);
+            create table boards (id uuid primary key, name text not null
+                check (length(trim(both from name)) >= 1 and position('@' in name) = 0));
+            create table device_boards (device_id uuid not null references devices,
+                board_id uuid not null references boards, primary key (device_id, board_id));""")
+        res = import_schema(brownfield, policies="discard")
+    notes = [n for n in res.notes if "boards" in n]
+    assert any("calls length(), a Postgres built-in function" in n for n in notes), notes
+    assert not any("expected" in n for n in notes), notes
+    assert any("table device_boards: the key (device_id, board_id) has a foreign key on each column "
+               "(device_id to devices, board_id to boards), but neither refers to the user table "
+               "(auth.users) and both have the user id's type (uuid), so either could be the user" in n
+               for n in notes), notes
+
+
 def test_enum_labels_are_the_catalogs(pg_dsn):
     """D59: drift's shadow creates its own copy of each enum type, so a deployed enum spec drifts
     clean; a label added to the live type (or a column the spec calls text) is drift and a

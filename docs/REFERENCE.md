@@ -1091,8 +1091,8 @@ need).  With no policy to read memberships from, relations are proposed from the
 table whose two-column primary or unique key has a single-column foreign key on each column is
 a membership table, keyed by the column that refers to the user table (`auth.users`, a table
 whose primary key refers to `auth.users` such as `profiles`, or failing those the column of the
-identity's `uid` type); when neither or both columns qualify, a note says so and no relation is
-proposed.  The identity is still read from the discarded policies' text; without any, a
+identity's `uid` type); when neither or both columns qualify, a note says which test failed and
+what each column refers to, and no relation is proposed.  The identity is still read from the discarded policies' text; without any, a
 foreign key to `auth.users` means `supabase` with `uid` from `auth.uid`.  The platform's
 trusted roles (`service_role`) are not taken as app roles.  `mls generate --skeleton`
 takes the result as it is.
@@ -1127,7 +1127,9 @@ A `(key, value)` membership proposes the relation when the pair is unique in a g
 opaque with the reason.  The lifter
 works at the boolean connectives: a conjunct, disjunct or negand it cannot read becomes an
 opaque block of its own text (an expression it cannot parse at all is one block), so a lifted
-spec always checks.  A call to a SQL helper of the schema is read as the helper's body when the
+spec always checks.  A call of a Postgres built-in (`length`, `char_length`, `position`, and the
+SQL-standard forms `TRIM(BOTH FROM x)`, `POSITION(a IN b)`, `SUBSTRING(x FROM i FOR n)`,
+`EXTRACT(f FROM x)`) is outside the fragment, and its note names it as a built-in.  A call to a SQL helper of the schema is read as the helper's body when the
 helper is one `select` statement returning a boolean, declared `stable` or `immutable`, and its
 arguments are the row's columns or constants (`has_org_role(org_id, array['owner', 'admin'])`
 reads as the membership its `exists` holds).  A `security definer` helper qualifies only when its

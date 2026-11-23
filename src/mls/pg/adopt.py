@@ -151,6 +151,8 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
             if expr is not None:
                 cat["functions"][fname] = {"params": (list(argnames) + [""] * nargs)[:nargs], "expr": expr,
                                            "assume": f"function {fname}({types}) md5 {digest}", "definer": definer}
+        cur.execute("select distinct proname from pg_proc where pronamespace = 'pg_catalog'::regnamespace")
+        cat["builtins"] = frozenset(r[0] for r in cur.fetchall())
         cur.execute("select rolname, rolsuper, rolcanlogin, rolbypassrls from pg_roles")
         for name, sup, login, bypass in cur.fetchall():
             cat["roles"][name] = {"super": sup, "login": login, "bypassrls": bypass}
@@ -374,7 +376,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                       for t, tb in spec_tables.items()},
               enums=enums, enum_cols={t: {c: col["enum"] for c, col in tb["columns"].items() if "enum" in col}
                                       for t, tb in spec_tables.items()},
-              governed=set(governed), roles=list(roles),
+              governed=set(governed), roles=list(roles), builtins=cat.get("builtins", frozenset()),
               keys={t: [frozenset(k) for k in key_sets(t)] for t in spec_tables})
 
     # --- relations: inclusion-shaped foreign keys, what the lifter reads as a membership, and (for
@@ -503,12 +505,22 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 if len(k) != 2 or not all(c in single for c in k):
                     continue
                 users = [c for c in k if single[c]["refname"] in user_tables]
-                if not users and uid_type is not None:
+                by_type = not users and uid_type is not None
+                if by_type:
                     users = [c for c in k if spec_tables[name]["columns"][c]["type"] == uid_type]
                 if len(users) != 1:
-                    notes.append(f"table {name}: the key ({', '.join(k)}) has a foreign key on each column, but "
-                                 + ("neither" if not users else "both") + f" refer to the user table "
-                                 f"({USER_TABLE}{f' or type {uid_type}' if uid_type else ''}): no relation proposed")
+                    refs = ", ".join(f"{c} to {single[c]['refname']}" for c in k)
+                    if not by_type:  # #45: say which test failed, and what the columns refer to
+                        why = (f"both refer to the user table ({USER_TABLE})" if users else
+                               f"neither refers to the user table ({USER_TABLE})")
+                    elif users:
+                        why = (f"neither refers to the user table ({USER_TABLE}) and both have the user id's "
+                               f"type ({uid_type}), so either could be the user")
+                    else:
+                        why = (f"neither refers to the user table ({USER_TABLE}) nor has the user id's type "
+                               f"({uid_type})")
+                    notes.append(f"table {name}: the key ({', '.join(k)}) has a foreign key on each column ({refs}), "
+                                 f"but {why}: no relation proposed")
                     continue
                 key = users[0]
                 value = next(c for c in k if c != key)

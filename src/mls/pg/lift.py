@@ -75,6 +75,9 @@ _TOKEN = re.compile(r"""
 """, re.VERBOSE)
 
 
+_SPECIAL_FORMS = frozenset({"trim", "position", "substring", "extract", "overlay"})
+
+
 def tokenize(text: str) -> list[Tok]:
     out: list[Tok] = []
     pos = 0
@@ -482,7 +485,10 @@ class Parser:
                 parts.append(self.name())
             if self.is_op("("):
                 self.take()
-                args = [] if self.is_op(")") else self.expr_list()
+                if len(parts) == 1 and parts[0].lower() in _SPECIAL_FORMS:
+                    args = self.special_form(parts[0].lower())
+                else:
+                    args = [] if self.is_op(")") else self.expr_list()
                 self.expect_op(")")
                 return self.span(Func(".".join(parts), args), start)
             if len(parts) > 2:
@@ -491,6 +497,41 @@ class Parser:
                 return self.span(Col(parts[0], parts[1]), start)
             return self.span(Col(None, parts[0]), start)
         raise Unreadable(f"unexpected {t.text!r} at {t.pos}")
+
+    def special_form(self, name: str) -> list[Node]:
+        """The arguments of a SQL-standard special form as the deparser prints it (#45): `TRIM(BOTH
+        [chars] FROM x)`, `POSITION(a IN b)`, `SUBSTRING(x FROM i FOR n)`, `EXTRACT(field FROM x)`,
+        `OVERLAY(x PLACING y FROM i FOR n)`.  The keywords separate the arguments, so each argument is
+        read below the comparisons (where IN would start a list)."""
+        args: list[Node] = []
+        if name == "trim":
+            if self.is_kw("both", "leading", "trailing"):
+                self.take()
+            if not self.is_kw("from"):
+                args.append(self.add_expr())
+            self.expect_kw("from")
+            return [self.add_expr(), *args]
+        if name == "extract":
+            if self.peek().kind in ("ident", "qident", "str"):
+                self.take()
+            else:
+                raise Unreadable(f"unexpected {self.peek().text!r} at {self.peek().pos}")
+            self.expect_kw("from")
+            return [self.add_expr()]
+        args.append(self.add_expr())
+        seps = {"position": ("in",), "substring": ("from", "for"), "overlay": ("placing", "from", "for")}[name]
+        if name == "position":
+            self.expect_kw("in")
+            return [*args, self.add_expr()]
+        if not any(self.is_kw(w) for w in seps):  # `substring(x, i, n)`: the plain call
+            while self.is_op(","):
+                self.take()
+                args.append(self.add_expr())
+            return args
+        while any(self.is_kw(w) for w in seps):
+            self.take()
+            args.append(self.add_expr())
+        return args
 
     def select(self) -> Select:
         start = self.peek().pos
@@ -606,6 +647,8 @@ class Env:
     # hide rows of, which the lifter then leaves to an opaque block
     caller_reads: list[str] = field(default_factory=list)
     hidden: set[str] = field(default_factory=set)
+    # #45: the names of the functions in pg_catalog, so a note on a call says built-in or user function
+    builtins: frozenset[str] = frozenset()
     _spec: Spec | None = field(default=None, repr=False)
 
     @classmethod
@@ -1347,6 +1390,10 @@ class Lifter:
         return isinstance(node, Str) and node.value == ""
 
     def func_reason(self, node: Func) -> str:
+        schema, _, base = node.name.rpartition(".")
+        if base in self.env.builtins and schema in ("", "pg_catalog"):
+            return (f"calls {base}(), a Postgres built-in function: MLS predicates compare columns with constants "
+                    f"and context values and call no functions such as string, date or arithmetic ones")
         return (f"calls {node.name}(), a function the lifter does not read: only a stable or immutable "
                 f"one-statement SQL function returning boolean is read as its body (a SECURITY DEFINER one only "
                 f"when its owner bypasses the policies of the tables it reads), with arguments that are the "
