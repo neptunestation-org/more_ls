@@ -31,7 +31,7 @@ from mls.props.obligations import (
 )
 from mls.props.runner import ObligationResult, run_obligation
 from mls.props.scenario import Scenario
-from mls.spec.model import And, InGroup, Lit, Member, Not, OpaqueRef, Or, Pred, Spec, Table
+from mls.spec.model import And, CardinalityRule, InGroup, Lit, Member, Not, OpaqueRef, Or, Pred, Spec, Table
 
 ACCESS_CASES = (("select", "using"), ("insert", "check"), ("update", "using"), ("update", "check"),
                 ("delete", "using"))
@@ -77,11 +77,21 @@ class GrantChange:
 
 
 @dataclass
+class CountChange:
+    """A cardinality rule one version has and the other does not (compared by what it says, not
+    by its name).  Counts are not compared row by row: the change is stated, not proved."""
+    table: str
+    direction: str              # "added" | "removed"
+    rule: CardinalityRule       # as its own version states it
+
+
+@dataclass
 class DiffResult:
     access: list[AccessChange]
     integrity: list[IntegrityChange]
     grants: list[GrantChange]
     notes: list[str]
+    counts: list[CountChange] = field(default_factory=list)
 
     @property
     def access_changes(self) -> list[AccessChange]:
@@ -97,7 +107,7 @@ class DiffResult:
 
     @property
     def any_change(self) -> bool:
-        return bool(self.access_changes or self.integrity_changes or self.grants)
+        return bool(self.access_changes or self.integrity_changes or self.grants or self.counts)
 
 
 # ----------------------------------------------------------------------------- shared symbols
@@ -404,7 +414,30 @@ def diff(old: Spec, new: Spec, timeout_ms: int = 20000) -> DiffResult:
                      f"modelled (row level security is off, or the table is not governed), so its access, "
                      f"integrity and privileges are not compared")
     return DiffResult(access_diff(old, new, timeout_ms), integrity_diff(old, new, timeout_ms),
-                      grant_diff(old, new), notes)
+                      grant_diff(old, new), notes, count_diff(old, new))
+
+
+def count_diff(old: Spec, new: Spec) -> list[CountChange]:
+    """The cardinality rules of one version that the other lacks.  The proofs do not compare
+    counts (a minimum is not even an invariant), so the diff lists them instead of saying that the
+    same changes are accepted."""
+    def key(r: CardinalityRule):
+        where = r.where.model_dump_json(by_alias=True, exclude_none=True) if r.where is not None else None
+        return (r.table, r.group, r.parent, r.max, r.min, where)
+
+    skip = observed_in_either(old, new)
+    before = {key(r): r for r in old.cardinalities() if r.table not in skip}
+    after = {key(r): r for r in new.cardinalities() if r.table not in skip}
+    return ([CountChange(r.table, "removed", r) for k, r in before.items() if k not in after]
+            + [CountChange(r.table, "added", r) for k, r in after.items() if k not in before])
+
+
+def _count_english(old: Spec, new: Spec, c: CountChange) -> str:
+    from mls import english
+
+    spec = new if c.direction == "added" else old
+    return (f"a count on {c.table} is {c.direction} (stated, not compared row by row): "
+            f"{c.rule.id}: {english.rule(spec, c.rule)}")
 
 
 # ----------------------------------------------------------------------------- reports
@@ -415,7 +448,8 @@ def to_json(old: Spec, new: Spec, d: DiffResult) -> dict:
     return {
         "notes": d.notes,
         "assumptions": english.identity_lines(new) + [f"- {a}" for a in english.assumption_lines(new)],
-        "summary": {"access_changes": len(d.access_changes), "integrity_changes": len(d.integrity_changes),
+        "summary": {"access_changes": len(d.access_changes),
+                    "integrity_changes": len(d.integrity_changes) + len(d.counts),
                     "grant_changes": len(d.grants), "unknown": len(d.unknown)},
         "access": [
             {"table": a.table, "role": a.role, "command": a.command, "which": a.which,
@@ -437,6 +471,8 @@ def to_json(old: Spec, new: Spec, d: DiffResult) -> dict:
         ],
         "grants": [{"role": g.role, "table": g.table, "command": g.command, "before": g.before,
                     "after": g.after} for g in d.grants],
+        "counts": [{"table": c.table, "direction": c.direction, "rule": c.rule.id,
+                    "english": _count_english(old, new, c)} for c in d.counts],
     }
 
 
@@ -524,8 +560,13 @@ def to_markdown(old: Spec, new: Spec, d: DiffResult) -> str:
             lines.append(f"  - for example: {english.scenario(view, a.scenario)}")
     lines += ["", "## Integrity changes", ""]
     shown_i = [i for i in d.integrity if i.verdict != "PROVED"]
-    if not shown_i:
+    if not shown_i and not d.counts:
         lines.append("None: the same rows and changes are accepted.")
+    from mls import terse
+
+    for c in d.counts:
+        lines.append(f"- {_count_english(old, new, c)}")
+        lines.append(f"  - {'after' if c.direction == 'added' else 'before'}: `{terse.rule(c.rule)}`")
     for i in shown_i:
         tag = " (undecided: solver timeout)" if i.verdict == "UNKNOWN" else ""
         cond = f" — conditional on unverified SQL: {', '.join(i.opaque_deps)}" if i.opaque_deps else ""

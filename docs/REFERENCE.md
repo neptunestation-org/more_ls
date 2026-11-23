@@ -1084,8 +1084,11 @@ Semantic diff (SEMANTICS §7): per table, role and command, new grants and new d
 scenario each; per table, rows and changes newly rejected or newly accepted; privilege changes;
 notes (new and removed tables and roles; a table observed in either version, which is not
 compared: what roles can do on it is not modelled); undecided questions (solver timeout).  `before` and
-`after` are the effective predicates in terse notation.  JSON keys: `notes`, `summary` (with
-the count of undecided questions), `access`, `integrity`, `grants`.  Exit 2 if anything
+`after` are the effective predicates in terse notation.  The proofs do not compare counts, so a
+cardinality rule that only one version has (compared by what it says, not by its name) is listed
+under integrity changes as stated, not proved: `a count on <table> is added (stated, not compared
+row by row): <id>: <sentence>`, and counted in the summary.  JSON keys: `notes`, `summary` (with
+the count of undecided questions), `access`, `integrity`, `grants`, `counts`.  Exit 2 if anything
 changed, else 0.
 
 ### `mls migrate OLD NEW [--format sql|json] [--out FILE] [--allow-destructive]`

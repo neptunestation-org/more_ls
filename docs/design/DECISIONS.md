@@ -1702,3 +1702,10 @@ size ≥ 3, so random statements meet the bound), mutations `CARDINALITY_MIN_OFF
 `CARDINALITY_WHERE_DROPPED`.  Rejected: a ∀∃ invariant with Skolem witnesses (leaves EPR, and the
 owner's flow creates a shop before its owner), a separate rule kind (one construct, one template
 family).
+
+*Amended 2026-11-23 (D83, scarpar run 21):* `mls diff` never compared cardinality rules, so a
+spec adding the owner minimum diffed as "0 integrity changes … the same rows and changes are
+accepted".  The diff now lists the cardinality rules only one version has (`diff.count_diff`,
+compared by table, group, parent, bounds and condition, not by name) as integrity changes stated
+rather than proved, counts them in the summary and the exit code, and the eval grader counts them
+as differences.

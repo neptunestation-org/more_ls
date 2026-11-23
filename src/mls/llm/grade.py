@@ -144,6 +144,7 @@ def grade(case: dict, result: LoopResult, reference: Spec, timeout_ms: int = 200
         g.differences += [f"access: {a.table} {a.role} {a.command} {a.which} {a.direction}" for a in d.access_changes]
         g.differences += [f"integrity: {i.table} {i.kind} {i.direction}" for i in d.integrity_changes]
         g.differences += [f"grant: {x.role} {x.table} {x.command} {x.before} -> {x.after}" for x in d.grants]
+        g.differences += [f"count: {c.table} {c.rule.id} {c.direction}" for c in d.counts]
         g.equivalent = not d.any_change
     except Exception as e:  # noqa: BLE001
         g.equivalent = False

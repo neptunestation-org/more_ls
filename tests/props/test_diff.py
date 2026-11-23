@@ -168,3 +168,21 @@ def test_a_renamed_relation_is_no_change(monkeypatch):
     monkeypatch.setattr(diff_mod, "both_axioms", lambda old, new, e_old, e_new: [
         *diff_mod.relation_axioms(old, e_old), *diff_mod.relation_axioms(new, e_new)])
     assert any(a.changed for a in diff(old, new).access_changes)
+
+
+def test_a_count_rule_that_comes_or_goes_is_listed():
+    """A cardinality rule is no row constraint the proofs compare, so the diff lists the ones only
+    one version has (a minimum added, a maximum's condition changed) instead of saying that the same
+    changes are accepted."""
+    from mls.props.diff import to_markdown
+    from tests.templates import specs
+
+    old, new = specs.cardinality_spec(), specs.min_count_spec()
+    d = diff(old, new)
+    assert d.any_change
+    assert {(c.rule.id, c.direction) for c in d.counts} == {("R5", "removed"), ("R5", "added"), ("M1", "added")}
+    md = to_markdown(old, new, d)
+    assert "None: the same rows and changes are accepted." not in md
+    assert ("- a count on files is added (stated, not compared row by row): M1: No transaction leaves a tenants "
+            "row with fewer than 2 rows of files where the row's size is at least 3") in md
+    assert diff(new, new).counts == []

@@ -117,10 +117,10 @@ def rule(spec: Spec, r: Rule) -> str:
         which = f"rows of {r.table}" + (f" where {pred(spec, r.where)}" if r.where is not None else "")
         out = []
         if r.max is not None:
-            out.append(f"A {r.parent} row has at most {r.max} {which} (counted by {r.group}); "
+            out.append(f"{_a(r.parent).capitalize()} row has at most {r.max} {which} (counted by {r.group}); "
                        f"rows with no {r.group} are not counted.")
         if r.min is not None:  # #61
-            out.append(f"No transaction leaves a {r.parent} row with fewer than {r.min} {which} (counted by "
+            out.append(f"No transaction leaves {_a(r.parent)} row with fewer than {r.min} {which} (counted by "
                        f"{r.group}) once it removes or changes one of them, unless it deletes that "
                        f"{r.parent} row too; a new {r.parent} row may start with fewer.")
         return " ".join(out)
