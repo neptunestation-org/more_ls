@@ -142,6 +142,32 @@ def transition_nullable_spec() -> Spec:
     return make(d)
 
 
+def guard_spec() -> Spec:
+    """#50: the owner of a document who is not one of its tenant's admins edits only its level and
+    whether it is archived (a column guard: a trigger that fires for `authenticated` only, reading
+    the editor's id and the admins relation as the caller).  P10's edits (which may clear the
+    owner) are of unowned documents; P12 is the owner's edit the guard allows."""
+    d = base()
+    d["rules"].append({"id": "G1", "kind": "column_rule", "name": "owner_edits", "table": "docs",
+                       "role": "authenticated", "access": "write", "columns": ["level", "archived"],
+                       "when": {"and": [{"cmp": [{"col": "owner_id"}, "=", {"ctx": "uid"}]},
+                                        {"not": {"member": {"relation": "admin_of", "key": {"ctx": "uid"},
+                                                            "value": {"col": "tenant_id"}}}}]}})
+    p10 = next(p for p in d["properties"] if p["id"] == "P10")
+    p10["when"]["and"].append({"is_null": {"old": "owner_id"}})
+    same = [{"cmp": [{"new": c}, "=", {"old": c}]} for c in ("id", "tenant_id", "owner_id")]
+    d["properties"].append(
+        {"id": "P12", "template": "must_allow", "table": "docs", "role": "authenticated", "command": "update",
+         "when": {"and": [{"member": {"relation": "member_of", "key": {"ctx": "uid"}, "value": {"old": "tenant_id"}}},
+                          {"cmp": [{"old": "owner_id"}, "=", {"ctx": "uid"}]},
+                          {"cmp": [{"old": "archived"}, "=", {"const": 0}]},
+                          {"cmp": [{"new": "archived"}, "=", {"const": 0}]},
+                          {"cmp": [{"new": "level"}, ">=", {"const": 0}]},
+                          {"cmp": [{"new": "level"}, "<=", {"ctx": "clearance"}]}, *same]},
+         "description": "the owner of a document changes its level within their clearance"})
+    return make(d)
+
+
 def fk_spec() -> Spec:
     return make(base())
 

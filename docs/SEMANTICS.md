@@ -58,6 +58,7 @@ Compiled as `(select now())`.
 | `inclusion` (table, cols → rel) | EPR | composite FK, MATCH SIMPLE, `ON DELETE RESTRICT` |
 | `transition` (table, predicate over old/new) | QF over two rows | one `BEFORE UPDATE` row trigger template |
 | `column_rule` (role, table, columns, read/write) | propositional | column privileges (`GRANT SELECT (cols)`; no table-level grant to that role) |
+| `column_rule` with `when` (write) | old image + context + memberships | BEFORE UPDATE trigger, for the role only: `T(when(old)) → other columns unchanged` |
 | `cardinality` (table, group col, parent, max N) | LIA + UF | trigger template: lock parent row `FOR UPDATE`, count, raise |
 | `hierarchy` (group table, parent col, max depth d) | unrolled to depth d | depth column + `CHECK (depth <= d)`, immutable parent (transition), recursive-CTE InitPlan in policies |
 | `opaque` (name, inputs, sql) | uninterpreted predicate | raw SQL, wrapped and named |
@@ -223,7 +224,12 @@ All are "assumptions ∧ ¬goal is UNSAT"; SAT yields a counterexample rendered 
 
 - **Template properties**, e.g. isolation: `effective_select(r) → member(memberships, uid, r.tenant)`.
   An update's assumptions include the column privileges: every column the role may not write
-  keeps its value (Postgres refuses the statement otherwise), as in `must_allow` below.
+  keeps its value (Postgres refuses the statement otherwise), as in `must_allow` below.  They
+  include the role's column guards too: `T(when(old)) → ∧ (new.c = old.c, NULL-safe)` over the
+  columns outside the guard's list.  The antecedent is the condition's truth, not the
+  predicate itself: an UNKNOWN condition limits nothing, as the trigger's `(when) is true`.  The
+  guard reads memberships as the caller, so the relation-visibility obligation covers it as it
+  does a policy.  Trusted roles are not guarded, so `always_on_update` does not assume it.
 - **must_allow (the lower bound):** `constraints(every image) ∧ when → admitted`, where
   `admitted` is the command's access layers — the effective policies and, for an update, the
   transition rules and the column privileges.  The written image is assumed *valid* (it satisfies

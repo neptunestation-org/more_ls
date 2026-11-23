@@ -56,14 +56,15 @@ def uses(spec: Spec) -> list[Use]:
     from mls.spec.chain import levels
 
     out = []
-    for r in spec.rules:
-        if not isinstance(r, PolicyRule):
-            continue
-        for expr, which in ((r.using, "using"), (r.check, "check")):
+    for r, role, table, _ in spec.caller_reads():  # policies, and the column guards' conditions (#50)
+        if isinstance(r, PolicyRule):
+            exprs = [(r.using, r.command in ("select", "all")), (r.check, False)]
+        else:  # a trigger's read is no step of a policy expansion
+            exprs = [(r.when, False)]
+        for expr, steps in exprs:
             for m in members(expr, []):
                 lv = tuple(lvl.table for lvl in levels(spec, m.relation))
-                out.append(Use(r.role, r.table, r.id, m.relation, lv,
-                               which == "using" and r.command in ("select", "all"), isinstance(m.key, Const)))
+                out.append(Use(role, table, r.id, m.relation, lv, steps, isinstance(m.key, Const)))
     return out
 
 

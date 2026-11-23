@@ -98,6 +98,13 @@ def policy_scope(table: str) -> Scope:
                  opaque_ctx=True, reject_negated_member=True, is_policy=True)
 
 
+def guard_scope(table: str) -> Scope:
+    """A column guard's condition (#50): what a policy may say of the row being edited and of who
+    is editing, evaluated in the trigger, so no index shape is required."""
+    return Scope("column rule condition", table, cols=True, ctx=True, member=True,
+                 now_between=True)
+
+
 def check_scope(table: str) -> Scope:
     return Scope("check", table, cols=True, opaque=True)
 
@@ -882,6 +889,15 @@ class Checker:
                 for j, c in enumerate(r.columns):
                     if c not in self.spec.tables[r.table].columns:
                         self.err(f"{path}.columns[{j}]", f"unknown column '{c}' of table '{r.table}'")
+                if r.when is not None:
+                    if r.access != "write":
+                        self.err(path + ".when", "only a write column rule takes a condition",
+                                 "remove 'when', or make the rule access write")
+                    if r.name is None:
+                        self.err(path, "a column rule with a condition needs a name (it names its trigger)",
+                                 "add a name")
+                    self.pred(r.when, guard_scope(r.table), path + ".when")
+                    continue
                 k = (r.role, r.table, r.access)
                 if k in colrules:
                     self.err(path, f"a second {r.access} column rule for role '{r.role}' on "

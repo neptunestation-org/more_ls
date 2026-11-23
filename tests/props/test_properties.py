@@ -527,3 +527,41 @@ def test_an_update_by_every_writer_is_proved_from_the_triggers_and_checks_alone(
         "Every change to a row of profiles, by anyone (the roles that bypass the policies included), "
         "keeps this true: the new role is the previous role.")
     assert parse(render(spec)) == spec
+
+
+def test_a_column_guard_limits_the_edit_only_where_its_condition_holds():
+    """#50: the owner of a document who is not one of its tenant's admins edits only its level and
+    archived flag; anyone else (or the owner, once an admin) edits as the policies allow.  The
+    guard reads the admins relation as the caller, so a restrictive policy hiding admins rows is
+    refused at compile time like a policy's membership; its English and terse forms round-trip."""
+    from mls.english import rule
+    from mls.spec.syntax import parse
+    from mls.terse import render
+    from tests.templates.specs import guard_spec
+
+    spec = guard_spec()
+    assert set(verdicts(spec).values()) == {"PROVED"}
+    d = json.loads(spec.model_dump_json(by_alias=True, exclude_none=True))
+    p12 = next(p for p in d["properties"] if p["id"] == "P12")
+    p12["when"]["and"] = [c for c in p12["when"]["and"] if c != {"cmp": [{"new": "owner_id"}, "=", {"old": "owner_id"}]}]
+    p12["when"]["and"].append({"is_null": {"new": "owner_id"}})  # the owner gives the document away
+    bad = make(d)
+    r = run_property(bad, next(p for p in bad.properties if p.id == "P12"))
+    assert r.verdict == "REFUTED"
+    sc = next(o for o in r.obligations if o.verdict == "REFUTED").scenario
+    assert sc.rows["old"]["values"]["owner_id"] == sc.context["uid"] and sc.rows["new"]["values"]["owner_id"] is None
+    g = spec.column_guards()[0]
+    assert rule(spec, g) == ("When the row's owner_id is the current user and not the row's tenant_id is among the "
+                             "current user's admin_of, an edit of a row of docs by authenticated changes only the "
+                             "columns level, archived.")
+    assert parse(render(spec)) == spec
+    d = json.loads(spec.model_dump_json(by_alias=True, exclude_none=True))
+    d["relations"]["chief_of"] = {"table": "admins", "key": "user_id", "value": "tenant_id"}  # read by the guard only
+    g1 = next(r for r in d["rules"] if r["id"] == "G1")
+    g1["when"]["and"][1]["not"]["member"]["relation"] = "chief_of"
+    assert compile_spec(make(d))
+    d["rules"].append({"id": "R20", "kind": "policy", "name": "hide_admins", "table": "admins", "role": "authenticated",
+                       "command": "select", "mode": "restrictive", "using": {"cmp": [{"col": "user_id"}, "<>", {"ctx": "uid"}]}})
+    with pytest.raises(CompileError) as e:
+        compile_spec(make(d))
+    assert "column rule 'owner_edits' uses relation 'chief_of'" in str(e.value)

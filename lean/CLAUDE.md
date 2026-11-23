@@ -61,6 +61,10 @@ writers) is in `docs/design/archive/ROADMAP.md`, "Parallel track — Lean 4".
   images and the transition rules imply a two-state predicate, no policies) is not transcribed in
   `Policy.lean`.  It is the update case of `Transition.lean`'s step with a goal over both images
   instead of an invariant of the new one.
+- **Column guards (#50, D78).**  `obligations.guard_terms` (an update by the guard's role of a row
+  its condition is TRUE of keeps every other column) and `Oracle.guards_ok` are not transcribed:
+  `Policy.lean`'s update assumptions have the column privileges but no guard, and its statement
+  outcomes no guard check.  The guard is the column-privilege predicate under an antecedent.
 - **Lookup helpers (#34) and nullable membership values (#42)** need no transcription: the helper
   is a compilation of the same atom, and `liftCmp` already makes a NULL value UNKNOWN.
 - **Relations over nullable columns (#49, D71).**  `Relational.lean` derives a relation from every

@@ -25,6 +25,7 @@ from mls.compile.mutations import Mutation
 from mls.compile.policy import policy_ddl
 from mls.compile.sql import SqlCompiler, q, sql_type
 from mls.compile.table import pk_name, unique_name
+from mls.compile.guard import guard_fn_ddl, guard_fn_name, guard_trigger_ddl
 from mls.compile.transition import transition_fn_ddl, transition_fn_name, transition_trigger_ddl
 from mls.identity import get_adapter
 from mls.props.effective import all_policies, all_transitions
@@ -148,6 +149,10 @@ def objects(spec: Spec, mutations: frozenset[Mutation] = frozenset()) -> Objects
         fn = transition_fn_name(r)
         o.functions[fn] = FunctionObj(fn, f"{q(fn)}()", transition_fn_ddl(r, sc), None, (), r.id)
         o.triggers[(r.table, r.name)] = TriggerObj(r.table, r.name, fn, transition_trigger_ddl(r), r.id)
+    for r in spec.column_guards():  # #50
+        fn = guard_fn_name(r)
+        o.functions[fn] = FunctionObj(fn, f"{q(fn)}()", guard_fn_ddl(r, sc), None, (), r.id)
+        o.triggers[(r.table, r.name)] = TriggerObj(r.table, r.name, fn, guard_trigger_ddl(r), r.id)
     for name, h in spec.hierarchies.items():
         rid = f"hierarchy:{name}"
         rel = spec.relations[h.members]

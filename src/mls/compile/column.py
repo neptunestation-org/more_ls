@@ -45,18 +45,21 @@ def privileges(spec: Spec) -> dict[tuple[str, str], Priv]:
         for cmd in (COMMANDS if p.command == "all" else (p.command,)):
             g[cmd] = "*"
     for cr in spec.column_rules():
+        if cr.when is not None:
+            continue  # #50: a guard is a trigger; the role keeps the columns its other rules grant
         g = privs.setdefault((cr.role, cr.table), {})
         for cmd in (("select",) if cr.access == "read" else ("insert", "update")):
             if cmd in g:
                 g[cmd] = set(cr.columns)
-    for p in spec.policies():
-        rels = relations_in(p.using, set())
-        relations_in(p.check, rels)
+    for p, role, ptable, exprs in spec.caller_reads():  # a column guard's condition too (#50)
+        rels: set[str] = set()
+        for e in exprs:
+            relations_in(e, rels)
         for rname in rels:
-            if is_routed(spec, p.table, rname):
+            if is_routed(spec, ptable, rname):
                 continue  # D67: a helper reads it as mls_internal
             for table, cols in read_columns(spec, rname):  # D56: every level; D61: the condition's columns
-                g = privs.setdefault((p.role, table), {})
+                g = privs.setdefault((role, table), {})
                 cur = g.get("select")
                 if cur == "*":
                     continue

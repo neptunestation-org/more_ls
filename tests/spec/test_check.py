@@ -572,3 +572,23 @@ def test_an_always_on_update_predicate_names_the_old_and_new_rows_only():
     assert has(errs, f"$.properties[{n - 2}].predicate.cmp[0]",
                "a column reference is not allowed in an always_on_update property predicate")
     assert has(errs, f"$.properties[{n - 1}].table", "unknown table 'nope'")
+
+
+def test_a_column_rule_condition_needs_a_write_rule_with_a_name():
+    """#50: a condition only on a write column rule, which needs a name (it names the trigger); the
+    condition speaks of the row being edited and who edits it, so no old/new image."""
+    d = base()
+    cond = {"cmp": [{"col": "owner_id"}, "=", {"ctx": "uid"}]}
+    d["rules"] += [
+        {"id": "G1", "kind": "column_rule", "table": "docs", "role": "authenticated", "access": "read",
+         "columns": ["id"], "when": cond},
+        {"id": "G2", "kind": "column_rule", "table": "docs", "role": "authenticated", "access": "write",
+         "columns": ["level"], "when": cond},
+        {"id": "G3", "kind": "column_rule", "name": "g3", "table": "docs", "role": "authenticated", "access": "write",
+         "columns": ["level"], "when": {"cmp": [{"old": "owner_id"}, "=", {"ctx": "uid"}]}},
+    ]
+    errs = errors(d)
+    n = len(d["rules"])
+    assert has(errs, f"$.rules[{n - 3}].when", "only a write column rule takes a condition")
+    assert has(errs, f"$.rules[{n - 2}]", "a column rule with a condition needs a name")
+    assert has(errs, f"$.rules[{n - 1}].when.cmp[0]", "old/new references are only allowed")

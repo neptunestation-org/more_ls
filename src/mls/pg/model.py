@@ -270,6 +270,8 @@ class Oracle:
             return "error"
         if not holds(transition_constraints(self.spec, table), new, ctx, db, old=old, new=new):
             return "error"
+        if not self.guards_ok(role, table, old, new, ctx, db):
+            return "error"
         if not self.fk_exists(table, new, db) or not self.cardinality_ok(table, new, db, old):
             return "error"
         if self._unique_violation(table, new, db, old):
@@ -277,6 +279,18 @@ class Oracle:
         if self._fk_restrict_violation(table, old, new, db):
             return "error"
         return "ok"
+
+    def guards_ok(self, role: str, table: str, old: Row, new: Row, ctx: dict, db: Database) -> bool:
+        """The column guards' triggers (#50): an update by the guard's role of a row its condition
+        is TRUE of changes no column outside the guard's list (a hierarchy's depth aside)."""
+        depth = {h.depth for h in self.spec.hierarchies.values() if h.table == table}
+        for g in self.spec.column_guards():
+            if g.table != table or g.role != role or not holds(g.when, old, ctx, db):
+                continue
+            if any(new[c] != old[c] for c in self.spec.tables[table].columns
+                   if c not in g.columns and c not in depth):
+                return False
+        return True
 
     def delete(self, role: str, table: str, old: Row, ctx: dict, db: Database,
                where_cols: list[str]) -> str:

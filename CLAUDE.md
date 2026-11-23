@@ -183,6 +183,10 @@ union member the renderer does not cover.
 - D77: `always_on_update <table>: p` (`AlwaysOnUpdate`, `obligations.always_on_update`) is a
   property for every writer, trusted roles included: constraints on both images and the transitions
   imply `p`, no policies or column privileges assumed; test in `tests/props/test_properties.py`.
+- D78: a write `column_rule` with `when p` is a per-row column guard (`compile/guard.py`, trigger
+  `WHEN (current_user = role)`; `obligations.guard_terms` `T(p(old)) → unchanged`; `Oracle.guards_ok`);
+  its memberships read as the caller through `Spec.caller_reads` (routing, visibility, grants);
+  fixture `specs.guard_spec`, mutation `GUARD_ANY_ROW`.
 - D42: row-dependent column visibility is normalization
   (the column is its own table with its own policies); there is no masking construct.
 - M4 (the LLM loop and evals): `src/mls/llm/CLAUDE.md`. Tests never call the API (`MLS_LLM_SCRIPT=<json>`

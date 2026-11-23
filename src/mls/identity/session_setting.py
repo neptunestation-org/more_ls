@@ -40,8 +40,8 @@ class SessionSettingAdapter(Adapter):
         from mls.spec.model import CtxRef
 
         keys: set[str] = set()
-        for pol in self.spec.policies():
-            for e in (pol.using, pol.check):
+        for _, _, _, exprs in self.spec.caller_reads():
+            for e in exprs:
                 for m in members_in(e, []):
                     if isinstance(m.key, CtxRef):
                         keys.add(m.key.ctx)

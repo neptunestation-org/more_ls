@@ -38,6 +38,7 @@ CASES = {
     "mixed_case": (specs.mixed_case_spec, Mutation.IDENT_UNQUOTED, None),  # D58
     "enum": (specs.enum_spec, Mutation.IN_DROP_LAST, None),  # D59
     "enum_transition": (specs.enum_spec, Mutation.TRANSITION_NAIVE, None),  # #39
+    "guard": (specs.guard_spec, Mutation.GUARD_ANY_ROW, None),  # #50
     "owner": (specs.owner_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),  # D60
     "condition": (specs.condition_spec, Mutation.RELATION_CONDITION_DROPPED, None),  # D61
     "lookup": (specs.lookup_spec, Mutation.LOOKUP_KEY_DROPPED, None),  # D67

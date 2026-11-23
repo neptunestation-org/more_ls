@@ -103,7 +103,7 @@ def coverage(spec: Spec) -> list[Finding]:
     out: list[Finding] = []
     perm = {(p.table, p.role, c) for p in all_policies(spec) if p.mode == "permissive" for c in _commands(p)}
     for cr in spec.column_rules():
-        cmds = ("select",) if cr.access == "read" else ("insert", "update")
+        cmds = ("select",) if cr.access == "read" else ("update",) if cr.when is not None else ("insert", "update")
         if not any((cr.table, cr.role, c) in perm for c in cmds):
             out.append(Finding("coverage", cr.table,
                                f"column rule {cr.id}{f' ({cr.name})' if cr.name else ''} limits what {cr.role} may "

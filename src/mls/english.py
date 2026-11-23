@@ -110,6 +110,9 @@ def rule(spec: Spec, r: Rule) -> str:
         return (f"A {r.parent} row has at most {r.max} rows of {r.table} (counted by {r.group}); "
                 f"rows with no {r.group} are not counted.")
     if isinstance(r, ColumnRule):
+        if r.when is not None:
+            return (f"When {pred(spec, r.when)}, an edit of a row of {r.table} by {r.role} changes only the "
+                    f"columns {', '.join(r.columns)}.")
         what = "read" if r.access == "read" else "write"
         return f"{r.role} may {what} only the columns {', '.join(r.columns)} of {r.table}."
     raise TypeError(r)

@@ -26,6 +26,7 @@ from mls.compile.objects import objects
 from mls.compile.policy import policy_ddl, replace_policies_ddl
 from mls.compile.sql import SqlCompiler
 from mls.compile.table import table_ddl
+from mls.compile.guard import guard_ddl
 from mls.compile.transition import transition_ddl
 from mls.errors import CompileError, MlsError
 from mls.identity import get_adapter
@@ -127,6 +128,8 @@ def compile_spec(spec: Spec, mutations: frozenset[Mutation] | set[Mutation] = fr
               if r.table in adopted else fk_ddl(r, sc), r.id)
     for r in all_transitions(spec):
         s.add("transitions", transition_ddl(r, sc), r.id)
+    for r in spec.column_guards():  # #50
+        s.add("transitions", guard_ddl(r, sc), r.id)
     for name in spec.hierarchies:
         s.add("hierarchies", hierarchy_ddl(spec, name, sc), f"hierarchy:{name}")
     for r in spec.cardinalities():

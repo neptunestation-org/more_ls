@@ -67,6 +67,10 @@ triggers, grants).  You never write SQL.
   is the table col refers to)
 - R6 column_rule name on t: role read|write c1, c2         the role may read or write only these
   columns of the table (without a column rule the role's policies cover all columns)
+- R7 column_rule name on t: role write c1, c2 when p       when p holds of the row being edited (p
+  as in a policy: columns, @context, relations), an edit by the role changes only these columns; for
+  users of one role who differ by row ("a rider edits only the status of a delivery assigned to
+  them": ... when rider_of(@uid, rider_id)).  The role's other edits, and the server's, are not limited
   A column rule is per role, not per row: a column some users may see only on some rows (their own
   salary) is its own table, one row per parent row, with its own policies; there is no masking construct.
 A role has a privilege on a table only through its policies; a command with no policy is denied.
@@ -109,7 +113,7 @@ body       := ROLE COMMAND MODE ['using' pred] ['check' pred]      (policy)
             | pred                                                 (check, transition)
             | '(' COL ',' COL ')' 'in' RELATION 'on_delete' 'restrict' ['deferred']   (inclusion)
             | COL '->' TABLE 'max' INT                             (cardinality)
-            | ROLE ('read' | 'write') COL (',' COL)*               (column_rule)
+            | ROLE ('read' | 'write') COL (',' COL)* ['when' pred]  (column_rule; when: write only)
 property   := ID TEMPLATE ... ['description' STRING]              (forms as listed above)
 term       := column | old.column | new.column | @context | 'text' | 123 | true | false
 atom       := term op term | term in (const, ...) | term is null | relation(key, value)

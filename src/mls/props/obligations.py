@@ -23,7 +23,7 @@ from mls.props.effective import (
 from mls.spec.model import (
     AlwaysOnUpdate, And, CardinalityRule, CheckRule, Cmp, ColRef, ColumnImmutable, ComposedRelation, Custom, InclusionRule,
     InvariantPreserved, IsNull, LeastPrivilege, Lit, Member, MemberBody, MonotoneIn, MustAllow, NewRef,
-    Not, OldRef, Or, Pred, Property, RoleSeparation, Spec, TenantIsolation, WriteSubsetRead,
+    Not, OldRef, Or, PolicyRule, Pred, Property, RoleSeparation, Spec, TenantIsolation, WriteSubsetRead,
 )
 from mls.logic.term import IntVal, add
 
@@ -249,7 +249,8 @@ def update_assumptions(enc: Encoder, spec: Spec, table: str, role: str) -> list[
             _T(enc, effective(spec, table, role, "update", "check"), "new", table),
             _T(enc, row_constraints(spec, table), "new", table),
             _T(enc, transition_constraints(spec, table), "new", table),
-            _T(enc, unwritable_unchanged(spec, table, role), "new", table)]
+            _T(enc, unwritable_unchanged(spec, table, role), "new", table),
+            *guard_terms(spec, table, role, enc)[1]]
 
 
 def delete_assumptions(enc: Encoder, spec: Spec, table: str, role: str, row: str = "old") -> list[Term]:
@@ -264,6 +265,33 @@ def unwritable_unchanged(spec: Spec, table: str, role: str) -> Pred:
     allowed = privileges(spec).get((role, table), {}).get("update")
     if allowed is None or allowed == "*":
         return Lit(lit=True)
+    return unchanged_except(spec, table, set(allowed))
+
+
+def guard_columns(spec: Spec, table: str) -> set[str]:
+    """The columns a column guard never compares: a hierarchy's depth, which its own trigger
+    recomputes from the parent before the guard runs (#50)."""
+    return {h.depth for h in spec.hierarchies.values() if h.table == table}
+
+
+def guard_terms(spec: Spec, table: str, role: str, enc: Encoder) -> tuple[list[Pred], list[Term]]:
+    """The column guards of `role` on `table` (#50): when the condition is TRUE of the row being
+    edited, every other column keeps its value.  An UNKNOWN condition limits nothing (the trigger
+    tests `(when) is true`), which is why this is a term and not a transition predicate.  Returns
+    the predicates (for the diff's comparison) and the terms."""
+    preds: list[Pred] = []
+    terms: list[Term] = []
+    for g in spec.column_guards():
+        if g.table != table or g.role != role:
+            continue
+        same = unchanged_except(spec, table, set(g.columns) | guard_columns(spec, table))
+        preds += [g.when, same]
+        terms.append(implies(enc.T(g.when, "old", table), enc.T(same, "new", table)))
+    return preds, terms
+
+
+def unchanged_except(spec: Spec, table: str, allowed: set[str]) -> Pred:
+    """Every column of `table` outside `allowed` keeps its value (NULL-safe)."""
     parts: list[Pred] = []
     for c in spec.tables[table].columns:
         if c in allowed:
@@ -291,6 +319,8 @@ def net_terms(spec: Spec, table: str, role: str, cmd: str, enc: Encoder) -> tupl
                  (effective(spec, table, role, "update", "check"), "new"),
                  (row_constraints(spec, table), "new"), (transition_constraints(spec, table), "new"),
                  (unwritable_unchanged(spec, table, role), "new")]
+        gp, gt = guard_terms(spec, table, role, enc)
+        return [q for q, _ in parts] + gp, and_(*[enc.T(q, img, table) for q, img in parts], *gt)
     return [q for q, _ in parts], and_(*[enc.T(q, img, table) for q, img in parts])
 
 
@@ -318,6 +348,8 @@ def _relations_of(spec: Spec, *preds: Pred | None, tag: str | None = None) -> li
 def _all_relations(spec: Spec, table: str, role: str, cmd: str) -> list[tuple[str, str | None]]:
     preds = [effective(spec, table, role, cmd, "using"), effective(spec, table, role, cmd, "check"),
              row_constraints(spec, table)]
+    if cmd == "update":
+        preds += [g.when for g in spec.column_guards() if g.table == table and g.role == role]
     return _relations_of(spec, *preds)
 
 
@@ -503,6 +535,7 @@ def access_terms(spec: Spec, table: str, role: str, cmd: str, enc: Encoder) -> T
                  (effective(spec, table, role, "update", "check"), "new"),
                  (transition_constraints(spec, table), "new"),
                  (unwritable_unchanged(spec, table, role), "new")]
+        return and_(*[enc.T(q, img, table) for q, img in parts], *guard_terms(spec, table, role, enc)[1])
     return and_(*[enc.T(q, img, table) for q, img in parts])
 
 
@@ -710,18 +743,19 @@ def relation_visibility_obligations(spec: Spec, only: set[tuple[str, str]] | Non
     have; the import passes the memberships it read from subqueries that run as the caller."""
     out = []
     seen: set[tuple[str, int, str, str]] = set()
-    for i, p in enumerate(spec.policies()):
-        for e in (p.using, p.check):
+    for p, role, table, exprs in spec.caller_reads():  # a column guard's condition too (#50)
+        what = f"policy '{p.name}'" if isinstance(p, PolicyRule) else f"column rule '{p.name}'"
+        for e in exprs:
             for m in members_in(e, []):
                 if only is not None:
                     if (p.id, m.relation) not in only:
                         continue
-                elif is_routed(spec, p.table, m.relation):
+                elif is_routed(spec, table, m.relation):
                     continue  # D67: the helper reads every row, without the role's policies
                 for lvl, rel in enumerate(levels(spec, m.relation)):
                     # level 0: the rows with key = k; a hop (D56): the rows whose key is a value of
                     # the previous level for k
-                    k = (m.relation, lvl, p.role, m.key.model_dump_json())
+                    k = (m.relation, lvl, role, m.key.model_dump_json())
                     if k in seen:
                         continue
                     seen.add(k)
@@ -743,19 +777,19 @@ def relation_visibility_obligations(spec: Spec, only: set[tuple[str, str]] | Non
                         which = f"rows whose {rel.key} the previous level reaches from the key"
                     assumptions = [*relation_axioms(spec, enc), reach,
                                    enc.T(row_constraints(spec, rel.table), "x", rel.table)]
-                    goal = enc.T(effective(spec, rel.table, p.role, "select", "using", implicit=only is None),
+                    goal = enc.T(effective(spec, rel.table, role, "select", "using", implicit=only is None),
                                  "x", rel.table)
                     idx = spec.rules.index(p)
                     out.append(Obligation(
-                        "soundness", f"relation {m.relation} visible to {p.role}"
+                        "soundness", f"relation {m.relation} visible to {role}"
                                      + (f" (hop {lvl}, {rel.table})" if lvl else ""),
                         assumptions, goal, {"x": rel.table}, _relations_of(spec, e), [enc],
                         path=f"$.rules[{idx}]",
-                        failure_message=f"policy '{p.name}' uses relation '{m.relation}', but a "
+                        failure_message=f"{what} uses relation '{m.relation}', but a "
                                         f"restrictive policy on '{rel.table}' can hide {which} from role "
-                                        f"'{p.role}', so the membership subquery would be filtered and the "
+                                        f"'{role}', so the membership subquery would be filtered and the "
                                         f"atom would not mean '(key, value) ∈ {m.relation}'",
-                        fix=f"relax the restrictive policies on '{rel.table}' for role '{p.role}' so "
+                        fix=f"relax the restrictive policies on '{rel.table}' for role '{role}' so "
                             f"that those rows are visible").finish())
     return out
 

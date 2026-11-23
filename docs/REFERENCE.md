@@ -464,6 +464,7 @@ predicate; "col key" means the membership key may be a column instead of a conte
 | policy `using` / `check` | yes | yes | no | yes¹ | no | yes¹ | yes | yes | yes |
 | `check` rule | yes | no | no | no | – | no | no | yes | no |
 | `transition` rule | no | no | yes | no | – | no | no | no | no |
+| `column_rule.when` | yes | yes | no | yes | no | yes | yes | no | no |
 | `always_on_update` predicate | no | no | yes | no | – | no | no | no | no |
 | invariant (`invariant_preserved` inline) | yes | no | no | yes | yes | no | no | no | no |
 | `custom.goal` | yes | yes | no | yes | yes | yes | yes | yes | yes |
@@ -606,6 +607,26 @@ Compiles to column-list grants (`GRANT SELECT (cols)`, `GRANT INSERT (cols)`, `G
 
 Column rules are per role, not per row.  A column whose visibility depends on the row is
 modelled as its own table with its own policies.
+
+**A write rule with a condition** limits edits row by row instead, for users of one role who
+differ by row (a rider of this delivery, and the staff, are all `authenticated`):
+
+    {"id": "C2", "kind": "column_rule", "name": "rider_edits", "table": "deliveries",
+     "role": "authenticated", "access": "write", "columns": ["status", "proof_media_id"],
+     "when": {"member": {"relation": "rider_of", "key": {"ctx": "uid"}, "value": {"col": "rider_id"}}}}
+
+Terse: `C2 column_rule rider_edits on deliveries: authenticated write status, proof_media_id when
+rider_of(@uid, rider_id)`.  When the condition is TRUE of the row being edited (its old image), an
+update by the role changes no column outside the list; an UNKNOWN or FALSE condition limits
+nothing.  The condition is in policy scope without the index shape (§10.2): columns, context
+values, memberships.  It is a guard, not a grant: the role keeps the columns its policies and its
+other column rules give it, and the role needs `name`.  Compiles to a `BEFORE UPDATE ... FOR EACH
+ROW WHEN (current_user = '<role>')` trigger `<name>` calling `mls_cg_<table>_<name>()`, which
+raises `insufficient_privilege` (`MLS column rule <name> on <table> violated`) when the condition
+is true and the row, as jsonb without the listed columns (and a hierarchy's depth), changed; so a
+column the spec does not declare is held too.  The trigger reads memberships as the caller, under
+the relation table's policies, as a policy does (the relation-visibility check applies).  The
+trusted roles that bypass the policies are not limited.
 
 ## 12. Properties
 
@@ -844,6 +865,7 @@ All names are deterministic functions of the spec, so `mls drift` can match them
 | unique constraint | `<table>_<col>[_<col>...]_key` |
 | check constraint, foreign key, policy, trigger | the rule's `name` |
 | transition trigger function | `mls_tr_<table>_<name>()` |
+| column guard trigger function | `mls_cg_<table>_<name>()` (trigger `<name>`) |
 | implicit relation policy | `mls_rel_<relation>_<role>_<n>` |
 | hop visibility policy of a composed relation | `mls_rel_<relation>_h<i>_<role>_<n>` on the i-th hop table |
 | internal-role policy | `mls_internal_<table>` |

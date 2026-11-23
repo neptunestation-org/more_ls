@@ -432,11 +432,16 @@ class CardinalityRule(RuleBase):
 
 
 class ColumnRule(RuleBase):
+    """`role` may read or write only `columns` of `table` (column privileges).  A write rule with
+    `when` (#50) is a guard instead: when `when` is TRUE of the row being edited, an update by
+    `role` changes no other column (a trigger; the grants are untouched).  It limits a role whose
+    users differ by row (a rider of this delivery), which one database role cannot."""
     kind: Literal["column_rule"]
     name: str | None = None
     role: str
     columns: list[str] = Field(min_length=1)
     access: Literal["read", "write"]
+    when: Pred | None = None
 
 
 Rule = Annotated[
@@ -615,6 +620,22 @@ class Spec(Strict):
 
     def column_rules(self) -> list[ColumnRule]:
         return [r for r in self.rules if isinstance(r, ColumnRule)]
+
+    def column_guards(self) -> list[ColumnRule]:
+        """The write column rules with a condition (#50): triggers, not grants."""
+        return [r for r in self.column_rules() if r.when is not None]
+
+    def caller_reads(self) -> list[tuple[Rule, str, str, list[Pred]]]:
+        """(rule, role, table, predicates) for every rule whose predicates the database evaluates
+        as the caller, so that its memberships read the relation tables under their policies: the
+        policies (using, check) and the column guards' conditions (#50), in rule order."""
+        out: list[tuple[Rule, str, str, list[Pred]]] = []
+        for r in self.rules:
+            if isinstance(r, PolicyRule):
+                out.append((r, r.role, r.table, [e for e in (r.using, r.check) if e is not None]))
+            elif isinstance(r, ColumnRule) and r.when is not None:
+                out.append((r, r.role, r.table, [r.when]))
+        return out
 
     def context_type(self, name: str) -> ColType | None:
         if name == CONTEXT_NOW:

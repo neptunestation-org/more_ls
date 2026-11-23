@@ -531,6 +531,10 @@ class Parser:
             while self.at(","):
                 self.advance()
                 r["columns"].append(self.name("a column"))
+            if self.at_word("when"):
+                self.advance()
+                self.mark(f"{base}.when")
+                r["when"] = self.pred(f"{base}.when")
         if self.at_word("requirement"):
             self.advance()
             r["requirement"] = self.string()

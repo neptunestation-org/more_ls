@@ -64,10 +64,10 @@ def _implicit_policies(spec: Spec) -> list[PolicyRule]:
     seen: set[tuple[str, str, str]] = set()
     hops: dict[tuple[str, str, str, str], tuple] = {}  # (table, role, prev, key) -> first (key, column)
     users: dict[tuple[str, str, str, str], set[str]] = {}  # ... -> the composed relations through it
-    for p in spec.policies():
-        for e in (p.using, p.check):
+    for p, role, table, exprs in spec.caller_reads():  # a column guard reads as the caller too (#50)
+        for e in exprs:
             for m in members_in(e, []):
-                if is_routed(spec, p.table, m.relation):
+                if is_routed(spec, table, m.relation):
                     continue  # D67: a helper reads it, without the caller's policies
                 lv = levels(spec, m.relation)
                 base = base_name(spec, m.relation)
@@ -75,19 +75,19 @@ def _implicit_policies(spec: Spec) -> list[PolicyRule]:
                 cond = condition(spec, m.relation)
                 # D61: a relation with a condition reads only the rows it keeps, under a policy of
                 # its own (named after it, so that the import gets the relation back)
-                k = (lv[0].table, p.role, key_json, cond.model_dump_json(by_alias=True) if cond else None)
+                k = (lv[0].table, role, key_json, cond.model_dump_json(by_alias=True) if cond else None)
                 if k not in seen:
                     seen.add(k)
-                    n = sum(1 for s_ in seen if s_[0] == lv[0].table and s_[1] == p.role)
+                    n = sum(1 for s_ in seen if s_[0] == lv[0].table and s_[1] == role)
                     using = Cmp(cmp=(ColRef(col=lv[0].key), "=", m.key))
                     out.append(PolicyRule(
-                        id=f"implicit:{base}:{p.role}:{n}",
-                        name=f"mls_rel_{base}_{p.role}_{n}",
-                        table=lv[0].table, kind="policy", role=p.role, command="select",
+                        id=f"implicit:{base}:{role}:{n}",
+                        name=f"mls_rel_{base}_{role}_{n}",
+                        table=lv[0].table, kind="policy", role=role, command="select",
                         mode="permissive",
                         using=using if cond is None else And(**{"and": [using, cond]})))
                 for i in range(1, len(lv)):
-                    hk = (lv[i].table, p.role, hop_prefix(spec, m.relation, i), key_json)
+                    hk = (lv[i].table, role, hop_prefix(spec, m.relation, i), key_json)
                     hops.setdefault(hk, (m.key, lv[i].key, i))
                     users.setdefault(hk, set()).add(m.relation.split("/")[0])
     # D56: each hop table is read as the role too: its rows whose key is a value of the previous

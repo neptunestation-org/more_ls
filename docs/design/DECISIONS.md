@@ -1534,3 +1534,33 @@ on the written row with a two-state goal.  Rejected: an `everyone` form of `colu
 the same property in this template; one way to say it is enough);
 extending `invariant_preserved` with two-state invariants (its induction over every table and
 statement kind is meaningless for a predicate over one update).
+
+**D78. A write column rule with a condition: a per-row column guard (#50).**
+Scarpar: "a rider edits a delivery assigned to them; the edit changes only status,
+proof_media_id, cod_collected and otp_code".  Riders and staff share `authenticated`, so column
+privileges cannot separate them, and a transition sees only old/new.  A write `column_rule` takes
+`when p` (policy scope without the index shape: columns, context values, memberships; no
+column-keyed membership, whose visibility the obligation could not state).  It compiles to a fixed
+BEFORE UPDATE trigger (`compile/guard.py`) whose `WHEN (current_user = role)` limits only the rule's
+role, so the server and the other trusted roles, and the SECURITY DEFINER helpers, are not limited;
+its function raises when `(p on old) is true` and `to_jsonb(new) - cols` differs from the old's
+(columns the spec does not model are held too; a hierarchy's depth, recomputed by its own trigger,
+is left out).  The antecedent is the truth of `p`: an UNKNOWN condition (a delivery with no rider)
+limits nothing, the reading of "when p holds" for a restriction, which is why the proofs take it as
+a term (`obligations.guard_terms`: `T(p(old)) → unchanged`, in the update assumptions, `net_terms`
+and `access_terms`) and not as a transition predicate, whose IS TRUE would limit on UNKNOWN.  The
+grants are untouched: the role keeps what its policies and its other column rules give.  The
+condition's memberships run as the caller, so `Spec.caller_reads` (policies plus guards) feeds the
+routing (`recursion.uses`, as no step of a policy expansion), the implicit visibility policies, the
+relation grants, the relation-visibility obligation (its message names the column rule) and the
+harness.  The oracle (`pg/model.py:Oracle.guards_ok`) applies the guard after the transitions.
+Fixture `specs.guard_spec` (a document's owner who is not an admin of its tenant edits only its
+level and archive flag; a context comparison and a negated membership), mutation `GUARD_ANY_ROW`
+(the condition ignored).  Not an upper-bound template: `custom` cannot read old/new, so "a rider
+never changes the address" is a `must_allow` refutation away, not a property; the differential
+test ties the trigger to Postgres.  The import lists a deployed guard's trigger as foreign rather
+than reading it back.  Lean: the guard term and the oracle check are not transcribed
+(lean/CLAUDE.md).  Rejected: a transition that reads context values (each other column listed by
+hand, stale when one is added, and IS TRUE would limit on UNKNOWN); applying it to every role (a
+writer with no user would be refused, and the model takes context values as never NULL).  D42 is
+not reopened: it is about reading a column on some rows; this limits which columns an edit changes.

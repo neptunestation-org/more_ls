@@ -22,7 +22,8 @@ approval artifact (D10, D33).  The grammar:
     opaque     := 'opaque' NAME 'on' TABLE '(' [input (',' input)*] ')' 'relations' '(' [names] ')' 'sql' DOLLAR
     input      := COL | '@' CTX                                   DOLLAR := '$$' sql '$$' | '$tag$' sql '$tag$'
     rule       := ID KIND [NAME] ('on' TABLE | 'applies_to' selector) ['from' ID] ':' body ['requirement' STRING]
-                  (an inclusion's body ends `on_delete restrict` [`deferred`])
+                  (an inclusion's body ends `on_delete restrict` [`deferred`]; a write column rule's may end
+                  `when` pred)
     selector   := 'has_column' '(' COL [TYPE] ')' | 'named' '(' names ')' | 'tagged' '(' NAME ')' | 'all'
                 | 'and' '(' selector (',' selector)* ')' | 'or' '(' selector (',' selector)* ')'
     property   := ID TEMPLATE [table role command which]: ... ['description' STRING]
@@ -55,7 +56,7 @@ OR, AND, NOT, ATOM = 1, 2, 3, 4
 
 RESERVED = frozenset("""
 mls comment identity roles enum table relation hierarchy opaque rules properties
-on applies_to from requirement description using check for max on_delete restrict deferred max_depth where
+on applies_to from requirement description using check for max on_delete restrict deferred max_depth where when
 and or not is null true false in in_group now_between old new
 primary_key unique tags assume sql relations has_column named tagged all
 owned adopted observed select insert update delete permissive restrictive read write
@@ -241,7 +242,8 @@ def rule(r: Rule) -> str:
     if isinstance(r, CardinalityRule):
         return f"{head} {ident(r.group)} -> {ident(r.parent)} max {r.max}" + _tail(r)
     if isinstance(r, ColumnRule):
-        return f"{head} {ident(r.role)} {r.access} {', '.join(ident(c) for c in r.columns)}" + _tail(r)
+        when = f" when {pred(r.when)}" if r.when is not None else ""
+        return f"{head} {ident(r.role)} {r.access} {', '.join(ident(c) for c in r.columns)}{when}" + _tail(r)
     raise TypeError(r)
 
 

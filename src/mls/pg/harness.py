@@ -210,8 +210,8 @@ def user_columns(spec: Spec, adapter: Adapter) -> set[tuple[str, str]]:
 
     from mls.props.effective import in_groups_in
 
-    for pol in spec.policies():
-        for e in (pol.using, pol.check):
+    for pol, _, ptable, exprs in spec.caller_reads():
+        for e in exprs:
             for m in members_in(e, []):
                 if isinstance(m.key, CtxRef) and m.key.ctx == user_ctx:
                     rel_keys.add(m.relation)
