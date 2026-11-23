@@ -684,11 +684,40 @@ def _relation_change(spec: Spec, table: str, cmd: str, backed: set[str]) -> list
     return axioms
 
 
+def _references(spec: Spec, inc: InclusionRule, row: str, parent_row: str) -> Term:
+    """Row `row` of the inclusion's table refers to row `parent_row` of its relation's table (MATCH
+    SIMPLE: a NULL in either column refers to nothing)."""
+    rel = spec.relations[inc.relation]
+    refs = []
+    for c, pc in zip(inc.columns, (rel.key, rel.value)):
+        refs.append(eq(col_value_var(row, c), col_value_var(parent_row, pc)))
+        if spec.tables[inc.table].columns[c].nullable:
+            refs.append(not_(col_null_var(row, c)))
+        if spec.tables[rel.table].columns[pc].nullable:
+            refs.append(not_(col_null_var(parent_row, pc)))
+    return and_(*refs)
+
+
+def _nulled(spec: Spec, inc: InclusionRule, src: str, dst: str) -> list[Term]:
+    """#62: row `dst` is row `src` of the inclusion's table with its first column set NULL, the
+    UPDATE an `on_delete set_null` inclusion's key makes."""
+    out = []
+    for c, col in spec.tables[inc.table].columns.items():
+        if c == inc.columns[0]:
+            out.append(col_null_var(dst, c))
+            continue
+        out.append(eq(col_value_var(dst, c), col_value_var(src, c)))
+        if col.nullable:
+            out.append(iff(col_null_var(dst, c), col_null_var(src, c)))
+    return out
+
+
 def _restrict_guard(spec: Spec, table: str, cmd: str, backed: set[str], row: str, row_table: str) -> list[Term]:
     """ON DELETE/UPDATE RESTRICT as seen by the solver: the arbitrary row `row` of `row_table` does
     not reference the pair removed from a relation backed by `table`.  A cascade inclusion (#60)
     gives the same guard on delete: a row that referenced the pair is gone, so every row left
-    does not reference it."""
+    does not reference it.  So does a set_null one (#62) for the rows left unchanged; the rows it
+    nulls are the induction step's third case."""
     guards = []
     for inc in spec.inclusions():
         if inc.relation not in backed or inc.table != row_table:
@@ -749,6 +778,22 @@ def _induction_step(spec: Spec, p: InvariantPreserved, invs: list[Invariant], ta
                 p.id, f"{cmd} on {table} preserves {inv.label} for every other row of {inv.table}",
                 assumptions, after.T(inv.pred, row, inv.table), rows, rel_list,
                 [before, after]).finish())
+        # 3. #62: a row of the invariant's table that a set_null inclusion nulls on this delete
+        if cmd == "delete":
+            for inc in spec.inclusions():
+                if inc.on_delete != "set_null" or inc.table != inv.table or inc.relation not in backed:
+                    continue
+                row, nrow = f"row_{inv.table}", f"row_{inv.table}_nulled"
+                assumptions = list(change) + [before.T(inv.pred, row, inv.table),
+                                              before.T(row_constraints(spec, inv.table), row, inv.table),
+                                              _references(spec, inc, row, "old"), *_nulled(spec, inc, row, nrow)]
+                rows = dict(mod_rows)
+                rows[row] = rows[nrow] = inv.table
+                out.append(Obligation(
+                    p.id, f"{cmd} on {table} preserves {inv.label} for the rows of {inv.table} that "
+                          f"{inc.name} sets NULL",
+                    assumptions, after.T(inv.pred, nrow, inv.table), rows, rel_list,
+                    [before, after]).finish())
     return out
 
 
@@ -817,10 +862,13 @@ def cascade_obligations(spec: Spec) -> list[Obligation]:
     """#60 (D79): an `on_delete cascade` inclusion deletes the referencing rows as the table owner,
     past their own policies.  For every role that can delete a referenced row, each row that
     refers to it must be one the role could delete itself, so a cascade deletes nothing a direct
-    delete could not and the delete properties keep their meaning."""
+    delete could not and the delete properties keep their meaning.  #62: a `set_null` one updates
+    them instead (`_set_null_obligations`)."""
     out = []
     privs = privileges(spec)
     for inc in spec.inclusions():
+        if inc.on_delete == "set_null":
+            out += _set_null_obligations(spec, inc, privs)
         if inc.on_delete != "cascade":
             continue
         rel = spec.relations[inc.relation]
@@ -852,6 +900,57 @@ def cascade_obligations(spec: Spec) -> list[Obligation]:
                 fix=f"give role '{role}' a delete policy on '{child}' covering every row that refers to a "
                     f"'{parent}' row it can delete, narrow its delete on '{parent}', or use on_delete "
                     f"restrict").finish())
+    return out
+
+
+def _set_null_obligations(spec: Spec, inc: InclusionRule, privs: dict) -> list[Obligation]:
+    """#62: an `on_delete set_null` inclusion's key, on a delete of the referenced row, updates each
+    referring row to NULL in its first column, as the table owner: past the policies and the column
+    guards (they fire for the app role only), but under the checks and the transition triggers.
+    (1) Those allow it, or every such delete would fail; (2) every role that can delete the
+    referenced row could make that update itself (`net_terms`: its update policies, the
+    constraints, the transitions, its column privileges and its guards)."""
+    rel = spec.relations[inc.relation]
+    parent, child = rel.table, inc.table
+    path = f"$.rules[{spec.rules.index(inc)}]"
+    c0 = inc.columns[0]
+    rows = {"p": parent, "old": child, "new": child}
+
+    def base(enc: Encoder) -> list[Term]:
+        return [_T(enc, row_constraints(spec, child), "old", child), _references(spec, inc, "old", "p"),
+                *_nulled(spec, inc, "old", "new")]
+
+    enc = Encoder(spec)
+    out = [Obligation(
+        "soundness", f"a delete on {parent} may set {child}.{c0} NULL",
+        [*relation_axioms(spec, enc), _T(enc, row_constraints(spec, parent), "p", parent), *base(enc)],
+        and_(_T(enc, row_constraints(spec, child), "new", child),
+             _T(enc, transition_constraints(spec, child), "new", child)),
+        rows, _relations_of(spec, row_constraints(spec, child), row_constraints(spec, parent)), [enc],
+        path=path,
+        failure_message=f"inclusion '{inc.name}' sets {child}.{c0} NULL on the rows that refer to a deleted "
+                        f"'{parent}' row, but a check or transition rule on '{child}' refuses that change, so "
+                        f"such a delete would fail",
+        fix=f"let the checks and transition rules on '{child}' allow {c0} to become NULL with every other "
+            f"column unchanged, or use on_delete restrict").finish()]
+    for role in spec.roles:
+        if "delete" not in privs.get((role, parent), {}):
+            continue
+        enc = Encoder(spec)
+        out.append(Obligation(
+            "soundness", f"a delete on {parent} by {role} sets {child}.{c0} NULL only where it could",
+            [*delete_assumptions(enc, spec, parent, role, row="p"), *base(enc)],
+            net_terms(spec, child, role, "update", enc)[1], rows,
+            list(dict.fromkeys(_all_relations(spec, parent, role, "delete")
+                               + _all_relations(spec, child, role, "update"))),
+            [enc], path=path,
+            failure_message=f"inclusion '{inc.name}' sets {child}.{c0} NULL on the rows that refer to a deleted "
+                            f"'{parent}' row, but role '{role}' can delete a '{parent}' row while some row of "
+                            f"'{child}' referring to it is one it could not make that change to itself (its "
+                            f"update policies, column privileges or column rules on '{child}'), so the key "
+                            f"would change it past them",
+            fix=f"let role '{role}' set {c0} NULL on every row of '{child}' that refers to a '{parent}' row it "
+                f"can delete, narrow its delete on '{parent}', or use on_delete restrict").finish())
     return out
 
 

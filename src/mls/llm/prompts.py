@@ -70,6 +70,8 @@ triggers, grants).  You never write SQL.
   row is a pair of R (NULLs pass); the referenced pair cannot be deleted.  "on_delete": "cascade" instead
   deletes the rows that refer to it ("a product's variants go with it"); only on a table no relation
   reads, and every role that deletes the referenced row must be able to delete those rows itself.
+  "on_delete": "set_null" keeps them and sets a (nullable) first column NULL ("a delivery whose rider
+  is deleted is unassigned"); the role must be able to make that edit itself.
   Add "deferred": true when its
   foreign key closes a cycle (R's table refers back to this one, as a membership refers to its
   organization): it is then checked at commit, so both rows can be written in one transaction

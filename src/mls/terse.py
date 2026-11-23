@@ -22,7 +22,7 @@ approval artifact (D10, D33).  The grammar:
     opaque     := 'opaque' NAME 'on' TABLE '(' [input (',' input)*] ')' 'relations' '(' [names] ')' 'sql' DOLLAR
     input      := COL | '@' CTX                                   DOLLAR := '$$' sql '$$' | '$tag$' sql '$tag$'
     rule       := ID KIND [NAME] ('on' TABLE | 'applies_to' selector) ['from' ID] ':' body ['requirement' STRING]
-                  (an inclusion's body ends `on_delete` (`restrict` | `cascade`) [`deferred`]; a write column rule's may end
+                  (an inclusion's body ends `on_delete` (`restrict` | `cascade` | `set_null`) [`deferred`]; a write column rule's may end
                   `when` pred)
     selector   := 'has_column' '(' COL [TYPE] ')' | 'named' '(' names ')' | 'tagged' '(' NAME ')' | 'all'
                 | 'and' '(' selector (',' selector)* ')' | 'or' '(' selector (',' selector)* ')'
@@ -56,7 +56,7 @@ OR, AND, NOT, ATOM = 1, 2, 3, 4
 
 RESERVED = frozenset("""
 mls comment identity roles enum table relation hierarchy opaque rules properties
-on applies_to from requirement description using check for max on_delete restrict cascade deferred max_depth where when
+on applies_to from requirement description using check for max on_delete restrict cascade set_null deferred max_depth where when
 and or not is null true false in in_group now_between old new
 primary_key unique tags assume sql relations has_column named tagged all
 owned adopted observed select insert update delete permissive restrictive read write

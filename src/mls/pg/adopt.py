@@ -175,11 +175,12 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
             cur.execute("""select conname, contype, pg_get_constraintdef(oid), conkey, confrelid, confkey,
                                   confupdtype, confdeltype, confmatchtype, convalidated,
                                   case when confrelid <> 0 then confrelid::regclass::text end,
-                                  condeferrable, condeferred
+                                  condeferrable, condeferred, confdelsetcols
                            from pg_constraint where conrelid = %s order by conname""", (oid,))
             t["constraints"] = [{"name": r[0], "type": r[1], "def": _strip_schema(r[2], schema), "cols": list(r[3] or []),
                                  "ref": r[4], "refcols": list(r[5] or []), "upd": r[6], "del": r[7], "match": r[8],
-                                 "validated": r[9], "refname": r[10], "deferrable": r[11], "deferred": r[12]}
+                                 "validated": r[9], "refname": r[10], "deferrable": r[11], "deferred": r[12],
+                                 "delsetcols": list(r[13]) if r[13] else None}
                                 for r in cur.fetchall()]
             cur.execute("""select p.oid, p.polname, p.polcmd, p.polpermissive,
                                   array(select rolname from pg_roles where oid = any (p.polroles) order by 1),
@@ -211,6 +212,9 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
     for t in cat["tables"].values():
         for con in t["constraints"]:
             con["colnames"] = [t["colname"][n] for n in con["cols"]]
+            # #62: `ON DELETE SET NULL (c)` names the columns it nulls; none listed is every column
+            con["delsetcols"] = ([t["colname"][n] for n in con["delsetcols"]] if con["delsetcols"]
+                                 else list(con["colnames"]))
             ref = oids.get(con["ref"])
             con["reftable"] = ref
             con["refcolnames"] = [cat["tables"][ref]["colname"][n] for n in con["refcols"]] if ref else []
@@ -472,12 +476,16 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 (con["match"] != "s", "not MATCH SIMPLE"),
                 (con["upd"] != "r", f"ON UPDATE {actions.get(con['upd'], con['upd'])}"),
                 (con["deferrable"] and not con["deferred"], "DEFERRABLE INITIALLY IMMEDIATE"),
-                (con["del"] not in ("r", "c"), f"ON DELETE {actions.get(con['del'], con['del'])}"),
+                (con["del"] not in ("r", "c", "n"), f"ON DELETE {actions.get(con['del'], con['del'])}"),
+                (con["del"] == "n" and con.get("delsetcols") != [con["colnames"][0]],
+                 "ON DELETE SET NULL of other than its first column"),
+                (con["del"] == "n" and any(c["name"] == con["colnames"][0] and c["notnull"] for c in t["columns"]),
+                 "ON DELETE SET NULL of a NOT NULL column"),
                 (not set(con["colnames"]) <= modelled[name], "a column of it is not modelled")) if bad]
             if unmet:
                 notes.append(f"foreign key {con['name']} on {name} is not an inclusion ({', '.join(unmet)}; an "
                              f"inclusion is two columns onto a key pair, MATCH SIMPLE, ON UPDATE RESTRICT, ON DELETE "
-                             f"RESTRICT or CASCADE): "
+                             f"RESTRICT, CASCADE or SET NULL of its first column): "
                              f"listed as foreign, not imported")
                 continue
             rel = propose(con["reftable"], con["refcolnames"][0], con["refcolnames"][1], f"foreign key {con['name']}")
@@ -485,7 +493,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 continue
             inclusions.append({"kind": "inclusion", "name": ident(con["name"]), "table": name,
                                "columns": con["colnames"], "relation": rel,
-                               "on_delete": "cascade" if con["del"] == "c" else "restrict",
+                               "on_delete": {"c": "cascade", "n": "set_null"}.get(con["del"], "restrict"),
                                **({"deferred": True} if con["deferred"] else {})})
 
     # --- membership tables, from the schema alone (D52): a two-column key with a foreign key on
@@ -800,9 +808,10 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
     # #60: a cascade deletes rows nothing else may read (the checker refuses one on a table that
     # backs a relation); such a key stays foreign
     backing = {r["table"] for r in relations.values() if "table" in r}
-    for r in [r for r in rules if r.get("on_delete") == "cascade" and r["table"] in backing]:
+    for r in [r for r in rules if r.get("on_delete") in ("cascade", "set_null") and r["table"] in backing]:
         rules.remove(r)
-        notes.append(f"foreign key {r['name']} on {r['table']} is ON DELETE CASCADE, and a relation reads "
+        notes.append(f"foreign key {r['name']} on {r['table']} is ON DELETE {r['on_delete'].upper().replace('_', ' ')}, "
+                     f"and a relation reads "
                      f"{r['table']}, so the proofs could not follow the rows it deletes: listed as foreign, "
                      f"not imported")
     checked = finish(rules)

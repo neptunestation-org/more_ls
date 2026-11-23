@@ -55,7 +55,7 @@ Compiled as `(select now())`.
 |---|---|---|
 | `policy` (role, command, permissive/restrictive, using, check) | QF + UF | `CREATE POLICY` |
 | `check` (table, predicate) | QF | `CHECK ((p) IS TRUE)` |
-| `inclusion` (table, cols → rel, on_delete) | EPR | composite FK, MATCH SIMPLE, `ON UPDATE RESTRICT`, `ON DELETE RESTRICT` or `CASCADE` |
+| `inclusion` (table, cols → rel, on_delete) | EPR | composite FK, MATCH SIMPLE, `ON UPDATE RESTRICT`, `ON DELETE RESTRICT`, `CASCADE` or `SET NULL (c1)` |
 | `transition` (table, predicate over old/new) | QF over two rows | one `BEFORE UPDATE` row trigger template |
 | `column_rule` (role, table, columns, read/write) | propositional | column privileges (`GRANT SELECT (cols)`; no table-level grant to that role) |
 | `column_rule` with `when` (write) | old image + context + memberships | BEFORE UPDATE trigger, for the role only: `T(when(old)) → other columns unchanged` |
@@ -194,6 +194,12 @@ obligation, no implicit relation policy and no column grant.
   compiler proves, per role that can delete the referenced row, that its delete policies on the
   referring table pass every referring row: a cascade deletes nothing a direct delete could not.
   Updating a referenced pair stays `RESTRICT`.
+- An `on_delete set_null` inclusion's FK (`SET NULL (c1)`) updates each referring row to
+  `c1 = NULL`, everything else unchanged, as the table owner: no policy or column guard, but the
+  CHECKs and transition triggers run.  The induction step adds the nulled rows as a third case
+  (`I(row) ∧ refers(row, deleted) ∧ row' = row[c1 := NULL] → I(row')`), the compiler proves the
+  checks and transitions allow `row'` (else the delete fails), and, per role that can delete the
+  referenced row, that the role's own update of `row` to `row'` would be admitted.
 - Other targets differ (e.g. Snowflake defaults FKs to MATCH FULL); out of scope for v1.
 
 ## 5. Policy combination (Postgres semantics)

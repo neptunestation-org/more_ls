@@ -303,9 +303,29 @@ class Oracle:
             return "filtered"
         if reads_columns and not holds(effective(self.spec, table, role, "select", "using"), old, ctx, db):
             return "filtered"
-        if self._fk_restrict_violation(table, old, None, db):
+        if self._fk_restrict_violation(table, old, None, db) or not self._set_null_ok(table, old, ctx, db):
             return "error"
         return "ok"
+
+    def _set_null_ok(self, table: str, old: Row, ctx: dict, db: Database) -> bool:
+        """#62: a set_null inclusion's key updates each row that refers to the deleted row to NULL
+        in its first column, as the table owner: no policy or column guard, but the checks and the
+        transition triggers run, and one that refuses fails the delete."""
+        for inc in self.spec.inclusions():
+            rel = self.spec.relations[inc.relation]
+            if inc.on_delete != "set_null" or rel.table != table:
+                continue
+            pair = (old[rel.key], old[rel.value])
+            if None in pair:
+                continue
+            for r in db.tables.get(inc.table, []):
+                if (r[inc.columns[0]], r[inc.columns[1]]) != pair:
+                    continue
+                new = {**r, inc.columns[0]: None}
+                if not holds(row_constraints(self.spec, inc.table, at_commit=True), new, ctx, db) \
+                        or not holds(transition_constraints(self.spec, inc.table), new, ctx, db, old=r, new=new):
+                    return False
+        return True
 
     def _fk_restrict_violation(self, table: str, old: Row, new: Row | None, db: Database) -> bool:
         """ON DELETE/UPDATE RESTRICT: removing a referenced (key, value) pair of a relation
@@ -327,7 +347,7 @@ class Oracle:
             if new is not None and (new[rel.key], new[rel.value]) == pair:
                 continue
             for inc in self.spec.inclusions():
-                if inc.relation != rname or (new is None and inc.on_delete == "cascade"):
+                if inc.relation != rname or (new is None and inc.on_delete != "restrict"):
                     continue
                 for r in db.tables.get(inc.table, []):
                     if r is old:

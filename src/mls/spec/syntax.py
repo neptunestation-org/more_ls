@@ -514,7 +514,7 @@ class Parser:
             r["columns"] = [c1, c2]
             r["relation"] = self.name("a relation")
             self.word("on_delete")
-            r["on_delete"] = self.word("cascade") if self.at_word("cascade") else self.word("restrict")
+            r["on_delete"] = self.word("restrict", "cascade", "set_null")
             if self.at_word("deferred"):
                 self.advance()
                 r["deferred"] = True

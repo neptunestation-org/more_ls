@@ -202,6 +202,19 @@ def cascade_spec() -> Spec:
     return make(d)
 
 
+def set_null_spec() -> Spec:
+    """#62: a note's document is in the note's tenant, and deleting the document keeps the note,
+    with no document (`on_delete set_null` nulls doc_id, the tenant stays); a member could make
+    that edit themselves, and a note's tenant never changes (a transition the nulling keeps)."""
+    d = json.loads(cascade_spec().model_dump_json(by_alias=True, exclude_none=True))
+    d["tables"]["doc_notes"]["columns"]["doc_id"]["nullable"] = True
+    n2 = next(r for r in d["rules"] if r["id"] == "N2")
+    n2["on_delete"] = "set_null"
+    d["rules"].append({"id": "N4", "kind": "transition", "name": "note_tenant_fixed", "table": "doc_notes",
+                       "predicate": {"cmp": [{"new": "tenant_id"}, "=", {"old": "tenant_id"}]}})
+    return make(d)
+
+
 def column_rule_spec() -> Spec:
     d = base()
     d["rules"].append({"id": "C1", "kind": "column_rule", "role": "authenticated", "table": "docs",

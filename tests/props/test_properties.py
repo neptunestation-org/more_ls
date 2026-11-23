@@ -621,3 +621,40 @@ def test_changes_only_is_the_upper_bound_a_column_guard_proves():
     no_guard = copy.deepcopy(d)
     no_guard["rules"] = [r for r in no_guard["rules"] if r["id"] != "G1"]
     assert verdicts(make(no_guard))["P13"] == "REFUTED"
+
+
+def test_a_set_null_inclusion_nulls_only_what_the_rules_allow():
+    """#62: deleting a document keeps its notes with no document.  The compiler refuses the key
+    when a transition forbids the nulling (every such delete would fail) or when the deleter could
+    not make that edit itself (no update policy on notes); an invariant the nulled note breaks is
+    refuted on that row."""
+    from mls.english import rule
+    from mls.spec.syntax import parse
+    from mls.terse import render
+    from tests.templates.specs import set_null_spec
+
+    spec = set_null_spec()
+    assert set(verdicts(spec).values()) == {"PROVED"}
+    assert compile_spec(spec)
+    n2 = next(r for r in spec.rules if r.id == "N2")
+    assert rule(spec, n2).endswith("removing it sets doc_id to empty on the rows of doc_notes that refer to it.")
+    assert parse(render(spec)) == spec
+    d = json.loads(spec.model_dump_json(by_alias=True, exclude_none=True))
+    fixed = copy.deepcopy(d)
+    fixed["rules"].append({"id": "N5", "kind": "transition", "name": "note_doc_fixed", "table": "doc_notes",
+                           "predicate": {"cmp": [{"new": "doc_id"}, "=", {"old": "doc_id"}]}})
+    with pytest.raises(CompileError) as e:
+        compile_spec(make(fixed))
+    assert "a check or transition rule on 'doc_notes' refuses that change" in str(e.value)
+    no_update = copy.deepcopy(d)
+    n1 = next(r for r in no_update["rules"] if r["id"] == "N1")
+    n1["command"] = "select"
+    del n1["check"]
+    no_update["rules"].append({**n1, "id": "N1d", "name": "member_notes_delete", "command": "delete"})
+    with pytest.raises(CompileError) as e:
+        compile_spec(make(no_update))
+    assert "is one it could not make that change to itself" in str(e.value)
+    kept = copy.deepcopy(d)
+    next(p for p in kept["properties"] if p["id"] == "P4")["invariants"].append(
+        {"table": "doc_notes", "predicate": {"not": {"is_null": {"col": "doc_id"}}}})
+    assert verdicts(make(kept))["P4"] == "REFUTED"

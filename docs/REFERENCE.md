@@ -554,8 +554,10 @@ of the relation (predicate `is_null(c1) ∨ is_null(c2) ∨ member(R, c1, c2)`),
 cannot be changed while a row refers to it.  The two columns must differ and match the
 relation's key and value types.  `on_delete` says what deleting a referenced pair does:
 `restrict` refuses it while a row refers to it; `cascade` deletes the rows that refer to it in
-the same statement.  Compiles to a composite foreign key `MATCH SIMPLE ON UPDATE RESTRICT ON
-DELETE RESTRICT` (or `CASCADE`) and an index on the two columns.
+the same statement; `set_null` sets the first column of the rows that refer to it to NULL and
+keeps them (a delivery whose rider is deleted stays, with no rider, in its shop), so that column
+must be nullable.  Compiles to a composite foreign key `MATCH SIMPLE ON UPDATE RESTRICT ON
+DELETE RESTRICT` (or `CASCADE`, or `SET NULL (<first column>)`) and an index on the two columns.
 
 A cascade deletes the referring rows as the table's owner, past their own policies, so the
 compiler proves that it deletes nothing the deleter could not delete directly: for every role
@@ -563,16 +565,22 @@ that can delete a row of the relation's table, every row that refers to it must 
 role's delete policies on the inclusion's table.  If not, compiling fails with `inclusion '<name>'
 deletes the rows of '<table>' that refer to a deleted '<parent>' row, but role '<role>' can
 delete …`; the fix is a delete policy covering those rows, a narrower delete on the parent, or
-`restrict`.  The proofs see a cascade only as referring rows that are gone, so the checker
-refuses `cascade` on a table that a relation reads, that a hierarchy is on, or that a
-cardinality rule counts or is grouped by (`a cascade deletes rows of '<table>' along with the
-referenced row, and relation '<R>' reads it, …`).
+`restrict`.  `set_null` is an update of the referring rows, also as the owner: no policy or
+column rule applies, but the checks and transition rules do.  The compiler proves that they
+allow it (`… a check or transition rule on '<table>' refuses that change, so such a delete would
+fail`), and that every role that can delete the referenced row could make that edit itself, with
+its update policies, column privileges and column rules (`… is one it could not make that change
+to itself …`).  The proofs see these rows only as gone or nulled, so the checker refuses
+`cascade` and `set_null` on a table that a relation reads, that a hierarchy is on, or that a
+cardinality rule counts or is grouped by (`on_delete cascade deletes rows of '<table>' along with
+the referenced row, and relation '<R>' reads it, …`).
 
 On an existing database, `mls check --dsn` and `mls preflight` refuse an inclusion next to one
 of the table's own foreign keys, on columns among the inclusion's and onto the same table, whose
-delete action clashes with it: `restrict` beside `CASCADE`, `SET NULL` or `SET DEFAULT`, and
-`cascade` beside `RESTRICT`, `SET NULL` or `SET DEFAULT` (`NO ACTION` is checked after the
-cascade, so it never clashes).  A delete of a parent row fires both keys, and whether it is
+delete action clashes with it: `restrict` beside `CASCADE`, `SET NULL` or `SET DEFAULT`,
+`cascade` beside `RESTRICT`, `SET NULL` or `SET DEFAULT`, and `set_null` beside `RESTRICT`,
+`CASCADE` or `SET DEFAULT` (`NO ACTION` is checked at the end of the statement, so it never
+clashes).  A delete of a parent row fires both keys, and whether it is
 refused or deletes the referring rows would depend on which fires first.  The fix names the
 `on_delete` that keeps the existing key's behaviour, or the key to change or drop.
 
@@ -1131,7 +1139,7 @@ reads.  Every policy becomes a rule, one per role it applies to, whose `using` a
 lifter reads (below); what it cannot read is an opaque block with the policy's catalog
 signature: the columns it depends on or names, the context values whose source it reads, the
 relations on the tables it names.  A foreign key of the inclusion shape (two columns onto a key
-pair, `MATCH SIMPLE`, `ON UPDATE RESTRICT`, `ON DELETE RESTRICT` or `CASCADE` (an inclusion with that `on_delete`), not deferrable or `DEFERRABLE INITIALLY
+pair, `MATCH SIMPLE`, `ON UPDATE RESTRICT`, `ON DELETE RESTRICT`, `CASCADE` or `SET NULL` of its first, nullable column (an inclusion with that `on_delete`), not deferrable or `DEFERRABLE INITIALLY
 DEFERRED`, the latter a deferred inclusion) becomes an inclusion rule, except one per cycle of
 such keys checked after each statement, which is listed as foreign with a note; column-level
 grants become column rules; a CHECK the lifter reads becomes a check rule; a trigger of the

@@ -115,7 +115,7 @@ object); disabling RLS on relation tables (exposes every membership row).
 
 **D22. Inclusion FKs are `ON UPDATE RESTRICT ON DELETE RESTRICT`.** Changing a referenced pair is
 modeled as delete+insert, so the update case needs the same guard as the delete case.
-*Amended 2026-11-22 by D79 (#60):* the delete side may be `CASCADE`; the update side stays RESTRICT.
+*Amended 2026-11-22 by D79 (#60):* the delete side may be `CASCADE`; the update side stays RESTRICT. *Amended 2026-11-23 by D81 (#62):* or `SET NULL` of the first column.
 
 **D23. Spec JSON shape (ROADMAP open detail).** Single-key objects for terms and predicates
 (`{"col"}`, `{"ctx"}`, `{"const"}`, `{"old"}`, `{"new"}`; `{"cmp"}`, `{"member"}`, `{"now_between"}`,
@@ -1625,3 +1625,25 @@ when a column is added, the same reason D78 rejected a transition); an old/new `
 cannot read the new row, so the property would promise what no rule enforces).  Lean: the
 obligation is `update_assumptions → unchanged`, built from transcribed parts except the guard term
 (D78's gap).
+
+**D81. An inclusion may set its first column NULL on delete (#62, amends D79).**
+Scarpar: "a delivery's rider is one of its own shop's riders", while deleting a rider unassigns its
+deliveries (`deliveries_rider_id_fkey ON DELETE SET NULL`); a restrict or cascade inclusion beside
+that key is refused by `check.fk_action_errors` (D79), so the fact could not be enforced.  Decision:
+`on_delete set_null` compiles `ON DELETE SET NULL (<first column>)` (the column-list form, PG 15+,
+our floor), so the row keeps its second column, its shop; the first column must be nullable
+(checker), and the referring column comes first as in every inclusion.  The key's update runs as the
+table owner, so no policy and no column guard (`WHEN current_user = role`) applies, while the CHECKs
+and the transition triggers do.  Proofs: (1) the induction step gets a third case, the rows a
+set_null inclusion nulls (`_nulled`: the same row with the first column NULL), so an invariant the
+nulled row breaks is refuted; the restrict guard keeps covering the rows left unchanged; (2) two
+soundness obligations (`_set_null_obligations`, inside `cascade_obligations`): the checks and
+transitions admit the nulled row (else every such delete fails, which the oracle predicts), and each
+role that can delete the referenced row would be admitted to make that update itself (`net_terms`:
+policies, constraints, transitions, column privileges, guards), D79's reasoning for updates; (3) the
+same limits as cascade (no relation, hierarchy or cardinality rule on the table).  Clashes: set_null
+beside RESTRICT, CASCADE or SET DEFAULT.  Import reads `SET NULL (first column)` onto a key pair
+when that column is nullable.  Fixture `specs.set_null_spec` (in the lift round trip), mutation
+`SET_NULL_BOTH` (plain `SET NULL` nulls the NOT NULL tenant too, so the delete fails).  Rejected:
+naming the nulled column (`set_null(c)`): the first column is the referring one in every inclusion
+written so far, and the second is the shared scope that must survive.

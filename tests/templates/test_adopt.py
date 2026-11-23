@@ -685,3 +685,26 @@ def test_a_cascading_key_imports_as_a_cascade_inclusion_and_a_clash_is_refused(b
         assert len(errs) == 1 and errs[0].path.endswith(".on_delete"), errs
         assert ("the table's own foreign key 'gadget_parts_gadget_id_fkey' on (gadget_id) is ON DELETE CASCADE"
                 in errs[0].message) and "use on_delete cascade" in errs[0].fix
+
+
+def test_a_set_null_key_imports_as_a_set_null_inclusion_and_a_clash_is_refused(brownfield):
+    """#62: a two-column key `ON DELETE SET NULL (its first column)` onto a key pair imports as an
+    on_delete set_null inclusion, beside which the table's own single-column SET NULL key (scarpar's
+    `deliveries.rider_id`) does not clash; the same inclusion as restrict does."""
+    with brownfield.transaction(force_rollback=True):
+        brownfield.execute("""
+            create table couriers (id int primary key, shop int not null, unique (id, shop));
+            create table drops (id int primary key,
+                courier_id int references couriers on delete set null, shop int not null,
+                constraint courier_in_shop foreign key (courier_id, shop) references couriers (id, shop)
+                    on update restrict on delete set null (courier_id));""")
+        res = import_schema(brownfield, policies="discard")
+        spec = check_spec(Spec.model_validate(res.spec))
+        inc = next(r for r in spec.inclusions() if r.name == "courier_in_shop")
+        assert inc.on_delete == "set_null" and inc.columns == ["courier_id", "shop"]
+        assert [e for e in verify_adopted(brownfield, spec) if "courier_in_shop" in e.message] == []
+        d = json.loads(spec.model_dump_json(by_alias=True, exclude_none=True))
+        next(r for r in d["rules"] if r.get("name") == "courier_in_shop")["on_delete"] = "restrict"
+        errs = [e for e in verify_adopted(brownfield, Spec.model_validate(d)) if "courier_in_shop" in e.message]
+        assert len(errs) == 1 and "is ON DELETE SET NULL" in errs[0].message, errs
+        assert "use on_delete set_null" in errs[0].fix

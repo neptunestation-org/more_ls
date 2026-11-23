@@ -194,6 +194,9 @@ union member the renderer does not cover.
   `soundness_errors`) proves a cascade deletes only rows the deleter could delete; `check --dsn` and
   `preflight` refuse a clashing delete action on the table's own key (`check.fk_action_errors`);
   import reads cascade keys; fixture `specs.cascade_spec`, mutation `CASCADE_AS_RESTRICT`.
+- D81: `on_delete set_null` nulls the (nullable) first column (`SET NULL (c1)`); the induction step's
+  third case covers the nulled rows, `_set_null_obligations` prove the checks/transitions allow it
+  and the deleter could make that update; fixture `specs.set_null_spec`, mutation `SET_NULL_BOTH`.
 - D80: property `changes_only <table> <role>: cols when p` (`obligations.changes_only`) is the upper
   bound of a column guard: the role's update assumptions and `T(p(old))` imply the other columns
   unchanged; test in `tests/props/test_properties.py`.

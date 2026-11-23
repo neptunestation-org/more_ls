@@ -988,7 +988,11 @@ class Checker:
                                          f"references a primary key or unique constraint on exactly those "
                                          f"two columns",
                      f"add [\"{rel.key}\", \"{rel.value}\"] to tables.{rel.table}.unique")
-        if r.on_delete == "cascade":
+        if r.on_delete == "set_null" and r.columns[0] in t.columns and not t.columns[r.columns[0]].nullable:
+            self.err(path + ".on_delete", f"on_delete set_null sets {r.table}.{r.columns[0]} NULL, and it is "
+                                          f"NOT NULL",
+                     f"make {r.columns[0]} nullable, or use on_delete restrict or cascade")
+        if r.on_delete != "restrict":
             # #60 (D79): the proofs see a cascade only as rows of r.table that are gone; nothing
             # else may read those rows, or a delete would change it unmodelled
             uses = ([f"relation '{n}' reads it" for n, b in self.spec.base_relations().items() if b.table == r.table]
@@ -996,9 +1000,10 @@ class Checker:
                     + [f"cardinality rule '{c.name}' counts it" for c in self.spec.cardinalities()
                        if r.table in (c.table, c.parent)])
             if uses:
-                self.err(path + ".on_delete", f"a cascade deletes rows of '{r.table}' along with the referenced "
-                                              f"row, and {'; '.join(uses)}, so the delete would change it "
-                                              f"without the proofs seeing it",
+                what = "deletes" if r.on_delete == "cascade" else "updates"
+                self.err(path + ".on_delete", f"on_delete {r.on_delete} {what} rows of '{r.table}' along with the "
+                                              f"referenced row, and {'; '.join(uses)}, so the delete would change "
+                                              f"it without the proofs seeing it",
                          "use on_delete restrict (the referencing rows are deleted first), or state the "
                          "rule on a table nothing else reads")
         for j, (c, rc) in enumerate(zip(r.columns, (rel.key, rel.value))):
@@ -1120,7 +1125,7 @@ def fk_cycle_errors(spec: Spec, database: list) -> list[MlsError]:
 # confdeltype letters (pg_constraint) and the delete actions that, beside an inclusion's on the
 # same referencing rows, make the outcome of a delete depend on which key's trigger fires first
 FK_ACTIONS = {"a": "NO ACTION", "r": "RESTRICT", "c": "CASCADE", "n": "SET NULL", "d": "SET DEFAULT"}
-_CLASHES = {"restrict": {"c", "n", "d"}, "cascade": {"r", "n", "d"}}
+_CLASHES = {"restrict": {"c", "n", "d"}, "cascade": {"r", "n", "d"}, "set_null": {"r", "c", "d"}}
 
 
 def fk_action_errors(spec: Spec, rows: list[dict]) -> list[MlsError]:
@@ -1140,12 +1145,13 @@ def fk_action_errors(spec: Spec, rows: list[dict]) -> list[MlsError]:
                 continue
             action = FK_ACTIONS[fk["on_delete"]]
             c.err(c.rule_paths[i] + ".on_delete",
-                  f"inclusion '{r.name}' is ON DELETE {r.on_delete.upper()}, and the table's own foreign key "
+                  f"inclusion '{r.name}' is ON DELETE {r.on_delete.upper().replace('_', ' ')}, and the table's own foreign key "
                   f"'{fk['name']}' on ({', '.join(fk['columns'])}) is ON DELETE {action} onto the same table "
                   f"'{parent}': a delete of a '{parent}' row fires both, and whether it is refused or deletes "
                   f"the rows of '{r.table}' depends on which fires first",
                   ("use on_delete cascade to keep the existing key's behaviour" if fk["on_delete"] == "c" else
                    "use on_delete restrict" if fk["on_delete"] == "r" else
+                   "use on_delete set_null to keep the existing key's behaviour" if fk["on_delete"] == "n" else
                    f"change '{fk['name']}' to ON DELETE RESTRICT or CASCADE")
                   + f", or drop '{fk['name']}'")
     return c.sink.errors

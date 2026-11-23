@@ -608,3 +608,16 @@ def test_a_cascade_inclusion_is_refused_on_a_table_something_else_reads():
     n = len(d["rules"])
     assert has(errs, f"$.rules[{n - 1}].on_delete", "relation 'member_of' reads it")
     assert has(errs, f"$.rules[{n - 2}].on_delete", "relation 'admin_of' reads it")
+
+
+def test_a_set_null_inclusion_needs_a_nullable_first_column():
+    """#62: the key sets the first column NULL, so it must be nullable."""
+    d = base()
+    d["tables"]["docs"]["unique"] = [["id", "tenant_id"]]
+    d["relations"]["doc_tenant"] = {"table": "docs", "key": "id", "value": "tenant_id"}
+    d["tables"]["doc_notes"] = {"mode": "owned", "primary_key": ["id"], "columns": {
+        "id": {"type": "int", "nullable": False}, "doc_id": {"type": "int", "nullable": False},
+        "tenant_id": {"type": "int", "nullable": False}}}
+    d["rules"].append({"id": "C1", "kind": "inclusion", "name": "note_in_doc", "table": "doc_notes",
+                       "columns": ["doc_id", "tenant_id"], "relation": "doc_tenant", "on_delete": "set_null"})
+    assert has(errors(d), f"$.rules[{len(d['rules']) - 1}].on_delete", "sets doc_notes.doc_id NULL, and it is NOT NULL")

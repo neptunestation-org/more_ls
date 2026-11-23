@@ -104,6 +104,9 @@ def rule(spec: Spec, r: Rule) -> str:
                 + (f"such a {r.relation} entry cannot be changed while a row of {r.table} refers to it, "
                    f"and removing it deletes the rows of {r.table} that refer to it."
                    if r.on_delete == "cascade" else
+                   f"such a {r.relation} entry cannot be changed while a row of {r.table} refers to it, "
+                   f"and removing it sets {r.columns[0]} to empty on the rows of {r.table} that refer to it."
+                   if r.on_delete == "set_null" else
                    f"such a {r.relation} entry cannot be removed or changed while a row of {r.table} "
                    f"refers to it.")
                 + (" It is checked when the transaction commits, so the two rows may be written in either "

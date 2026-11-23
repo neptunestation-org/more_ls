@@ -410,9 +410,10 @@ class InclusionRule(RuleBase):
     kind: Literal["inclusion"]
     columns: list[str] = Field(min_length=2, max_length=2)
     relation: str
-    # #60 (D79, amends D22): `cascade` deletes the referencing rows with the referenced one; a
-    # change of the referenced pair stays refused either way
-    on_delete: Literal["restrict", "cascade"]
+    # #60 (D79, amends D22): `cascade` deletes the referencing rows with the referenced one; #62:
+    # `set_null` sets their first column NULL instead; a change of the referenced pair stays
+    # refused either way
+    on_delete: Literal["restrict", "cascade", "set_null"]
     # #35: checked when the transaction commits (DEFERRABLE INITIALLY DEFERRED), so a cycle of
     # foreign keys through it can be written in two statements; the proofs do not assume it
     deferred: bool | None = None
