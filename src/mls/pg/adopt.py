@@ -904,12 +904,14 @@ def verify_adopted(conn: psycopg.Connection, spec: Spec, schema: str = "public")
     every observed table exists, and no owned table is owned by an app role (D45)."""
     errors: list[MlsError] = []
     from mls.pg.catalog import all_foreign_keys
-    from mls.spec.check import fk_action_errors, fk_cycle_errors
+    from mls.pg.catalog import before_update_triggers
+    from mls.spec.check import fk_action_errors, fk_cycle_errors, guard_order_errors
     from mls.spec.fkcycle import database_fks
 
     with conn.transaction():
         cat = _read(conn, schema)
         fks = all_foreign_keys(conn, schema)
+        errors += guard_order_errors(spec, before_update_triggers(conn, schema))  # #58
     errors += fk_cycle_errors(spec, database_fks(fks, spec))  # #35: with the database's own keys
     errors += fk_action_errors(spec, fks)  # #60
     for name, labels in spec.enums.items():

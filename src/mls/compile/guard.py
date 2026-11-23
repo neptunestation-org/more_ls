@@ -18,6 +18,14 @@ def guard_fn_name(r: ColumnRule) -> str:
     return f"mls_cg_{r.table}_{r.name}"
 
 
+def guard_trigger_name(r: ColumnRule, mutations: frozenset[Mutation] = frozenset()) -> str:
+    """#58 (amends D78): Postgres fires a table's BEFORE row triggers in byte order of their names,
+    and a trigger of the table's own that rewrites the row (an `updated_at` stamp) must come after
+    the guard, or the guard sees a column the caller did not change.  `0` sorts before letters and
+    `_`, so before any ordinary trigger name; `check --dsn` refuses one that still sorts first."""
+    return f"zz_mls_cg_{r.name}" if Mutation.GUARD_SORTS_LAST in mutations else f"0_mls_cg_{r.name}"
+
+
 def on_old(p: Pred) -> Pred:
     """The condition with its columns read from the old row (`{"col": c}` -> `{"old": c}`)."""
     def walk(x):
@@ -53,10 +61,10 @@ def guard_fn_ddl(r: ColumnRule, sc: SqlCompiler, replace: bool = False) -> str:
         f"end $mls$")
 
 
-def guard_trigger_ddl(r: ColumnRule) -> str:
-    return (f"create trigger {q(r.name)} before update on {q(r.table)} for each row "
+def guard_trigger_ddl(r: ColumnRule, mutations: frozenset[Mutation] = frozenset()) -> str:
+    return (f"create trigger {q(guard_trigger_name(r, mutations))} before update on {q(r.table)} for each row "
             f"when (current_user = {const_sql(r.role, 'text')}) execute function {q(guard_fn_name(r))}()")
 
 
 def guard_ddl(r: ColumnRule, sc: SqlCompiler) -> list[str]:
-    return [guard_fn_ddl(r, sc), guard_trigger_ddl(r)]
+    return [guard_fn_ddl(r, sc), guard_trigger_ddl(r, sc.mutations)]

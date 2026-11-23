@@ -643,12 +643,21 @@ update by the role changes no column outside the list; an UNKNOWN or FALSE condi
 nothing.  The condition is in policy scope without the index shape (§10.2): columns, context
 values, memberships, and a membership may be negated (`not staff_of(@uid, org_id)`).  It is a guard, not a grant: the role keeps the columns its policies and its
 other column rules give it, and the role needs `name`.  Compiles to a `BEFORE UPDATE ... FOR EACH
-ROW WHEN (current_user = '<role>')` trigger `<name>` calling `mls_cg_<table>_<name>()`, which
+ROW WHEN (current_user = '<role>')` trigger `0_mls_cg_<name>` calling `mls_cg_<table>_<name>()`, which
 raises `insufficient_privilege` (`MLS column rule <name> on <table> violated`) when the condition
 is true and the row, as jsonb without the listed columns (and a hierarchy's depth), changed; so a
 column the spec does not declare is held too.  The trigger reads memberships as the caller, under
 the relation table's policies, as a policy does (the relation-visibility check applies).  The
 trusted roles that bypass the policies are not limited.
+
+Postgres fires a table's `BEFORE` row triggers in byte order of their names, and the `0` makes
+the guard fire before any trigger whose name starts with a letter or `_`.  That matters for a
+trigger of the table's own that rewrites the row, such as one that stamps `updated_at`: firing
+after the guard, it changes the row once the caller's edit has been checked; firing before, the
+guard would see a column the caller did not change and refuse the edit.  `mls check --dsn` and
+`mls preflight` refuse a guard when one of its table's own `BEFORE UPDATE` row triggers still
+sorts before it (`column rule '<name>' is checked by trigger '0_mls_cg_<name>' on '<table>', and
+the table's own trigger '<trigger>' fires before it …`; fix: rename that trigger or drop it).
 
 ## 12. Properties
 
@@ -903,7 +912,7 @@ All names are deterministic functions of the spec, so `mls drift` can match them
 | unique constraint | `<table>_<col>[_<col>...]_key` |
 | check constraint, foreign key, policy, trigger | the rule's `name` |
 | transition trigger function | `mls_tr_<table>_<name>()` |
-| column guard trigger function | `mls_cg_<table>_<name>()` (trigger `<name>`) |
+| column guard trigger function | `mls_cg_<table>_<name>()` (trigger `0_mls_cg_<name>`) |
 | implicit relation policy | `mls_rel_<relation>_<role>_<n>` |
 | hop visibility policy of a composed relation | `mls_rel_<relation>_h<i>_<role>_<n>` on the i-th hop table |
 | internal-role policy | `mls_internal_<table>` |

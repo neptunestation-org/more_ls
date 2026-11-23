@@ -1565,6 +1565,14 @@ than reading it back.  Lean: the guard term and the oracle check are not transcr
 hand, stale when one is added, and IS TRUE would limit on UNKNOWN); applying it to every role (a
 writer with no user would be refused, and the model takes context values as never NULL).  D42 is
 not reopened: it is about reading a column on some rows; this limits which columns an edit changes.
+*Amended 2026-11-23 (#58):* the trigger is `0_mls_cg_<name>`, not `<name>`.  Postgres fires a table's
+BEFORE row triggers in byte order of their names, and a trigger of the table's own that stamps a
+column outside the list (scarpar's `deliveries_touch_updated_at`) firing first makes the guard
+refuse every edit it applies to; `0` sorts before letters and `_`.  No prefix sorts before every
+quoted name, so `check --dsn` and `preflight` (`check.guard_order_errors` on
+`catalog.before_update_triggers`) refuse a guard when one of its table's own BEFORE UPDATE row
+triggers still sorts first.  The harness has no foreign triggers, so `tests/templates/test_guard.py`
+ties the order to Postgres, with mutation `GUARD_SORTS_LAST`.
 
 **D79. An inclusion may cascade its deletes (#60, amends D22).**
 Scarpar: "a variant or image is in its product's shop, a lesson in its course's shop", and deleting

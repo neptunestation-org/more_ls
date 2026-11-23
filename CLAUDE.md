@@ -186,7 +186,9 @@ union member the renderer does not cover.
 - D78: a write `column_rule` with `when p` is a per-row column guard (`compile/guard.py`, trigger
   `WHEN (current_user = role)`; `obligations.guard_terms` `T(p(old)) → unchanged`; `Oracle.guards_ok`);
   its memberships read as the caller through `Spec.caller_reads` (routing, visibility, grants);
-  fixture `specs.guard_spec`, mutation `GUARD_ANY_ROW`.
+  fixture `specs.guard_spec`, mutation `GUARD_ANY_ROW`.  #58: the trigger is `0_mls_cg_<name>` so it
+  fires before the table's own (`check.guard_order_errors` refuses one that sorts first);
+  `tests/templates/test_guard.py`, mutation `GUARD_SORTS_LAST`.
 - D79: an inclusion's `on_delete` may be `cascade` (ON UPDATE stays RESTRICT); refused on a table a
   relation, hierarchy or cardinality rule reads; `obligations.cascade_obligations` (in
   `soundness_errors`) proves a cascade deletes only rows the deleter could delete; `check --dsn` and

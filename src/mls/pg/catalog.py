@@ -227,6 +227,20 @@ order by t.relname, c.conname
 """
 
 
+BEFORE_UPDATE_TRIGGERS = """
+select c.relname, t.tgname
+from pg_trigger t join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = %s and not t.tgisinternal and t.tgtype & 1 = 1 and t.tgtype & 2 = 2 and t.tgtype & 16 = 16
+order by 1, 2
+"""
+
+
+def before_update_triggers(conn: psycopg.Connection, schema: str) -> list[dict]:
+    """Every BEFORE UPDATE row trigger on a table of `schema`: {table, name} (#58: one that fires
+    before a column guard can rewrite a column the guard then sees changed)."""
+    return [{"table": t, "name": n} for t, n in conn.execute(BEFORE_UPDATE_TRIGGERS, (schema,)).fetchall()]
+
+
 def all_foreign_keys(conn: psycopg.Connection, schema: str) -> list[dict]:
     """Every foreign key between two tables of `schema`, of any width: {name, table, parent,
     deferrable, on_delete, columns} (#35: a cycle of immediate ones makes two-statement inserts

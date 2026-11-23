@@ -1151,6 +1151,30 @@ def fk_action_errors(spec: Spec, rows: list[dict]) -> list[MlsError]:
     return c.sink.errors
 
 
+def guard_order_errors(spec: Spec, rows: list[dict]) -> list[MlsError]:
+    """#58, with the database read (`catalog.before_update_triggers`): a BEFORE UPDATE row trigger
+    of a guarded table's own that Postgres fires before the guard (byte order of the names).  If
+    it rewrites a column outside the guard's list, the guard sees it changed and refuses an edit
+    the caller made within the list."""
+    from mls.compile.guard import guard_trigger_name
+
+    c = Checker(spec)
+    own = {guard_trigger_name(g) for g in spec.column_guards()}
+    for i, r in enumerate(spec.rules):
+        if r not in spec.column_guards():
+            continue
+        name = guard_trigger_name(r)
+        for tg in rows:
+            if tg["table"] == r.table and tg["name"] not in own and tg["name"].encode() < name.encode():
+                c.err(c.rule_paths[i], f"column rule '{r.name}' is checked by trigger '{name}' on '{r.table}', "
+                                       f"and the table's own trigger '{tg['name']}' fires before it (Postgres "
+                                       f"fires a table's BEFORE triggers in name order): if it changes a column "
+                                       f"outside the rule's list, every edit by '{r.role}' it applies to is refused",
+                      f"rename '{tg['name']}' so that it sorts after '{name}' (a name starting with a letter or "
+                      f"'_' does), or drop it")
+    return c.sink.errors
+
+
 def check_spec(spec: Spec) -> Spec:
     """Expand the selectors (spec/selectors.py, D48), typecheck and fragment-check `spec`, then
     return it with its sugar expanded (spec/expand.py).  Every consumer must use the returned

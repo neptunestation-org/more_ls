@@ -107,12 +107,13 @@ def preflight(conn: psycopg.Connection, new: Spec, old: Spec | None = None, sche
     with conn.transaction(force_rollback=True):  # nests as a savepoint inside a caller's transaction
         with conn.cursor() as cur:
             cur.execute("set transaction read only")
-            from mls.pg.catalog import all_foreign_keys
-            from mls.spec.check import fk_action_errors, fk_cycle_errors
+            from mls.pg.catalog import all_foreign_keys, before_update_triggers
+            from mls.spec.check import fk_action_errors, fk_cycle_errors, guard_order_errors
             from mls.spec.fkcycle import database_fks
 
             fks = all_foreign_keys(conn, schema)
-            errors = fk_cycle_errors(new, database_fks(fks, new)) + fk_action_errors(new, fks)
+            errors = (fk_cycle_errors(new, database_fks(fks, new)) + fk_action_errors(new, fks)
+                      + guard_order_errors(new, before_update_triggers(conn, schema)))
             cur.execute(psql.SQL("set local search_path to {}, pg_catalog").format(psql.Identifier(schema)))
             live_cols: dict[str, dict[str, str] | None] = {t: _live_columns(cur, schema, t) for t in new.tables}
             for t, cols in live_cols.items():

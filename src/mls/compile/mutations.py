@@ -32,4 +32,5 @@ class Mutation(str, Enum):
     INCLUSION_NOT_DEFERRED = "inclusion_not_deferred"  # a deferred inclusion's foreign key checked per statement
     CASCADE_AS_RESTRICT = "cascade_as_restrict"  # #60: an on_delete cascade inclusion compiled ON DELETE RESTRICT
     GUARD_ANY_ROW = "guard_any_row"                  # a column guard that limits every row, its condition ignored
+    GUARD_SORTS_LAST = "guard_sorts_last"            # #58: a guard trigger named to fire after the table's own
     IDENT_UNQUOTED = "ident_unquoted"                # a predicate's column unquoted, so a mixed-case name folds
