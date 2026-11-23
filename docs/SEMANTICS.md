@@ -55,7 +55,7 @@ Compiled as `(select now())`.
 |---|---|---|
 | `policy` (role, command, permissive/restrictive, using, check) | QF + UF | `CREATE POLICY` |
 | `check` (table, predicate) | QF | `CHECK ((p) IS TRUE)` |
-| `inclusion` (table, cols → rel) | EPR | composite FK, MATCH SIMPLE, `ON DELETE RESTRICT` |
+| `inclusion` (table, cols → rel, on_delete) | EPR | composite FK, MATCH SIMPLE, `ON UPDATE RESTRICT`, `ON DELETE RESTRICT` or `CASCADE` |
 | `transition` (table, predicate over old/new) | QF over two rows | one `BEFORE UPDATE` row trigger template |
 | `column_rule` (role, table, columns, read/write) | propositional | column privileges (`GRANT SELECT (cols)`; no table-level grant to that role) |
 | `column_rule` with `when` (write) | old image + context + memberships | BEFORE UPDATE trigger, for the role only: `T(when(old)) → other columns unchanged` |
@@ -187,6 +187,13 @@ obligation, no implicit relation policy and no column grant.
   it (the stored-row constraints and the relation axioms leave it out).  Its `RESTRICT` side is
   immediate, as for any inclusion.  An inclusion that closes a cycle of FKs checked after each
   statement is refused (two inserts would fail in either order).
+- An `on_delete cascade` inclusion's FK deletes the referring rows in the statement that deletes
+  the referenced row, as the table owner, past their policies.  For an invariant the rows left
+  are the ones that did not refer to it, the same guard as `RESTRICT` gives.  Nothing else may read
+  the rows it deletes (no relation, hierarchy or cardinality rule on that table), and the
+  compiler proves, per role that can delete the referenced row, that its delete policies on the
+  referring table pass every referring row: a cascade deletes nothing a direct delete could not.
+  Updating a referenced pair stays `RESTRICT`.
 - Other targets differ (e.g. Snowflake defaults FKs to MATCH FULL); out of scope for v1.
 
 ## 5. Policy combination (Postgres semantics)
@@ -242,7 +249,8 @@ All are "assumptions ∧ ¬goal is UNSAT"; SAT yields a counterexample rendered 
 - **Invariant preservation (induction):** for every compiled transition τ (INSERT/UPDATE/DELETE on
   every table the invariant mentions, including referenced tables):
   `I(state) ∧ guards(τ) → I(τ(state))`. Referenced-table deletes are modeled with two copies of
-  the relation (`small(x,y) ⇔ big(x,y) ∧ ¬(x=u ∧ y=t)`) plus the FK RESTRICT guard.
+  the relation (`small(x,y) ⇔ big(x,y) ∧ ¬(x=u ∧ y=t)`) plus the FK RESTRICT guard (for a
+  cascade inclusion the same guard: the rows that referred to the pair are gone).
 - **Every writer's update (`always_on_update`):** `constraints(old) ∧ constraints(new) ∧
   transitions(old, new) → p(old, new)`, one step, with no policy and no column privilege among
   the assumptions: the trusted roles bypass both, and the CHECKs, foreign keys and transition

@@ -179,6 +179,29 @@ def deferred_spec() -> Spec:
     return make(d)
 
 
+def cascade_spec() -> Spec:
+    """#60 (D79): a document's notes are in its tenant (an inclusion into docs' (id, tenant_id)) and
+    go with it: a member deletes a document of their tenant, and its notes are deleted too, which a
+    member could delete one by one (the cascade obligation)."""
+    d = base()
+    d["tables"]["docs"]["unique"] = [["id", "tenant_id"]]
+    d["tables"]["doc_notes"] = {"mode": "owned", "primary_key": ["id"], "columns": {
+        "id": {"type": "int", "nullable": False}, "doc_id": {"type": "int", "nullable": False},
+        "tenant_id": {"type": "int", "nullable": False}, "body": {"type": "text", "nullable": True}}}
+    d["relations"]["doc_tenant"] = {"table": "docs", "key": "id", "value": "tenant_id"}
+    member = {"member": {"relation": "member_of", "key": {"ctx": "uid"}, "value": {"col": "tenant_id"}}}
+    d["rules"] += [
+        {"id": "D1", "kind": "policy", "name": "member_delete", "table": "docs", "role": "authenticated",
+         "command": "delete", "mode": "permissive", "using": member},
+        {"id": "N1", "kind": "policy", "name": "member_notes", "table": "doc_notes", "role": "authenticated",
+         "command": "all", "mode": "permissive", "using": member, "check": member},
+        {"id": "N2", "kind": "inclusion", "name": "note_in_doc", "table": "doc_notes",
+         "columns": ["doc_id", "tenant_id"], "relation": "doc_tenant", "on_delete": "cascade"}]
+    d["properties"] = [p for p in d["properties"] if p["template"] != "least_privilege"]
+    next(p for p in d["properties"] if p["id"] == "P4")["invariants"].append({"rule": "N2"})
+    return make(d)
+
+
 def column_rule_spec() -> Spec:
     d = base()
     d["rules"].append({"id": "C1", "kind": "column_rule", "role": "authenticated", "table": "docs",

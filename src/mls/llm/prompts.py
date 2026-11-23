@@ -67,7 +67,10 @@ triggers, grants).  You never write SQL.
   insert has only "check"; select and delete only "using"; update may have both.
 - check: {"kind": "check", "predicate": p}  every stored row satisfies p (p may be UNKNOWN)
 - inclusion: {"kind": "inclusion", "columns": [a, b], "relation": R, "on_delete": "restrict"}  (a, b) of every
-  row is a pair of R (NULLs pass); the referenced pair cannot be deleted.  Add "deferred": true when its
+  row is a pair of R (NULLs pass); the referenced pair cannot be deleted.  "on_delete": "cascade" instead
+  deletes the rows that refer to it ("a product's variants go with it"); only on a table no relation
+  reads, and every role that deletes the referenced row must be able to delete those rows itself.
+  Add "deferred": true when its
   foreign key closes a cycle (R's table refers back to this one, as a membership refers to its
   organization): it is then checked at commit, so both rows can be written in one transaction
 - transition: {"kind": "transition", "predicate": p over {"old": c} and {"new": c}}  every update satisfies p

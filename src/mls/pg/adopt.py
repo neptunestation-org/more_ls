@@ -472,18 +472,20 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 (con["match"] != "s", "not MATCH SIMPLE"),
                 (con["upd"] != "r", f"ON UPDATE {actions.get(con['upd'], con['upd'])}"),
                 (con["deferrable"] and not con["deferred"], "DEFERRABLE INITIALLY IMMEDIATE"),
-                (con["del"] != "r", f"ON DELETE {actions.get(con['del'], con['del'])}"),
+                (con["del"] not in ("r", "c"), f"ON DELETE {actions.get(con['del'], con['del'])}"),
                 (not set(con["colnames"]) <= modelled[name], "a column of it is not modelled")) if bad]
             if unmet:
                 notes.append(f"foreign key {con['name']} on {name} is not an inclusion ({', '.join(unmet)}; an "
-                             f"inclusion is two columns onto a key pair, MATCH SIMPLE, ON UPDATE/DELETE RESTRICT): "
+                             f"inclusion is two columns onto a key pair, MATCH SIMPLE, ON UPDATE RESTRICT, ON DELETE "
+                             f"RESTRICT or CASCADE): "
                              f"listed as foreign, not imported")
                 continue
             rel = propose(con["reftable"], con["refcolnames"][0], con["refcolnames"][1], f"foreign key {con['name']}")
             if rel is None:
                 continue
             inclusions.append({"kind": "inclusion", "name": ident(con["name"]), "table": name,
-                               "columns": con["colnames"], "relation": rel, "on_delete": "restrict",
+                               "columns": con["colnames"], "relation": rel,
+                               "on_delete": "cascade" if con["del"] == "c" else "restrict",
                                **({"deferred": True} if con["deferred"] else {})})
 
     # --- membership tables, from the schema alone (D52): a two-column key with a foreign key on
@@ -795,6 +797,14 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
         relations[cname] = {"of": of, "through": [{"table": t, "key": k, "value": v} for t, k, v in hops]}
         notes.append(f"relation {cname} proposed: {of} . " + " . ".join(f"{t}({k}, {v})" for t, k, v in hops)
                      + " (a nested membership subquery reads it)")
+    # #60: a cascade deletes rows nothing else may read (the checker refuses one on a table that
+    # backs a relation); such a key stays foreign
+    backing = {r["table"] for r in relations.values() if "table" in r}
+    for r in [r for r in rules if r.get("on_delete") == "cascade" and r["table"] in backing]:
+        rules.remove(r)
+        notes.append(f"foreign key {r['name']} on {r['table']} is ON DELETE CASCADE, and a relation reads "
+                     f"{r['table']}, so the proofs could not follow the rows it deletes: listed as foreign, "
+                     f"not imported")
     checked = finish(rules)
     hidden = _hidden_memberships(checked, lifted_exprs)
     for x in lifted_exprs:  # #41: read again, the hidden memberships left to opaque blocks
@@ -894,13 +904,14 @@ def verify_adopted(conn: psycopg.Connection, spec: Spec, schema: str = "public")
     every observed table exists, and no owned table is owned by an app role (D45)."""
     errors: list[MlsError] = []
     from mls.pg.catalog import all_foreign_keys
-    from mls.spec.check import fk_cycle_errors
+    from mls.spec.check import fk_action_errors, fk_cycle_errors
     from mls.spec.fkcycle import database_fks
 
     with conn.transaction():
         cat = _read(conn, schema)
         fks = all_foreign_keys(conn, schema)
     errors += fk_cycle_errors(spec, database_fks(fks, spec))  # #35: with the database's own keys
+    errors += fk_action_errors(spec, fks)  # #60
     for name, labels in spec.enums.items():
         live_labels = cat["enums"].get(name)
         if live_labels is None:

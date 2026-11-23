@@ -30,6 +30,7 @@ ROUND_TRIP = {
     "transition": specs.transition_nullable_spec,
     "column": specs.column_rule_spec,
     "fk": specs.fk_spec,
+    "fk_cascade": specs.cascade_spec,  # #60: the ON DELETE CASCADE key reads back as a cascade inclusion
     "session_setting": specs.session_spec,
     "bigint": specs.bigint_spec,
     "pg_roles": specs.pg_roles_spec,

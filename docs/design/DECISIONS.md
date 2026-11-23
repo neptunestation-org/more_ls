@@ -115,6 +115,7 @@ object); disabling RLS on relation tables (exposes every membership row).
 
 **D22. Inclusion FKs are `ON UPDATE RESTRICT ON DELETE RESTRICT`.** Changing a referenced pair is
 modeled as delete+insert, so the update case needs the same guard as the delete case.
+*Amended 2026-11-22 by D79 (#60):* the delete side may be `CASCADE`; the update side stays RESTRICT.
 
 **D23. Spec JSON shape (ROADMAP open detail).** Single-key objects for terms and predicates
 (`{"col"}`, `{"ctx"}`, `{"const"}`, `{"old"}`, `{"new"}`; `{"cmp"}`, `{"member"}`, `{"now_between"}`,
@@ -1564,3 +1565,38 @@ than reading it back.  Lean: the guard term and the oracle check are not transcr
 hand, stale when one is added, and IS TRUE would limit on UNKNOWN); applying it to every role (a
 writer with no user would be refused, and the model takes context values as never NULL).  D42 is
 not reopened: it is about reading a column on some rows; this limits which columns an edit changes.
+
+**D79. An inclusion may cascade its deletes (#60, amends D22).**
+Scarpar: "a variant or image is in its product's shop, a lesson in its course's shop", and deleting
+a product deletes its variants and images, as the schema's single-column keys already do
+(`ON DELETE CASCADE`).  An inclusion was RESTRICT only (D22), and next to a cascading key on the
+same rows a parent delete fires both keys' RI triggers in name order, i.e. by constraint OID: tested
+on PG 18, with the cascading key older the delete cascades, with it newer it is refused.  The proofs
+said refused either way.  Decision: (1) `InclusionRule.on_delete` is `restrict | cascade`
+(terse `on_delete cascade`); the FK stays `ON UPDATE RESTRICT`, since D22's reason (a changed pair
+is delete+insert) is about updates.  (2) The invariant proofs need no change: after a delete, the
+rows left are the ones that did not refer to the pair, which is the RESTRICT guard
+(`obligations._restrict_guard`).  The cascade's other effect, rows of the inclusion's table that are
+gone, is invisible to the proofs only if nothing reads that table, so the checker refuses `cascade`
+on a table that backs a relation (an inclusion target included, so a cascade never chains), carries
+a hierarchy, or is counted or grouped by a cardinality rule.  (3) RI actions run as the table owner,
+past the referring table's policies, so a delete property on that table could be broken by a parent
+delete.  A soundness obligation (`obligations.cascade_obligations`, run by
+`compile/plan.py:soundness_errors` and so by the loop) proves for each role that can delete a parent
+row that its effective delete on the referring table is TRUE of every row that refers to it: a
+cascade deletes nothing the role could not delete directly.  (4) The order dependence is refused
+on an existing database: `check --dsn` and `preflight` (`check.fk_action_errors` on
+`catalog.all_foreign_keys`, which now reads `confdeltype` and the key's columns) refuse an inclusion
+next to a foreign key of its table onto the same parent, on columns among its own, whose delete
+action clashes (`restrict` with CASCADE/SET NULL/SET DEFAULT; `cascade` with RESTRICT/SET NULL/SET
+DEFAULT; NO ACTION is checked at the end of the statement, after any cascade, so it never clashes).
+(5) Import reads a two-column `ON UPDATE RESTRICT ON DELETE CASCADE` key onto a key pair as a
+cascade inclusion, unless a relation reads its table (then foreign, with a note).  The oracle
+skips a cascade inclusion's RESTRICT check on delete; the differential compares outcomes only
+(statements roll back), and mutation `CASCADE_AS_RESTRICT` makes the delete of a parent with
+referring rows an error that the model calls ok.  Fixture `specs.cascade_spec` (a document's
+notes go with it); it is also in the lift round trip.  Lean: not transcribed (lean/CLAUDE.md).
+Rejected: refusing only the clash and leaving cascade out (the business answer was "delete them
+too", and the existing keys already do it, unproved); cascades that chain or touch read tables
+(each would need the deleted rows in the relation axioms, a frame the induction step does not
+have).

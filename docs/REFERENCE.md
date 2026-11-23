@@ -550,15 +550,36 @@ validated; the proofs assume every stored row satisfies every check.
 
 Every row whose two columns are both non-NULL has `(columns[0], columns[1])` as a stored pair
 of the relation (predicate `is_null(c1) ∨ is_null(c2) ∨ member(R, c1, c2)`), and such a pair
-cannot be deleted or changed while a row refers to it.  The two columns must differ and match
-the relation's key and value types.  `on_delete` is `restrict` only.  Compiles to a composite
-foreign key `MATCH SIMPLE ON UPDATE RESTRICT ON DELETE RESTRICT` and an index on the two
-columns.
+cannot be changed while a row refers to it.  The two columns must differ and match the
+relation's key and value types.  `on_delete` says what deleting a referenced pair does:
+`restrict` refuses it while a row refers to it; `cascade` deletes the rows that refer to it in
+the same statement.  Compiles to a composite foreign key `MATCH SIMPLE ON UPDATE RESTRICT ON
+DELETE RESTRICT` (or `CASCADE`) and an index on the two columns.
+
+A cascade deletes the referring rows as the table's owner, past their own policies, so the
+compiler proves that it deletes nothing the deleter could not delete directly: for every role
+that can delete a row of the relation's table, every row that refers to it must pass that
+role's delete policies on the inclusion's table.  If not, compiling fails with `inclusion '<name>'
+deletes the rows of '<table>' that refer to a deleted '<parent>' row, but role '<role>' can
+delete …`; the fix is a delete policy covering those rows, a narrower delete on the parent, or
+`restrict`.  The proofs see a cascade only as referring rows that are gone, so the checker
+refuses `cascade` on a table that a relation reads, that a hierarchy is on, or that a
+cardinality rule counts or is grouped by (`a cascade deletes rows of '<table>' along with the
+referenced row, and relation '<R>' reads it, …`).
+
+On an existing database, `mls check --dsn` and `mls preflight` refuse an inclusion next to one
+of the table's own foreign keys, on columns among the inclusion's and onto the same table, whose
+delete action clashes with it: `restrict` beside `CASCADE`, `SET NULL` or `SET DEFAULT`, and
+`cascade` beside `RESTRICT`, `SET NULL` or `SET DEFAULT` (`NO ACTION` is checked after the
+cascade, so it never clashes).  A delete of a parent row fires both keys, and whether it is
+refused or deletes the referring rows would depend on which fires first.  The fix names the
+`on_delete` that keeps the existing key's behaviour, or the key to change or drop.
 
 `"deferred": true` (terse: `... on_delete restrict deferred`) compiles the foreign key
 `DEFERRABLE INITIALLY DEFERRED`: a row may be written before the pair it refers to, within one
 transaction, and the key is checked when the transaction commits.  Removing a referenced pair
-is still refused at once (Postgres never defers `RESTRICT`).  The proofs do not assume a
+is still refused, or its referring rows deleted, at once (Postgres never defers `RESTRICT` or
+`CASCADE`).  The proofs do not assume a
 deferred inclusion: a policy, check or trigger runs while the pair may still be missing.
 
 An inclusion that closes a cycle of foreign keys checked after each statement is refused: for
@@ -1084,7 +1105,7 @@ reads.  Every policy becomes a rule, one per role it applies to, whose `using` a
 lifter reads (below); what it cannot read is an opaque block with the policy's catalog
 signature: the columns it depends on or names, the context values whose source it reads, the
 relations on the tables it names.  A foreign key of the inclusion shape (two columns onto a key
-pair, `MATCH SIMPLE`, `ON UPDATE/DELETE RESTRICT`, not deferrable or `DEFERRABLE INITIALLY
+pair, `MATCH SIMPLE`, `ON UPDATE RESTRICT`, `ON DELETE RESTRICT` or `CASCADE` (an inclusion with that `on_delete`), not deferrable or `DEFERRABLE INITIALLY
 DEFERRED`, the latter a deferred inclusion) becomes an inclusion rule, except one per cycle of
 such keys checked after each statement, which is listed as foreign with a note; column-level
 grants become column rules; a CHECK the lifter reads becomes a check rule; a trigger of the

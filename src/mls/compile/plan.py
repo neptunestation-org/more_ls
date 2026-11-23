@@ -70,7 +70,7 @@ class Script:
 
 def soundness_errors(spec: Spec) -> list[MlsError]:
     """Obligations the compiler must discharge before emitting (see props/obligations.py)."""
-    from mls.props.obligations import relation_visibility_obligations
+    from mls.props.obligations import cascade_obligations, relation_visibility_obligations
     from mls.props.runner import run_obligation
 
     errors: list[MlsError] = []
@@ -91,7 +91,7 @@ def soundness_errors(spec: Spec) -> list[MlsError]:
                         fix=f"add {', '.join(repr(c) for c in sorted(cols - g))} to the read column rule on "
                             f"'{table}'",
                         code="compile"))
-    for ob in relation_visibility_obligations(spec):
+    for ob in relation_visibility_obligations(spec) + cascade_obligations(spec):
         res = run_obligation(spec, ob)
         if res.verdict != "PROVED":
             errors.append(MlsError(

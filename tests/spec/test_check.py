@@ -592,3 +592,19 @@ def test_a_column_rule_condition_needs_a_write_rule_with_a_name():
     assert has(errs, f"$.rules[{n - 3}].when", "only a write column rule takes a condition")
     assert has(errs, f"$.rules[{n - 2}]", "a column rule with a condition needs a name")
     assert has(errs, f"$.rules[{n - 1}].when.cmp[0]", "old/new references are only allowed")
+
+
+def test_a_cascade_inclusion_is_refused_on_a_table_something_else_reads():
+    """#60 (D79): the proofs see a cascade only as referencing rows that are gone, so the table
+    it deletes from may back no relation, hierarchy or cardinality limit."""
+    d = base()
+    d["tables"]["docs"]["unique"] = [["id", "tenant_id"]]
+    d["relations"]["doc_tenant"] = {"table": "docs", "key": "id", "value": "tenant_id"}
+    d["rules"].append({"id": "C1", "kind": "inclusion", "name": "admin_doc", "table": "admins",
+                       "columns": ["tenant_id", "tenant_id"], "relation": "doc_tenant", "on_delete": "cascade"})
+    d["rules"].append({"id": "C2", "kind": "inclusion", "name": "member_cascade", "table": "memberships",
+                       "columns": ["user_id", "tenant_id"], "relation": "admin_of", "on_delete": "cascade"})
+    errs = errors(d)
+    n = len(d["rules"])
+    assert has(errs, f"$.rules[{n - 1}].on_delete", "relation 'member_of' reads it")
+    assert has(errs, f"$.rules[{n - 2}].on_delete", "relation 'admin_of' reads it")

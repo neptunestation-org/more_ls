@@ -100,8 +100,12 @@ def rule(spec: Spec, r: Rule) -> str:
         rel = spec.relations[r.relation]
         c1, c2 = r.columns
         return (f"Every row of {r.table} with both {c1} and {c2} set has ({c1}, {c2}) listed in "
-                f"{r.relation} (table {rel.table}); such a {r.relation} entry cannot be removed or "
-                f"changed while a row of {r.table} refers to it."
+                f"{r.relation} (table {rel.table}); "
+                + (f"such a {r.relation} entry cannot be changed while a row of {r.table} refers to it, "
+                   f"and removing it deletes the rows of {r.table} that refer to it."
+                   if r.on_delete == "cascade" else
+                   f"such a {r.relation} entry cannot be removed or changed while a row of {r.table} "
+                   f"refers to it.")
                 + (" It is checked when the transaction commits, so the two rows may be written in either "
                    "order within one transaction." if r.deferred else ""))
     if isinstance(r, TransitionRule):

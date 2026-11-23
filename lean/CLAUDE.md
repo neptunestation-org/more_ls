@@ -65,6 +65,9 @@ writers) is in `docs/design/archive/ROADMAP.md`, "Parallel track — Lean 4".
   its condition is TRUE of keeps every other column) and `Oracle.guards_ok` are not transcribed:
   `Policy.lean`'s update assumptions have the column privileges but no guard, and its statement
   outcomes no guard check.  The guard is the column-privilege predicate under an antecedent.
+- **Cascade inclusions (#60, D79).**  `obligations.cascade_obligations` (a cascaded delete is one
+  the role's delete policies on the referring table allow) and the oracle's skipped RESTRICT
+  check on a cascade delete are not transcribed: `Relational.lean`'s FK guard is RESTRICT only.
 - **Lookup helpers (#34) and nullable membership values (#42)** need no transcription: the helper
   is a compilation of the same atom, and `liftCmp` already makes a NULL value UNKNOWN.
 - **Relations over nullable columns (#49, D71).**  `Relational.lean` derives a relation from every

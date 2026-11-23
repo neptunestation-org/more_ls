@@ -669,7 +669,9 @@ def _relation_change(spec: Spec, table: str, cmd: str, backed: set[str]) -> list
 
 def _restrict_guard(spec: Spec, table: str, cmd: str, backed: set[str], row: str, row_table: str) -> list[Term]:
     """ON DELETE/UPDATE RESTRICT as seen by the solver: the arbitrary row `row` of `row_table` does
-    not reference the pair removed from a relation backed by `table`."""
+    not reference the pair removed from a relation backed by `table`.  A cascade inclusion (#60)
+    gives the same guard on delete: a row that referenced the pair is gone, so every row left
+    does not reference it."""
     guards = []
     for inc in spec.inclusions():
         if inc.relation not in backed or inc.table != row_table:
@@ -791,6 +793,48 @@ def relation_visibility_obligations(spec: Spec, only: set[tuple[str, str]] | Non
                                         f"atom would not mean '(key, value) ∈ {m.relation}'",
                         fix=f"relax the restrictive policies on '{rel.table}' for role '{role}' so "
                             f"that those rows are visible").finish())
+    return out
+
+
+def cascade_obligations(spec: Spec) -> list[Obligation]:
+    """#60 (D79): an `on_delete cascade` inclusion deletes the referencing rows as the table owner,
+    past their own policies.  For every role that can delete a referenced row, each row that
+    refers to it must be one the role could delete itself, so a cascade deletes nothing a direct
+    delete could not and the delete properties keep their meaning."""
+    out = []
+    privs = privileges(spec)
+    for inc in spec.inclusions():
+        if inc.on_delete != "cascade":
+            continue
+        rel = spec.relations[inc.relation]
+        parent, child = rel.table, inc.table
+        for role in spec.roles:
+            if "delete" not in privs.get((role, parent), {}):
+                continue
+            enc = Encoder(spec)
+            refs = []
+            for c, pc in zip(inc.columns, (rel.key, rel.value)):
+                refs.append(eq(col_value_var("c", c), col_value_var("old", pc)))
+                if spec.tables[child].columns[c].nullable:  # MATCH SIMPLE: a NULL refers to nothing
+                    refs.append(not_(col_null_var("c", c)))
+                if spec.tables[parent].columns[pc].nullable:
+                    refs.append(not_(col_null_var("old", pc)))
+            assumptions = [*delete_assumptions(enc, spec, parent, role), *refs,
+                           _T(enc, row_constraints(spec, child), "c", child)]
+            goal = _T(enc, effective(spec, child, role, "delete", "using"), "c", child)
+            out.append(Obligation(
+                "soundness", f"a delete on {parent} by {role} cascades only to rows of {child} it could delete",
+                assumptions, goal, {"old": parent, "c": child},
+                list(dict.fromkeys(_all_relations(spec, parent, role, "delete")
+                                   + _all_relations(spec, child, role, "delete"))),
+                [enc], path=f"$.rules[{spec.rules.index(inc)}]",
+                failure_message=f"inclusion '{inc.name}' deletes the rows of '{child}' that refer to a deleted "
+                                f"'{parent}' row, but role '{role}' can delete a '{parent}' row while some row "
+                                f"of '{child}' referring to it is one its own delete policies on '{child}' do "
+                                f"not allow, so the cascade would delete it past them",
+                fix=f"give role '{role}' a delete policy on '{child}' covering every row that refers to a "
+                    f"'{parent}' row it can delete, narrow its delete on '{parent}', or use on_delete "
+                    f"restrict").finish())
     return out
 
 

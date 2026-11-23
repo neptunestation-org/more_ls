@@ -187,6 +187,11 @@ union member the renderer does not cover.
   `WHEN (current_user = role)`; `obligations.guard_terms` `T(p(old)) → unchanged`; `Oracle.guards_ok`);
   its memberships read as the caller through `Spec.caller_reads` (routing, visibility, grants);
   fixture `specs.guard_spec`, mutation `GUARD_ANY_ROW`.
+- D79: an inclusion's `on_delete` may be `cascade` (ON UPDATE stays RESTRICT); refused on a table a
+  relation, hierarchy or cardinality rule reads; `obligations.cascade_obligations` (in
+  `soundness_errors`) proves a cascade deletes only rows the deleter could delete; `check --dsn` and
+  `preflight` refuse a clashing delete action on the table's own key (`check.fk_action_errors`);
+  import reads cascade keys; fixture `specs.cascade_spec`, mutation `CASCADE_AS_RESTRICT`.
 - D42: row-dependent column visibility is normalization
   (the column is its own table with its own policies); there is no masking construct.
 - M4 (the LLM loop and evals): `src/mls/llm/CLAUDE.md`. Tests never call the API (`MLS_LLM_SCRIPT=<json>`

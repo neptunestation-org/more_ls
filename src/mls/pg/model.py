@@ -309,7 +309,9 @@ class Oracle:
 
     def _fk_restrict_violation(self, table: str, old: Row, new: Row | None, db: Database) -> bool:
         """ON DELETE/UPDATE RESTRICT: removing a referenced (key, value) pair of a relation
-        backed by `table`, or a referenced single-column key, errors if any row references it."""
+        backed by `table`, or a referenced single-column key, errors if any row references it.  A
+        cascade inclusion's referencing rows are deleted with the row instead (#60), so only its
+        update side refuses."""
         for fk in simple_fks(self.spec):
             if fk.parent != table:
                 continue
@@ -325,7 +327,7 @@ class Oracle:
             if new is not None and (new[rel.key], new[rel.value]) == pair:
                 continue
             for inc in self.spec.inclusions():
-                if inc.relation != rname:
+                if inc.relation != rname or (new is None and inc.on_delete == "cascade"):
                     continue
                 for r in db.tables.get(inc.table, []):
                     if r is old:

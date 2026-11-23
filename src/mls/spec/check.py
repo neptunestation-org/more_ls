@@ -988,6 +988,19 @@ class Checker:
                                          f"references a primary key or unique constraint on exactly those "
                                          f"two columns",
                      f"add [\"{rel.key}\", \"{rel.value}\"] to tables.{rel.table}.unique")
+        if r.on_delete == "cascade":
+            # #60 (D79): the proofs see a cascade only as rows of r.table that are gone; nothing
+            # else may read those rows, or a delete would change it unmodelled
+            uses = ([f"relation '{n}' reads it" for n, b in self.spec.base_relations().items() if b.table == r.table]
+                    + [f"hierarchy '{n}' is on it" for n, h in self.spec.hierarchies.items() if h.table == r.table]
+                    + [f"cardinality rule '{c.name}' counts it" for c in self.spec.cardinalities()
+                       if r.table in (c.table, c.parent)])
+            if uses:
+                self.err(path + ".on_delete", f"a cascade deletes rows of '{r.table}' along with the referenced "
+                                              f"row, and {'; '.join(uses)}, so the delete would change it "
+                                              f"without the proofs seeing it",
+                         "use on_delete restrict (the referencing rows are deleted first), or state the "
+                         "rule on a table nothing else reads")
         for j, (c, rc) in enumerate(zip(r.columns, (rel.key, rel.value))):
             ct, rt = self.col_type(r.table, c), self.col_type(rel.table, rc)
             if ct is not None and rt is not None and not comparable(ct, rt):
@@ -1091,6 +1104,40 @@ def fk_cycle_errors(spec: Spec, database: list) -> list[MlsError]:
 
             i = next(j for j, r in enumerate(spec.rules) if r.id == inc.rule_id)
             c.err(c.rule_paths[i], *cycle_message(inc, path))
+    return c.sink.errors
+
+
+# confdeltype letters (pg_constraint) and the delete actions that, beside an inclusion's on the
+# same referencing rows, make the outcome of a delete depend on which key's trigger fires first
+FK_ACTIONS = {"a": "NO ACTION", "r": "RESTRICT", "c": "CASCADE", "n": "SET NULL", "d": "SET DEFAULT"}
+_CLASHES = {"restrict": {"c", "n", "d"}, "cascade": {"r", "n", "d"}}
+
+
+def fk_action_errors(spec: Spec, rows: list[dict]) -> list[MlsError]:
+    """#60, with the database read (`catalog.all_foreign_keys`): an inclusion and one of the
+    table's own foreign keys, on columns among the inclusion's and onto the same parent table,
+    with delete actions that clash.  A delete of a parent row then fires both keys' triggers, and
+    whether it is refused or cascades depends on their order, which the proofs cannot know."""
+    c = Checker(spec)
+    own = {(r.table, r.name) for r in spec.inclusions()}
+    for i, r in enumerate(spec.rules):
+        if not isinstance(r, InclusionRule) or r.relation not in spec.relations:
+            continue
+        parent = spec.relations[r.relation].table
+        for fk in rows:
+            if (fk["table"], fk["name"]) in own or fk["table"] != r.table or fk["parent"] != parent \
+                    or not set(fk["columns"]) <= set(r.columns) or fk["on_delete"] not in _CLASHES[r.on_delete]:
+                continue
+            action = FK_ACTIONS[fk["on_delete"]]
+            c.err(c.rule_paths[i] + ".on_delete",
+                  f"inclusion '{r.name}' is ON DELETE {r.on_delete.upper()}, and the table's own foreign key "
+                  f"'{fk['name']}' on ({', '.join(fk['columns'])}) is ON DELETE {action} onto the same table "
+                  f"'{parent}': a delete of a '{parent}' row fires both, and whether it is refused or deletes "
+                  f"the rows of '{r.table}' depends on which fires first",
+                  ("use on_delete cascade to keep the existing key's behaviour" if fk["on_delete"] == "c" else
+                   "use on_delete restrict" if fk["on_delete"] == "r" else
+                   f"change '{fk['name']}' to ON DELETE RESTRICT or CASCADE")
+                  + f", or drop '{fk['name']}'")
     return c.sink.errors
 
 

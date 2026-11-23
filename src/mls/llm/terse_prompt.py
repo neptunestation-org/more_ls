@@ -59,7 +59,9 @@ triggers, grants).  You never write SQL.
   (new rows it may write); select and delete only using (rows it may touch); update may have both.
 - R2 check name on t: p                      every stored row satisfies p (p may be UNKNOWN)
 - R3 inclusion name on t: (a, b) in R on_delete restrict   (a, b) of every row is a pair of R (NULLs
-  pass); the referenced pair cannot be deleted.  Append `deferred` when its foreign key closes a
+  pass); the referenced pair cannot be deleted.  `on_delete cascade` instead deletes the rows that
+  refer to it ("a product's variants go with it"); only on a table no relation reads, and every
+  role that deletes the referenced row must be able to delete those rows itself.  Append `deferred` when its foreign key closes a
   cycle (R's table refers back to t, as a membership refers to its organization): it is then
   checked at commit, so both rows can be written in one transaction
 - R4 transition name on t: p over old.c and new.c          every update satisfies p
@@ -112,7 +114,7 @@ relation   := 'relation' NAME '=' TABLE '(' KEY ',' VALUE ')' ['where' pred]
 rule       := ID KIND [NAME] 'on' TABLE ':' body ['requirement' STRING]
 body       := ROLE COMMAND MODE ['using' pred] ['check' pred]      (policy)
             | pred                                                 (check, transition)
-            | '(' COL ',' COL ')' 'in' RELATION 'on_delete' 'restrict' ['deferred']   (inclusion)
+            | '(' COL ',' COL ')' 'in' RELATION 'on_delete' ('restrict' | 'cascade') ['deferred']   (inclusion)
             | COL '->' TABLE 'max' INT                             (cardinality)
             | ROLE ('read' | 'write') COL (',' COL)* ['when' pred]  (column_rule; when: write only)
 property   := ID TEMPLATE ... ['description' STRING]              (forms as listed above)

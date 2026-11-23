@@ -660,3 +660,28 @@ def test_drift_of_an_import_mls_never_deployed(undeployed):
             drift(undeployed, spec, compile_spec(spec))
     finally:
         undeployed.execute("reset role")
+
+
+def test_a_cascading_key_imports_as_a_cascade_inclusion_and_a_clash_is_refused(brownfield):
+    """#60 (D79): a two-column ON DELETE CASCADE key onto a key pair imports as an on_delete
+    cascade inclusion, which the table's own single-column cascading key does not clash with;
+    the same inclusion as restrict does (a parent delete would fire both, in an order the proofs
+    cannot know), and `check --dsn` names the key."""
+    with brownfield.transaction(force_rollback=True):
+        brownfield.execute("""
+            create table gadgets (id int primary key, shop int not null, unique (id, shop));
+            create table gadget_parts (id int primary key,
+                gadget_id int not null references gadgets on delete cascade, shop int not null,
+                constraint part_in_shop foreign key (gadget_id, shop) references gadgets (id, shop)
+                    on update restrict on delete cascade);""")
+        res = import_schema(brownfield, policies="discard")
+        spec = check_spec(Spec.model_validate(res.spec))
+        inc = next(r for r in spec.inclusions() if r.name == "part_in_shop")
+        assert inc.on_delete == "cascade" and inc.table == "gadget_parts"
+        assert [e for e in verify_adopted(brownfield, spec) if "part_in_shop" in e.message] == []
+        d = json.loads(spec.model_dump_json(by_alias=True, exclude_none=True))
+        next(r for r in d["rules"] if r.get("name") == "part_in_shop")["on_delete"] = "restrict"
+        errs = [e for e in verify_adopted(brownfield, Spec.model_validate(d)) if "part_in_shop" in e.message]
+        assert len(errs) == 1 and errs[0].path.endswith(".on_delete"), errs
+        assert ("the table's own foreign key 'gadget_parts_gadget_id_fkey' on (gadget_id) is ON DELETE CASCADE"
+                in errs[0].message) and "use on_delete cascade" in errs[0].fix

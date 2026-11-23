@@ -565,3 +565,29 @@ def test_a_column_guard_limits_the_edit_only_where_its_condition_holds():
     with pytest.raises(CompileError) as e:
         compile_spec(make(d))
     assert "column rule 'owner_edits' uses relation 'chief_of'" in str(e.value)
+
+
+def test_a_cascade_deletes_only_rows_the_deleter_could_delete():
+    """#60 (D79): a member deletes a document and its notes go with it; the proofs keep the
+    inclusion, and the compiler refuses a cascade to notes the member could not delete
+    themselves (here: a restrictive policy keeps a note's author as its only deleter).  Its
+    English says the rows go, and the terse form round-trips."""
+    from mls.english import rule
+    from mls.spec.syntax import parse
+    from mls.terse import render
+    from tests.templates.specs import cascade_spec
+
+    spec = cascade_spec()
+    assert set(verdicts(spec).values()) == {"PROVED"}
+    assert compile_spec(spec)
+    n2 = next(r for r in spec.rules if r.id == "N2")
+    assert rule(spec, n2).endswith("removing it deletes the rows of doc_notes that refer to it.")
+    assert parse(render(spec)) == spec
+    d = json.loads(spec.model_dump_json(by_alias=True, exclude_none=True))
+    d["tables"]["doc_notes"]["columns"]["author_id"] = {"type": "uuid", "nullable": True}
+    d["rules"].append({"id": "N3", "kind": "policy", "name": "author_deletes", "table": "doc_notes",
+                       "role": "authenticated", "command": "delete", "mode": "restrictive",
+                       "using": {"cmp": [{"col": "author_id"}, "=", {"ctx": "uid"}]}})
+    with pytest.raises(CompileError) as e:
+        compile_spec(make(d))
+    assert "inclusion 'note_in_doc' deletes the rows of 'doc_notes'" in str(e.value)
