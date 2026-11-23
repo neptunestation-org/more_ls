@@ -466,6 +466,7 @@ predicate; "col key" means the membership key may be a column instead of a conte
 | `transition` rule | no | no | yes | no | – | no | no | no | no |
 | `column_rule.when` | yes | yes | no | yes | no | yes | yes | no | no |
 | `always_on_update` predicate | no | no | yes | no | – | no | no | no | no |
+| `changes_only.when` | yes | yes | no | yes | no | yes | yes | no | no |
 | invariant (`invariant_preserved` inline) | yes | no | no | yes | yes | no | no | no | no |
 | `custom.goal` | yes | yes | no | yes | yes | yes | yes | yes | yes |
 | `must_allow.when` | yes | yes | update only | yes | yes | yes | yes | yes | yes |
@@ -767,6 +768,22 @@ roles bypass them.  It is the two-state counterpart of `invariant_preserved`, an
 for a requirement that says "whoever", "the server included" or "ever": a refutation means no
 transition rule or check enforces it.  `column_immutable` is the same promise for the
 policy-bound roles only.
+
+### 12.11 `changes_only`
+
+    {"id": "P9", "template": "changes_only", "table": "deliveries", "role": "authenticated",
+     "columns": ["status", "delivered_at"],
+     "when": {"member": {"relation": "rider_of", "key": {"ctx": "uid"}, "value": {"col": "rider_id"}}}}
+
+Terse: `P9 changes_only deliveries authenticated: status, delivered_at when rider_of(@uid, rider_id)`.
+An update by the role of a row whose condition is TRUE (of the row being edited) changes no
+column outside the list; without `when`, of every row.  The condition has the scope of a write
+column rule's `when` (§11.6, §10.2): columns of the row being edited, context values and
+memberships, which may be negated.  One obligation: everything that binds the role's update (its
+policies, the checks and inclusions on both rows, the transition rules, its column privileges
+and its column guards) implies that every other column keeps its value (NULL stays NULL).  A
+hierarchy's depth column counts as listed, since its own trigger recomputes it.  It is the upper
+bound a column guard enforces: "a rider changes only the status of a delivery assigned to them".
 
 ## 13. Renderings: English and terse
 

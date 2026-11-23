@@ -192,6 +192,9 @@ union member the renderer does not cover.
   `soundness_errors`) proves a cascade deletes only rows the deleter could delete; `check --dsn` and
   `preflight` refuse a clashing delete action on the table's own key (`check.fk_action_errors`);
   import reads cascade keys; fixture `specs.cascade_spec`, mutation `CASCADE_AS_RESTRICT`.
+- D80: property `changes_only <table> <role>: cols when p` (`obligations.changes_only`) is the upper
+  bound of a column guard: the role's update assumptions and `T(p(old))` imply the other columns
+  unchanged; test in `tests/props/test_properties.py`.
 - D42: row-dependent column visibility is normalization
   (the column is its own table with its own policies); there is no masking construct.
 - M4 (the LLM loop and evals): `src/mls/llm/CLAUDE.md`. Tests never call the API (`MLS_LLM_SCRIPT=<json>`

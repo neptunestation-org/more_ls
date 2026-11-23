@@ -24,7 +24,7 @@ from mls.errors import ErrorSink, MlsError, SpecError
 from mls.spec.model import (
     MAX_HOPS, ComposedRelation, Relation,
     CONTEXT_NOW, And, BypassAssumed, CardinalityRule, CheckRule, ColRef, ColType, ColumnRule, Cmp, Const, CtxRef,
-    INT_RANGE, In, AlwaysOnUpdate, Custom, InclusionRule, InGroup, InvariantPreserved, IsNull, Lit, Member, MonotoneIn, MustAllow, NewRef, Not,
+    INT_RANGE, In, AlwaysOnUpdate, ChangesOnly, Custom, InclusionRule, InGroup, InvariantPreserved, IsNull, Lit, Member, MonotoneIn, MustAllow, NewRef, Not,
     RoleSeparation,
     NowBetween, OldRef, OpaqueRef, Or, OwnerAssumed, PathAssumed, InlinedAssumed, PolicyRule, RlsAssumed, Spec, TenantIsolation,
     ColumnImmutable, WriteSubsetRead, LeastPrivilege, TransitionRule, comparable, pair_unique,
@@ -1014,8 +1014,8 @@ class Checker:
             if p.id in ids:
                 self.err(path + ".id", f"duplicate property id '{p.id}'")
             ids.add(p.id)
-            if isinstance(p, (TenantIsolation, ColumnImmutable, WriteSubsetRead, AlwaysOnUpdate, Custom, MustAllow,
-                              RoleSeparation)):
+            if isinstance(p, (TenantIsolation, ColumnImmutable, WriteSubsetRead, AlwaysOnUpdate, ChangesOnly, Custom,
+                              MustAllow, RoleSeparation)):
                 if p.table not in self.spec.tables:
                     self.err(path + ".table", f"unknown table '{p.table}'")
                     continue
@@ -1077,6 +1077,16 @@ class Checker:
                         self.pred(inv.predicate, invariant_scope(inv.table), ipath + ".predicate")
             elif isinstance(p, AlwaysOnUpdate):
                 self.pred(p.predicate, Scope("always_on_update property", p.table, old_new=True), path + ".predicate")
+            elif isinstance(p, ChangesOnly):
+                if p.role not in self.spec.roles:
+                    self.err(path + ".role", f"unknown role '{p.role}'")
+                cols = self.spec.tables[p.table].columns
+                for j, c in enumerate(p.columns):
+                    if c not in cols:
+                        self.err(f"{path}.columns[{j}]", f"unknown column '{c}' of table '{p.table}'",
+                                 f"one of: {', '.join(cols)}")
+                if p.when is not None:  # the condition a column guard would carry (#56)
+                    self.pred(p.when, guard_scope(p.table), path + ".when")
             elif isinstance(p, Custom):
                 if p.role not in self.spec.roles:
                     self.err(path + ".role", f"unknown role '{p.role}'")

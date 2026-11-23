@@ -20,7 +20,7 @@ from mls.spec.model import Spec
 
 KINDS = ("policy", "check", "inclusion", "transition", "cardinality", "column_rule")
 TEMPLATES = ("tenant_isolation", "column_immutable", "monotone_in", "write_subset_read", "least_privilege",
-             "invariant_preserved", "always_on_update", "custom", "must_allow", "role_separation")
+             "invariant_preserved", "always_on_update", "changes_only", "custom", "must_allow", "role_separation")
 COMMANDS = ("select", "insert", "update", "delete", "all")
 MODES = ("permissive", "restrictive")
 TYPES = ("int", "bigint", "text", "bool", "timestamp", "uuid", "enum")
@@ -650,6 +650,17 @@ class Parser:
             p["table"] = self.name("a table")
             self.eat(":")
             p["predicate"] = self.pred(f"{base}.predicate")
+        elif t == "changes_only":
+            p["table"] = self.name("a table")
+            p["role"] = self.name("a role")
+            self.eat(":")
+            p["columns"] = [self.name("a column")]
+            while self.at(","):
+                self.advance()
+                p["columns"].append(self.name("a column"))
+            if self.at_word("when"):
+                self.advance()
+                p["when"] = self.pred(f"{base}.when")
         elif t == "custom":
             p["table"] = self.name("a table")
             p["role"] = self.name("a role")

@@ -523,6 +523,17 @@ class AlwaysOnUpdate(PropBase):
     predicate: Pred
 
 
+class ChangesOnly(PropBase):
+    """The upper bound a column guard enforces (#56): an update by `role` of a row of `table` for
+    which `when` is TRUE of the row being edited (all rows without one) changes no column outside
+    `columns`.  Proved from the role's update assumptions, the guards included."""
+    template: Literal["changes_only"]
+    table: str
+    role: str
+    columns: list[str] = Field(min_length=1)
+    when: Pred | None = None
+
+
 class Custom(PropBase):
     """For `role` and `command` on `table`: effective(row) -> goal(row).
     `which` selects the row image for update: 'old' (USING) or 'new' (WITH CHECK)."""
@@ -566,7 +577,7 @@ class RoleSeparation(PropBase):
 
 Property = Annotated[
     Union[TenantIsolation, ColumnImmutable, MonotoneIn, WriteSubsetRead, LeastPrivilege,
-          InvariantPreserved, AlwaysOnUpdate, Custom, MustAllow, RoleSeparation],
+          InvariantPreserved, AlwaysOnUpdate, ChangesOnly, Custom, MustAllow, RoleSeparation],
     Field(discriminator="template"),
 ]
 

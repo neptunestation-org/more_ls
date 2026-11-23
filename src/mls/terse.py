@@ -45,7 +45,7 @@ import re
 from typing import Any
 
 from mls.spec.model import (
-    AlwaysOnUpdate, And, AppliesTo, CardinalityRule, CheckRule, ColRef, ColumnImmutable, ColumnRule, Cmp, Const, CtxRef, Custom,
+    AlwaysOnUpdate, And, AppliesTo, ChangesOnly, CardinalityRule, CheckRule, ColRef, ColumnImmutable, ColumnRule, Cmp, Const, CtxRef, Custom,
     Hierarchy, Identity, In, InclusionRule, InGroup, InvariantPreserved, IsNull, LeastPrivilege, Lit, Member,
     MonotoneIn, MustAllow, NewRef, Not, NowBetween, OldRef, Opaque, OpaqueRef, Or, PolicyRule, Pred, Property,
     Relation, ComposedRelation, Hop, RoleSeparation, Rule, RuleBase, Spec, Table, TenantIsolation, TransitionRule, WriteSubsetRead,
@@ -61,7 +61,7 @@ and or not is null true false in in_group now_between old new
 primary_key unique tags assume sql relations has_column named tagged all
 owned adopted observed select insert update delete permissive restrictive read write
 policy inclusion transition cardinality column_rule
-tenant_isolation column_immutable monotone_in write_subset_read least_privilege invariant_preserved always_on_update custom
+tenant_isolation column_immutable monotone_in write_subset_read least_privilege invariant_preserved always_on_update changes_only custom
 must_allow role_separation
 """.split())
 
@@ -84,8 +84,8 @@ RENDERED_FIELDS: dict[type, set[str]] = {
 }
 RENDERED_CLASSES: set[type] = {
     PolicyRule, CheckRule, InclusionRule, TransitionRule, CardinalityRule, ColumnRule,
-    TenantIsolation, ColumnImmutable, MonotoneIn, WriteSubsetRead, LeastPrivilege, InvariantPreserved, AlwaysOnUpdate, Custom,
-    MustAllow, RoleSeparation,
+    TenantIsolation, ColumnImmutable, MonotoneIn, WriteSubsetRead, LeastPrivilege, InvariantPreserved, AlwaysOnUpdate, ChangesOnly,
+    Custom, MustAllow, RoleSeparation,
     Lit, And, Or, Not, IsNull, Cmp, In, Member, InGroup, NowBetween, OpaqueRef,
     ColRef, OldRef, NewRef, CtxRef, Const,
     OwnerAssumed, BypassAssumed, RlsAssumed, PathAssumed, InlinedAssumed,
@@ -269,6 +269,9 @@ def prop(p: Property) -> str:
         s = f"{pid} invariant_preserved: " + "; ".join(parts)
     elif isinstance(p, AlwaysOnUpdate):
         s = f"{pid} always_on_update {ident(p.table)}: {pred(p.predicate)}"
+    elif isinstance(p, ChangesOnly):
+        s = (f"{pid} changes_only {ident(p.table)} {ident(p.role)}: {', '.join(ident(c) for c in p.columns)}"
+             + (f" when {pred(p.when)}" if p.when is not None else ""))
     elif isinstance(p, Custom):
         s = f"{pid} custom {ident(p.table)} {ident(p.role)} {p.command} {p.which}: {pred(p.goal)}"
     elif isinstance(p, MustAllow):

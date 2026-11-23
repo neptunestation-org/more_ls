@@ -65,6 +65,8 @@ writers) is in `docs/design/archive/ROADMAP.md`, "Parallel track — Lean 4".
   its condition is TRUE of keeps every other column) and `Oracle.guards_ok` are not transcribed:
   `Policy.lean`'s update assumptions have the column privileges but no guard, and its statement
   outcomes no guard check.  The guard is the column-privilege predicate under an antecedent.
+  The `changes_only` property (#56, D80) is the same update assumptions implying the unchanged
+  columns, so it waits on the guard term.
 - **Cascade inclusions (#60, D79).**  `obligations.cascade_obligations` (a cascaded delete is one
   the role's delete policies on the referring table allow) and the oracle's skipped RESTRICT
   check on a cascade delete are not transcribed: `Relational.lean`'s FK guard is RESTRICT only.

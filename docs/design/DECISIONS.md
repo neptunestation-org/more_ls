@@ -1600,3 +1600,20 @@ Rejected: refusing only the clash and leaving cascade out (the business answer w
 too", and the existing keys already do it, unproved); cascades that chain or touch read tables
 (each would need the deleted rows in the relation axioms, a frame the induction step does not
 have).
+
+**D80. `changes_only`: the upper bound of a column guard (#56).**
+Scarpar runs 7–14: the properties pass could not state "a rider changes only status, …,
+updated_at of a delivery assigned to them" (a `custom` goal sees one image, `always_on_update` binds
+the server and staff too, `column_immutable` every app role), wrote it as a `custom` over old/new
+in three runs and lost a repair round to the refusal each time, and the guard (D78) was left
+enforced but unproved.  Decision: a property template `changes_only` (table, role, columns,
+optional `when` in the column guard's scope, D78: old row, context values, memberships, negation
+allowed); one obligation, the role's `update_assumptions` (policies, constraints on both images,
+transitions, column privileges, guard terms) and `T(when(old))` imply `unchanged_except(columns ∪
+hierarchy depth)`.  UNKNOWN `when` promises nothing, matching the guard's `is true`.  English: "When
+p, an edit of a row of T by role changes only the columns a, b."  Terse: `P changes_only T role: a,
+b when p`.  Rejected: `custom` with old/new for one role (every kept column listed by hand, stale
+when a column is added, the same reason D78 rejected a transition); an old/new `when` (the guard
+cannot read the new row, so the property would promise what no rule enforces).  Lean: the
+obligation is `update_assumptions → unchanged`, built from transcribed parts except the guard term
+(D78's gap).

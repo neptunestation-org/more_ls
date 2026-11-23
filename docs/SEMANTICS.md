@@ -256,6 +256,11 @@ All are "assumptions ∧ ¬goal is UNSAT"; SAT yields a counterexample rendered 
   the assumptions: the trusted roles bypass both, and the CHECKs, foreign keys and transition
   triggers bind them too.  It holds for every writer as long as the triggers fire, which the
   hardening keeps (no app role may set `session_replication_role`).
+- **One role's edits change only some columns (`changes_only`):** `update_assumptions(role) ∧
+  T(p(old)) → unchanged_except(columns)(old, new)`, one step; the update assumptions hold the
+  policies, the constraints on both rows, the transitions, the column privileges and the column
+  guards (`T(g(old)) → unchanged_except(g.columns)`), so a guard with the same condition and
+  columns proves it.  NULL-safe equality per column; a hierarchy's depth counts as listed.
 - **Access diff (v1 → v2):** for each table × command × role, check SAT of `v2 ∧ ¬v1` (new grants)
   and `v1 ∧ ¬v2` (new denials) over shared relation symbols; each model is a scenario.  Two base
   relations of the two versions over the same table, key and value are the same pairs when their

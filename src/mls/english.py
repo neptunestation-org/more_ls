@@ -10,7 +10,7 @@ from typing import Any
 
 from mls.spec.model import (
     CONTEXT_NOW, And, BypassAssumed, CardinalityRule, CheckRule, ColRef, ComposedRelation, ColumnImmutable, ColumnRule, Cmp, Const,
-    AlwaysOnUpdate, CtxRef, Custom, InclusionRule, InGroup, InvariantPreserved, IsNull, LeastPrivilege, Lit, Member, MonotoneIn,
+    AlwaysOnUpdate, ChangesOnly, CtxRef, Custom, InclusionRule, InGroup, InvariantPreserved, IsNull, LeastPrivilege, Lit, Member, MonotoneIn,
     MustAllow, NewRef, Not, NowBetween, OldRef, OpaqueRef, Or, OwnerAssumed, PathAssumed, InlinedAssumed, PolicyRule, Pred, Property,
     RlsAssumed,
     RoleSeparation,
@@ -179,6 +179,9 @@ def prop(spec: Spec, p: Property) -> str:
     if isinstance(p, AlwaysOnUpdate):
         return (f"Every change to a row of {p.table}, by anyone (the roles that bypass the policies included), "
                 f"keeps this true: {pred(spec, p.predicate, 'the new row')}.")
+    if isinstance(p, ChangesOnly):
+        head = f"When {pred(spec, p.when)}, an" if p.when is not None else "An"
+        return f"{head} edit of a row of {p.table} by {p.role} changes only the columns {', '.join(p.columns)}."
     if isinstance(p, Custom):
         img = "the new row" if p.command in ("insert", "update") and p.which == "new" else "the row"
         return (f"Whenever {p.role} can {VERB[p.command]} a row of {p.table}, "

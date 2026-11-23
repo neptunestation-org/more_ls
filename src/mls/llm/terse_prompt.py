@@ -94,6 +94,10 @@ the key and value columns of R's table (the membership lookup runs as the user),
   roles that bypass the policies included, satisfies p (old.c / new.c only); only transition rules
   and checks can make it hold.  Use it for a requirement that says "whoever", "the server
   included", "nobody ever"; column_immutable and custom cover the app's roles only
+- P11 changes_only t role: c1, c2 when p                    an edit by the role of a row p holds of
+  (p as a column rule's when: the row being edited, @context, relations, negation allowed) changes
+  only these columns ("a rider changes only the status of a delivery assigned to them"); without
+  `when`, of every row.  The upper bound for a write column_rule with `when`
 - P7 custom t role command old|new: p                         every row the role can <command>
   satisfies p (an upper bound on access)
 - P8 role_separation t command: a | b                         no row is admitted to <command> for

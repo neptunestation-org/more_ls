@@ -591,3 +591,33 @@ def test_a_cascade_deletes_only_rows_the_deleter_could_delete():
     with pytest.raises(CompileError) as e:
         compile_spec(make(d))
     assert "inclusion 'note_in_doc' deletes the rows of 'doc_notes'" in str(e.value)
+
+
+def test_changes_only_is_the_upper_bound_a_column_guard_proves():
+    """#56 (D80): the guard fixture's owner edits only level and archived (the guard proves it);
+    without the guard, or with a column left off the list, it is refuted with the column that
+    changed.  Its English and terse forms round-trip."""
+    from mls.english import prop
+    from mls.spec.syntax import parse
+    from mls.terse import render
+    from tests.templates.specs import guard_spec
+
+    spec = guard_spec()
+    d = json.loads(spec.model_dump_json(by_alias=True, exclude_none=True))
+    g1 = next(r for r in d["rules"] if r["id"] == "G1")
+    d["properties"].append({"id": "P13", "template": "changes_only", "table": "docs", "role": "authenticated",
+                            "columns": ["level", "archived"], "when": g1["when"],
+                            "description": "the owner of a document who is not an admin edits only its level"})
+    with_guard = make(d)
+    assert verdicts(with_guard)["P13"] == "PROVED"
+    p13 = next(p for p in with_guard.properties if p.id == "P13")
+    assert prop(with_guard, p13) == (
+        "When the row's owner_id is the current user and not the row's tenant_id is among the current "
+        "user's admin_of, an edit of a row of docs by authenticated changes only the columns level, archived.")
+    assert parse(render(with_guard)) == with_guard
+    narrower = copy.deepcopy(d)
+    narrower["properties"][-1]["columns"] = ["level"]
+    assert verdicts(make(narrower))["P13"] == "REFUTED"
+    no_guard = copy.deepcopy(d)
+    no_guard["rules"] = [r for r in no_guard["rules"] if r["id"] != "G1"]
+    assert verdicts(make(no_guard))["P13"] == "REFUTED"

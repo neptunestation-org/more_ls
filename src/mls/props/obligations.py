@@ -21,7 +21,7 @@ from mls.props.effective import (
     effective, inclusion_pred, members_in, relations_of, row_constraints, transition_constraints,
 )
 from mls.spec.model import (
-    AlwaysOnUpdate, And, CardinalityRule, CheckRule, Cmp, ColRef, ColumnImmutable, ComposedRelation, Custom, InclusionRule,
+    AlwaysOnUpdate, And, CardinalityRule, ChangesOnly, CheckRule, Cmp, ColRef, ColumnImmutable, ComposedRelation, Custom, InclusionRule,
     InvariantPreserved, IsNull, LeastPrivilege, Lit, Member, MemberBody, MonotoneIn, MustAllow, NewRef,
     Not, OldRef, Or, PolicyRule, Pred, Property, RoleSeparation, Spec, TenantIsolation, WriteSubsetRead,
 )
@@ -408,6 +408,23 @@ def always_on_update(spec: Spec, p: AlwaysOnUpdate) -> list[Obligation]:
         p.id, f"update on {p.table} by any writer: the change satisfies the condition",
         assumptions, _T(enc, p.predicate, "new", p.table), _rows_for("update", p.table),
         _relations_of(spec, rc), [enc]).finish()]
+
+
+def changes_only(spec: Spec, p: ChangesOnly) -> list[Obligation]:
+    """#56: an update by `p.role` of a row `p.when` is TRUE of (old image) changes only `p.columns`,
+    from everything that binds the role's update: its policies, the constraints and transitions,
+    the column privileges and the column guards.  A hierarchy's depth, which its own trigger
+    recomputes, counts as listed, as for a guard."""
+    enc = Encoder(spec)
+    assumptions = update_assumptions(enc, spec, p.table, p.role)
+    if p.when is not None:
+        assumptions.append(_T(enc, p.when, "old", p.table))
+    same = unchanged_except(spec, p.table, set(p.columns) | guard_columns(spec, p.table))
+    return [Obligation(
+        p.id, f"update on {p.table} by {p.role}: only {', '.join(p.columns)} change",
+        assumptions, _T(enc, same, "new", p.table), _rows_for("update", p.table),
+        list(dict.fromkeys(_all_relations(spec, p.table, p.role, "update") + _relations_of(spec, p.when))),
+        [enc]).finish()]
 
 
 def monotone_in(spec: Spec, p: MonotoneIn) -> list[Obligation]:
@@ -855,6 +872,8 @@ def obligations_for(spec: Spec, prop: Property) -> list[Obligation]:
         return invariant_preserved(spec, prop)
     if isinstance(prop, AlwaysOnUpdate):
         return always_on_update(spec, prop)
+    if isinstance(prop, ChangesOnly):
+        return changes_only(spec, prop)
     if isinstance(prop, Custom):
         return custom(spec, prop)
     if isinstance(prop, MustAllow):
