@@ -930,6 +930,14 @@ class Checker:
 
     def check_cardinality(self, r: CardinalityRule, path: str) -> None:
         t = self.spec.tables[r.table]
+        if r.max is None and r.min is None:
+            self.err(path, "a cardinality rule needs a max, a min or both",
+                     "add \"max\": N (at most N rows per group) or \"min\": N (no transaction leaves a "
+                     "group it lowered below N)")
+        elif r.max is not None and r.min is not None and r.min > r.max:
+            self.err(path + ".min", f"min {r.min} is above max {r.max}", "make min at most max")
+        if r.where is not None:  # #61: which rows count, read of the row alone
+            self.pred(r.where, Scope("cardinality condition", r.table, cols=True), path + ".where")
         if r.group not in t.columns:
             self.err(path + ".group", f"unknown column '{r.group}' of table '{r.table}'")
             return
@@ -1078,6 +1086,13 @@ class Checker:
                         if not isinstance(rule, (CheckRule, InclusionRule, CardinalityRule)):
                             self.err(ipath + ".rule", f"rule '{inv.rule}' is a {rule.kind}; only "
                                                       f"check, inclusion and cardinality rules are invariants")
+                        elif isinstance(rule, CardinalityRule) and rule.max is None:
+                            # #61: a new parent may start with fewer than `min`, so it is no invariant
+                            self.err(ipath + ".rule", f"cardinality rule '{inv.rule}' sets only a minimum, "
+                                                      f"which is no invariant: a new '{rule.parent}' row may "
+                                                      f"start with fewer than {rule.min} rows; it only keeps "
+                                                      f"a transaction from lowering a count below it",
+                                     "leave it out of the invariants (the compiler enforces it)")
                     else:
                         if inv.table not in self.spec.tables:
                             self.err(ipath + ".table", f"unknown table '{inv.table}'")

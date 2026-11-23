@@ -631,3 +631,27 @@ def test_a_set_null_inclusion_needs_a_nullable_first_column():
     d["rules"].append({"id": "C1", "kind": "inclusion", "name": "note_in_doc", "table": "doc_notes",
                        "columns": ["doc_id", "tenant_id"], "relation": "doc_tenant", "on_delete": "set_null"})
     assert has(errors(d), f"$.rules[{len(d['rules']) - 1}].on_delete", "sets doc_notes.doc_id NULL, and it is NOT NULL")
+
+
+def test_a_cardinality_rule_needs_a_bound_and_a_minimum_is_no_invariant():
+    """#61: max or min (or both, min at most max); `where` reads the row alone; a min-only rule is
+    refused as an invariant (a new parent may start below it)."""
+    from tests.templates import specs
+
+    d = json.loads(specs.min_count_spec().model_dump_json(by_alias=True, exclude_none=True))
+    i = next(i for i, r in enumerate(d["rules"]) if r["id"] == "M1")
+    bad = copy.deepcopy(d)
+    del bad["rules"][i]["min"]  # JSON only: the terse grammar has no form without a bound
+    assert has(Checker(Spec.model_validate(bad)).run(), f"$.rules[{i}]", "a cardinality rule needs a max, a min or both")
+    bad = copy.deepcopy(d)
+    bad["rules"][i]["max"] = 1
+    assert has(errors(bad), f"$.rules[{i}].min", "min 2 is above max 1")
+    bad = copy.deepcopy(d)
+    bad["rules"][i]["where"] = {"cmp": [{"col": "size"}, ">=", {"ctx": "uid"}]}
+    assert any(e.path.startswith(f"$.rules[{i}].where") for e in errors(bad))
+    bad = copy.deepcopy(d)
+    p = next(p for p in bad["properties"] if p["template"] == "invariant_preserved")
+    p["invariants"].append({"rule": "M1"})
+    j = bad["properties"].index(p)
+    assert has(errors(bad), f"$.properties[{j}].invariants[{len(p['invariants']) - 1}].rule",
+               "sets only a minimum, which is no invariant")

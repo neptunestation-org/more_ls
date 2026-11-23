@@ -522,8 +522,17 @@ class Parser:
             r["group"] = self.name("the group column")
             self.eat("->")
             r["parent"] = self.name("the parent table")
-            self.word("max")
-            r["max"] = self.integer()
+            if not self.at_word("max", "min"):
+                self.word("max", "min")
+            if self.at_word("max"):
+                self.advance()
+                r["max"] = self.integer()
+            if self.at_word("min"):
+                self.advance()
+                r["min"] = self.integer()
+            if self.at_word("where"):
+                self.advance()
+                r["where"] = self.pred(f"{base}.where")
         else:  # column_rule
             r["role"] = self.name("a role")
             r["access"] = self.word("read", "write")

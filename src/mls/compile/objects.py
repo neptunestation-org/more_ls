@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 
-from mls.compile.cardinality import card_fn_ddl, card_fn_name, card_trigger_ddl
+from mls.compile.cardinality import (
+    card_fn_ddl, card_fn_name, card_min_fn_ddl, card_min_fn_name, card_min_trigger_ddl, card_min_trigger_name,
+    card_trigger_ddl,
+)
 from mls.compile.cardinality import parent_fk_def as card_parent_fk_def
 from mls.compile.check import check_def
 from mls.compile.column import privileges
@@ -173,9 +176,15 @@ def objects(spec: Spec, mutations: frozenset[Mutation] = frozenset()) -> Objects
     for r in spec.cardinalities():
         o.constraints[(r.table, f"mls_card_{r.name}_parent")] = ConstraintObj(
             r.table, f"mls_card_{r.name}_parent", "fk", card_parent_fk_def(spec, r), r.id)
-        fn = card_fn_name(r)
-        o.functions[fn] = FunctionObj(fn, f"{q(fn)}()", card_fn_ddl(spec, r, mutations), INTERNAL_ROLE, (), r.id)
-        o.triggers[(r.table, r.name)] = TriggerObj(r.table, r.name, fn, card_trigger_ddl(r), r.id)
+        if r.max is not None:
+            fn = card_fn_name(r)
+            o.functions[fn] = FunctionObj(fn, f"{q(fn)}()", card_fn_ddl(spec, r, mutations), INTERNAL_ROLE, (), r.id)
+            o.triggers[(r.table, r.name)] = TriggerObj(r.table, r.name, fn, card_trigger_ddl(r), r.id)
+        if r.min is not None:  # #61
+            fn, tg = card_min_fn_name(r), card_min_trigger_name(r)
+            o.functions[fn] = FunctionObj(fn, f"{q(fn)}()", card_min_fn_ddl(spec, r, mutations), INTERNAL_ROLE, (),
+                                          r.id)
+            o.triggers[(r.table, tg)] = TriggerObj(r.table, tg, fn, card_min_trigger_ddl(r), r.id)
     platform = platform_revokes(spec)
     o.functions = {n: replace(f, revoke=tuple(r for r in platform if r not in f.execute))
                    for n, f in o.functions.items()}

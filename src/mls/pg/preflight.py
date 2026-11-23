@@ -155,14 +155,19 @@ def preflight(conn: psycopg.Connection, new: Spec, old: Spec | None = None, sche
                                              n, [dict(zip(names, r)) for r in cur.fetchall()]))
             # cardinality limits that are new or tightened
             for c in new.cardinalities():
+                if c.max is None:  # #61: a minimum binds only the transactions that lower a count
+                    continue
                 prev = next((x for x in old.cardinalities() if x.table == c.table and x.name == c.name), None) if old else None
-                if prev is not None and prev.group == c.group and prev.max <= c.max:
+                if prev is not None and prev.group == c.group and prev.max is not None and prev.max <= c.max \
+                        and prev.where == c.where:
                     continue
                 live = live_cols[c.table]
                 if live is None or c.group not in live:
                     continue
                 cond = (f"t.{q(c.group)} in (select {q(c.group)} from {q(schema)}.{q(c.table)} "
-                        f"where {q(c.group)} is not null group by {q(c.group)} having count(*) > {int(c.max)})")
+                        f"where {q(c.group)} is not null"
+                        + (f" and ({sc.pred(c.where, c.table)}) is true" if c.where is not None else "")
+                        + f" group by {q(c.group)} having count(*) > {int(c.max)})")
                 n, s, sql = _count_and_sample(cur, _source(new, schema, c.table, live), cond, samples)
                 if n:
                     out.append(Violation(c.id, c.table, f"share a {c.group} with more than {c.max} rows",

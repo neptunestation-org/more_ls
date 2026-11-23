@@ -221,7 +221,7 @@ def test_the_renderer_covers_the_whole_model():
     # and every rule kind's own fields are rendered: a rule kind is its base fields plus these
     own = {"policy": {"kind", "role", "command", "mode", "using", "check"}, "check": {"kind", "predicate"},
            "inclusion": {"kind", "columns", "relation", "on_delete", "deferred"}, "transition": {"kind", "predicate"},
-           "cardinality": {"kind", "group", "parent", "max"}, "column_rule": {"kind", "role", "columns", "access", "when"}}
+           "cardinality": {"kind", "group", "parent", "max", "min", "where"}, "column_rule": {"kind", "role", "columns", "access", "when"}}
     for cls in _members(Rule):
         kind = typing.get_args(cls.model_fields["kind"].annotation)[0]
         assert set(cls.model_fields) - terse.RENDERED_FIELDS[terse.RuleBase] == own[kind], cls.__name__

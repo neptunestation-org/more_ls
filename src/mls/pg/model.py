@@ -180,14 +180,39 @@ class Oracle:
                 return False
         return True
 
+    def _counted(self, c, row: Row, db: Database) -> bool:
+        """#61: the cardinality rule counts the row (its group is set and its condition TRUE)."""
+        return row[c.group] is not None and (c.where is None or holds(c.where, row, {CONTEXT_NOW: None}, db))
+
     def cardinality_ok(self, table: str, new: Row, db: Database, old: Row | None = None) -> bool:
         for c in self.spec.cardinalities():
-            if c.table != table or new[c.group] is None:
+            if c.table != table or c.max is None or not self._counted(c, new, db):
                 continue
-            if old is not None and old[c.group] == new[c.group]:
+            if old is not None and old[c.group] == new[c.group] and self._counted(c, old, db):
                 continue
-            n = sum(1 for r in db.tables.get(table, []) if r is not old and r[c.group] == new[c.group])
+            n = sum(1 for r in db.tables.get(table, [])
+                    if r is not old and r[c.group] == new[c.group] and self._counted(c, r, db))
             if n + 1 > c.max:
+                return False
+        return True
+
+    def minimum_ok(self, table: str, old: Row, new: Row | None, db: Database) -> bool:
+        """#61: the min trigger, at commit (the harness sets constraints immediate after each
+        statement): a row that counted and no longer does in its group leaves at least `min`
+        counted rows there, unless the parent row is gone."""
+        for c in self.spec.cardinalities():
+            if c.table != table or c.min is None or not self._counted(c, old, db):
+                continue
+            if new is not None and new[c.group] == old[c.group] and self._counted(c, new, db):
+                continue
+            pk = self.spec.tables[c.parent].primary_key[0]
+            if not any(p[pk] == old[c.group] for p in db.tables.get(c.parent, [])):
+                continue
+            n = sum(1 for r in db.tables.get(table, [])
+                    if r is not old and r[c.group] == old[c.group] and self._counted(c, r, db))
+            if new is not None and new[c.group] == old[c.group] and self._counted(c, new, db):
+                n += 1
+            if n < c.min:
                 return False
         return True
 
@@ -278,6 +303,8 @@ class Oracle:
             return "error"
         if self._fk_restrict_violation(table, old, new, db):
             return "error"
+        if not self.minimum_ok(table, old, new, db):
+            return "error"
         return "ok"
 
     def guards_ok(self, role: str, table: str, old: Row, new: Row, ctx: dict, db: Database) -> bool:
@@ -304,6 +331,8 @@ class Oracle:
         if reads_columns and not holds(effective(self.spec, table, role, "select", "using"), old, ctx, db):
             return "filtered"
         if self._fk_restrict_violation(table, old, None, db) or not self._set_null_ok(table, old, ctx, db):
+            return "error"
+        if not self.minimum_ok(table, old, None, db):
             return "error"
         return "ok"
 

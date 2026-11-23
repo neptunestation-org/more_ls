@@ -627,6 +627,27 @@ counts, and raises `check_violation` if the count would exceed `max`.  Correct u
 COMMITTED (stated in the proof report); the parent table gets an `mls_internal_<parent>` policy
 `FOR ALL`.
 
+    R5 cardinality files_per_tenant on files: tenant_id -> tenants max 5
+    C1 cardinality keep_an_owner on org_members: org_id -> orgs min 1 where role = 'owner'
+
+`max` and `min` are each optional, and a rule has at least one (`min` at most `max`).  `where`
+counts only the rows it is TRUE of; it reads the row's own columns and constants.  With `where`,
+the `max` trigger fires on every update, since a changed column can bring a row into the count.
+
+`min` keeps at least that many counted rows per parent row, against the transactions that remove
+or change them: a transaction that deletes a counted row, moves it to another group or makes
+`where` no longer TRUE of it fails if its parent row is left with fewer than `min`, unless the
+transaction deletes that parent row too.  A new parent row may start with fewer, until rows are
+added and then removed.  So deleting a shop is one transaction that deletes its memberships and
+the shop.  Compiles to a constraint trigger `<name>_min`, `AFTER DELETE OR UPDATE ... DEFERRABLE
+INITIALLY DEFERRED`, calling the `SECURITY DEFINER` function `mls_card_<table>_<name>_min()`:
+at commit it locks the parent row `FOR UPDATE` and raises `check_violation` (`MLS cardinality
+<name> on <table>: fewer than <min> rows for <group> = …`) when fewer remain.  Since a new parent
+may start below it, a minimum is no invariant: `invariant_preserved` refuses a rule with only a
+`min`, and for a rule with both it proves the `max`.  The proofs do not use a minimum, and
+`must_allow` does not see counts either way: a statement it promises can still be refused by a
+count.
+
 ### 11.6 `column_rule`
 
     {"id": "C1", "kind": "column_rule", "table": "docs", "role": "authenticated",
@@ -936,6 +957,7 @@ All names are deterministic functions of the spec, so `mls drift` can match them
 | hierarchy reachability function | `mls_reach_<hierarchy>(key)` |
 | lookup helper (a membership whose subquery would recurse) | `mls_lookup_<relation>(key)` |
 | cardinality trigger function | `mls_card_<table>_<name>()` |
+| cardinality minimum trigger and function | `<name>_min`, `mls_card_<table>_<name>_min()` |
 | index | `mls_ix_<table>_<col>[_<col>...]` |
 | migration: replacement constraint before the swap | `<name>_mls_new` |
 | adopted-table constraint comparison (dropped in the same block) | `mls_probe` |

@@ -1676,3 +1676,29 @@ key that changes nothing, so `tests/templates/test_pair_key.py` shows the mutati
 "I need a relation" request from the rules pass routed back to the relations pass (a second round
 trip for what one sentence in the relations prompt covers), and leaving the key to the skeleton
 (the importer cannot know it is wanted).
+
+**D83. A cardinality rule may keep a minimum and count only some rows (#61, refines D4, D36).**
+Scarpar: "an owner may change or remove their own membership, but a shop always keeps at least one
+owner"; both passes said MLS could not state it.  Decision: `CardinalityRule` gets optional `min`
+and `where` (`max` optional too, at least one bound, `min ≤ max`), terse `g -> parent [max N]
+[min M] [where p]`.  `where` (the row's own columns and constants) decides which rows count, for
+both bounds; the max trigger then fires on any update.  Meaning of `min` (the business owner's
+choice, 2026-11-23): no transaction that removes or changes a counted row leaves its parent row
+with fewer than `M`, unless the parent row is gone by commit; a new parent may start with fewer.
+It is checked at commit (a deferred constraint trigger `<name>_min`, AFTER DELETE OR UPDATE),
+because the parent foreign key is RESTRICT: an immediate check would make a parent undeletable,
+since its rows must go first and the last one could not (the owner chose commit over an
+undeletable shop or a cascading parent key, which D79 refuses on scarpar's relation-backed
+memberships).  The trigger locks the parent row at commit, so two writers each removing one of the
+last two rows cannot both succeed (`test_two_writers_cannot_remove_the_last_rows_together`; the
+`CARDINALITY_NO_LOCK` mutation lets both through).  Proofs: a minimum is no invariant of stored rows
+(a new parent starts at zero), so `invariant_preserved` refuses a min-only rule and proves only
+the maximum of a rule with both; nothing assumes a minimum, so the fragment is unchanged (the
+maximum's count encoding, with `counted = group set ∧ T(where)`).  `must_allow` does not see counts
+for either bound, as before.  The harness resets its data in one transaction (a reset deleting
+children before parents in separate statements is exactly what the rule refuses) and forces the
+deferred checks after a delete too.  Fixture `specs.min_count_spec` (min 2 = max 2 on files of
+size ≥ 3, so random statements meet the bound), mutations `CARDINALITY_MIN_OFF_BY_ONE` and
+`CARDINALITY_WHERE_DROPPED`.  Rejected: a ∀∃ invariant with Skolem witnesses (leaves EPR, and the
+owner's flow creates a shop before its owner), a separate rule kind (one construct, one template
+family).

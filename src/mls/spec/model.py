@@ -427,11 +427,16 @@ class TransitionRule(RuleBase):
 class CardinalityRule(RuleBase):
     """At most `max` rows of `table` share one value of `group` (D4).  `parent` is the table whose
     primary key `group` references; the compiled trigger locks that parent row before counting,
-    which makes the bound hold under READ COMMITTED.  NULL groups are not counted."""
+    which makes the bound hold under READ COMMITTED.  NULL groups are not counted.  #61: `min`
+    instead (or as well) keeps at least that many: no transaction leaves a parent row it lowered
+    below `min` (checked at commit, so a parent and its rows go together, and a new parent may
+    start with none).  `where` counts only the rows it is TRUE of."""
     kind: Literal["cardinality"]
     group: str
     parent: str
-    max: int = Field(ge=1)
+    max: int | None = Field(None, ge=1)
+    min: int | None = Field(None, ge=1)
+    where: Pred | None = None
 
 
 class ColumnRule(RuleBase):

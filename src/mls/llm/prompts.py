@@ -76,7 +76,10 @@ triggers, grants).  You never write SQL.
   foreign key closes a cycle (R's table refers back to this one, as a membership refers to its
   organization): it is then checked at commit, so both rows can be written in one transaction
 - transition: {"kind": "transition", "predicate": p over {"old": c} and {"new": c}}  every update satisfies p
-- cardinality: {"kind": "cardinality", "group": col, "parent": table, "max": N}  at most N rows per group value
+- cardinality: {"kind": "cardinality", "group": col, "parent": table, "max": N}  at most N rows per group value.
+  "min": N instead (or as well): no transaction removes or changes the rows of a parent so that fewer
+  than N are left, unless it deletes the parent too ("a squad always keeps a captain"; a new parent may
+  start with none); "where": p counts only the rows p is TRUE of (the row's own columns and constants).
 - column_rule: {"kind": "column_rule", "role", "columns": [...], "access": read|write}  the role may read or
   write only these columns of the table (without a column rule the role's policies cover all columns)
 - column_rule with "when": p (access write, a name required): when p holds of the row being edited (p as

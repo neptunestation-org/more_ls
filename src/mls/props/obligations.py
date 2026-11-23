@@ -601,7 +601,11 @@ def _invariants(spec: Spec, p: InvariantPreserved) -> list[Invariant]:
 
 def cardinality_obligations(spec: Spec, p: InvariantPreserved, r: CardinalityRule) -> list[Obligation]:
     """cnt: group -> int.  Invariant ∀g. cnt(g) ≤ N.  Transitions on the table change one or two
-    counts; the compiled trigger guards inserts and group moves with cnt(g) + 1 ≤ N (D4)."""
+    counts; the compiled trigger guards inserts and group moves with cnt(g) + 1 ≤ N (D4).  #61: a
+    row counts when its group is set and `where` is TRUE of it; a minimum is no invariant (a new
+    parent may start below it), so only the maximum is proved."""
+    if r.max is None:
+        return []
     N = IntVal(r.max)
     cnt, cnt2 = fun(f"cnt.{r.id}@before", Sort.INT, ret=Sort.INT), fun(f"cnt.{r.id}@after", Sort.INT, ret=Sort.INT)
     x = int_var("card.g")
@@ -616,25 +620,31 @@ def cardinality_obligations(spec: Spec, p: InvariantPreserved, r: CardinalityRul
         ng, og = col_value_var("new", r.group), col_value_var("old", r.group)
         nn = col_null_var("new", r.group) if nullable else FALSE
         on = col_null_var("old", r.group) if nullable else FALSE
+        cn = and_(not_(nn), enc.T(r.where, "new", r.table)) if r.where is not None else not_(nn)  # new counted
+        co = and_(not_(on), enc.T(r.where, "old", r.table)) if r.where is not None else not_(on)  # old counted
         if cmd == "insert":
-            # counted iff the group is not NULL; the trigger requires cnt(g) + 1 ≤ N
-            axioms.append(implies(not_(nn), le(add(cnt(ng), IntVal(1)), N)))
-            axioms.append(forall([x], iff(eq(cnt2(x), add(cnt(x), IntVal(1))), and_(not_(nn), eq(x, ng)))))
-            axioms.append(forall([x], implies(not_(and_(not_(nn), eq(x, ng))), eq(cnt2(x), cnt(x)))))
+            # counted iff the group is set (and the condition TRUE); the trigger requires cnt(g) + 1 ≤ N
+            axioms.append(implies(cn, le(add(cnt(ng), IntVal(1)), N)))
+            axioms.append(forall([x], iff(eq(cnt2(x), add(cnt(x), IntVal(1))), and_(cn, eq(x, ng)))))
+            axioms.append(forall([x], implies(not_(and_(cn, eq(x, ng))), eq(cnt2(x), cnt(x)))))
         elif cmd == "delete":
-            axioms.append(forall([x], implies(and_(not_(on), eq(x, og)), eq(cnt2(x), add(cnt(x), IntVal(-1))))))
-            axioms.append(forall([x], implies(not_(and_(not_(on), eq(x, og))), eq(cnt2(x), cnt(x)))))
+            axioms.append(forall([x], implies(and_(co, eq(x, og)), eq(cnt2(x), add(cnt(x), IntVal(-1))))))
+            axioms.append(forall([x], implies(not_(and_(co, eq(x, og))), eq(cnt2(x), cnt(x)))))
         else:
-            moved = or_(and_(not_(on), nn), and_(on, not_(nn)), and_(not_(on), not_(nn), not_(eq(og, ng))))
-            axioms.append(implies(and_(moved, not_(nn)), le(add(cnt(ng), IntVal(1)), N)))
-            leaves = and_(moved, not_(on))   # old group loses one
-            joins = and_(moved, not_(nn))    # new group gains one
-            axioms.append(forall([x], implies(and_(leaves, eq(x, og)), eq(cnt2(x), add(cnt(x), IntVal(-1))))))
-            axioms.append(forall([x], implies(and_(joins, eq(x, ng)), eq(cnt2(x), add(cnt(x), IntVal(1))))))
+            stays = and_(co, cn, eq(og, ng))   # counted before and after in the same group
+            joins = and_(cn, not_(stays))      # the new group gains one (the trigger checks it)
+            leaves = and_(co, not_(stays))     # the old group loses one
+            axioms.append(implies(joins, le(add(cnt(ng), IntVal(1)), N)))
+            axioms.append(forall([x], implies(and_(leaves, eq(x, og), not_(and_(joins, eq(x, ng)))),
+                                              eq(cnt2(x), add(cnt(x), IntVal(-1))))))
+            axioms.append(forall([x], implies(and_(joins, eq(x, ng), not_(and_(leaves, eq(x, og)))),
+                                              eq(cnt2(x), add(cnt(x), IntVal(1))))))
             axioms.append(forall([x], implies(not_(or_(and_(leaves, eq(x, og)), and_(joins, eq(x, ng)))),
                                               eq(cnt2(x), cnt(x)))))
+            axioms.append(forall([x], implies(and_(leaves, eq(x, og), joins, eq(x, ng)), eq(cnt2(x), cnt(x)))))
         out.append(Obligation(p.id, f"{cmd} on {r.table} preserves {r.id} ({r.name}): at most {r.max} "
-                                    f"rows per {r.group}", axioms, inv_after, rows, [], [enc]).finish())
+                                    f"rows per {r.group}", axioms, inv_after, rows,
+                              _relations_of(spec, r.where), [enc]).finish())
     return out
 
 

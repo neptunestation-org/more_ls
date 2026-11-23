@@ -59,7 +59,7 @@ Compiled as `(select now())`.
 | `transition` (table, predicate over old/new) | QF over two rows | one `BEFORE UPDATE` row trigger template |
 | `column_rule` (role, table, columns, read/write) | propositional | column privileges (`GRANT SELECT (cols)`; no table-level grant to that role) |
 | `column_rule` with `when` (write) | old image + context + memberships | BEFORE UPDATE trigger, for the role only: `T(when(old)) → other columns unchanged` |
-| `cardinality` (table, group col, parent, max N) | LIA + UF | trigger template: lock parent row `FOR UPDATE`, count, raise |
+| `cardinality` (table, group col, parent, max N, min M, where p) | LIA + UF | trigger template: lock parent row `FOR UPDATE`, count, raise; `min` at commit |
 | `hierarchy` (group table, parent col, max depth d) | unrolled to depth d | depth column + `CHECK (depth <= d)`, immutable parent (transition), recursive-CTE InitPlan in policies |
 | `opaque` (name, inputs, sql) | uninterpreted predicate | raw SQL, wrapped and named |
 
@@ -92,6 +92,14 @@ and raises `check_violation` if `count + 1 > max`.  Correct under READ COMMITTED
 the lock sees committed rows of the writers that held the lock before); not under REPEATABLE READ,
 where the count uses the transaction's snapshot (stated as an assumption in every report).  The
 proof side uses integer functions `cnt@before`, `cnt@after` (SEMANTICS §7).
+
+With `where p`, a row counts when its group is set and `p` is TRUE of it (`p` reads the row's
+own columns and constants); the `max` trigger then fires on every update, and an update that keeps
+a counted row counted in its group returns.  `min M`: a constraint trigger AFTER DELETE OR UPDATE,
+deferred to commit, for a row that counted and no longer counts in its group: if the parent row
+still exists, it is locked `FOR UPDATE` and the counted rows of the group must number at least `M`.
+A parent row inserted, or never lowered, may have fewer.  So `min` is a transition property of the
+transactions that lower a count, not an invariant of the stored rows; the proofs do not use it.
 
 ### 3.3 The internal role
 

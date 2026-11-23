@@ -72,6 +72,9 @@ writers) is in `docs/design/archive/ROADMAP.md`, "Parallel track — Lean 4".
   check on a cascade delete are not transcribed: `Relational.lean`'s FK guard is RESTRICT only.
   Nor is set_null (#62, D81): the induction step's nulled-row case, `_set_null_obligations` and the
   oracle's `_set_null_ok`.
+- **Cardinality `where` and `min` (#61, D83)** are not transcribed: `Cardinality.lean` counts every
+  row of a group against a maximum; the condition on the counted rows and the commit-time minimum
+  (which the proofs do not use) are not modelled.
 - **Lookup helpers (#34) and nullable membership values (#42)** need no transcription: the helper
   is a compilation of the same atom, and `liftCmp` already makes a NULL value UNKNOWN.
 - **Relations over nullable columns (#49, D71).**  `Relational.lean` derives a relation from every

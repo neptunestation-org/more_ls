@@ -56,7 +56,7 @@ OR, AND, NOT, ATOM = 1, 2, 3, 4
 
 RESERVED = frozenset("""
 mls comment identity roles enum table relation hierarchy opaque rules properties
-on applies_to from requirement description using check for max on_delete restrict cascade set_null deferred max_depth where when
+on applies_to from requirement description using check for max min on_delete restrict cascade set_null deferred max_depth where when
 and or not is null true false in in_group now_between old new
 primary_key unique tags assume sql relations has_column named tagged all
 owned adopted observed select insert update delete permissive restrictive read write
@@ -240,7 +240,9 @@ def rule(r: Rule) -> str:
     if isinstance(r, TransitionRule):
         return f"{head} {pred(r.predicate)}" + _tail(r)
     if isinstance(r, CardinalityRule):
-        return f"{head} {ident(r.group)} -> {ident(r.parent)} max {r.max}" + _tail(r)
+        bounds = (f" max {r.max}" if r.max is not None else "") + (f" min {r.min}" if r.min is not None else "")
+        where = f" where {pred(r.where)}" if r.where is not None else ""
+        return f"{head} {ident(r.group)} -> {ident(r.parent)}{bounds}{where}" + _tail(r)
     if isinstance(r, ColumnRule):
         when = f" when {pred(r.when)}" if r.when is not None else ""
         return f"{head} {ident(r.role)} {r.access} {', '.join(ident(c) for c in r.columns)}{when}" + _tail(r)

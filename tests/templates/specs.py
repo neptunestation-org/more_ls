@@ -382,6 +382,21 @@ def cardinality_spec() -> Spec:
     return make(d)
 
 
+def min_count_spec() -> Spec:
+    """#61: the cardinality fixture with a minimum: a tenant keeps at least two files of size 3 or
+    more once it has them (deletes and updates of files are checked at commit; two, the maximum,
+    so that the random statements often meet the bound); and the maximum counts only those files
+    too, so it bounds the large files (2) while small ones are free."""
+    d = json.loads(cardinality_spec().model_dump_json(by_alias=True, exclude_none=True))
+    big = {"cmp": [{"col": "size"}, ">=", {"const": 3}]}  # the generator draws ints from -1 to 4
+    for r in d["rules"]:
+        if r["id"] == "R5":
+            r["where"] = big
+    d["rules"].append({"id": "M1", "kind": "cardinality", "name": "keep_a_big_file", "table": "files",
+                       "group": "tenant_id", "parent": "tenants", "min": 2, "where": big})
+    return make(d)
+
+
 def org_base_spec() -> Spec:
     return make(org_base())
 

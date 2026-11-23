@@ -429,8 +429,9 @@ class Harness:
     def load(self, ds: Dataset) -> None:
         assert self.conn is not None
         with self.conn.cursor() as cur:
-            for t in reversed(table_order(self.spec, self.foreign)):
-                cur.execute(psql.SQL("delete from {}").format(_ident(t)))
+            with self.conn.transaction():  # #61: one transaction, so a minimum count sees its parents go too
+                for t in reversed(table_order(self.spec, self.foreign)):
+                    cur.execute(psql.SQL("delete from {}").format(_ident(t)))
             for fk in self.foreign:  # a parent outside the spec has every value the data may use
                 if fk["parent"] in self.spec.tables:
                     continue
@@ -556,6 +557,7 @@ class Harness:
                 psql.SQL(" and ").join(psql.SQL("{} = {}").format(_ident(c), psql.Placeholder()) for c in pk)),
                 [old[c] for c in pk])
             got = "ok" if cur.rowcount == 1 else "filtered"
+            cur.execute("set constraints all immediate")  # #61: a minimum count is checked at commit
         except psycopg.Error as e:
             got = self._classify(e)
         finally:

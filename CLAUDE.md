@@ -208,6 +208,11 @@ union member the renderer does not cover.
 - M4 (the LLM loop and evals): `src/mls/llm/CLAUDE.md`. Tests never call the API (`MLS_LLM_SCRIPT=<json>`
   or `ScriptedClient` replays answers); terse is the default, so tests that script JSON answers pass
   `syntax="json"` / `--syntax json`.
+- D83 (#61): a cardinality rule has `max` and/or `min` and an optional `where`; `min` is a deferred
+  constraint trigger `<name>_min` (at commit, parent row locked; a parent deleted in the transaction
+  is exempt), no invariant (refused in `invariant_preserved`), unused by the proofs; fixture
+  `specs.min_count_spec`, mutations `CARDINALITY_MIN_OFF_BY_ONE`, `CARDINALITY_WHERE_DROPPED`; the
+  harness resets its data in one transaction.
 - M3: hierarchies and cardinality limits compile to SECURITY DEFINER helpers owned by `mls_internal`
   (compile/internal.py, hierarchy.py, cardinality.py). The parent-row lock is only testable with
   parallel writers (`tests/templates/test_cardinality.py`); `-m cvc5` cross-checks the org_tree

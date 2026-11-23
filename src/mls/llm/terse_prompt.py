@@ -68,7 +68,10 @@ triggers, grants).  You never write SQL.
   checked at commit, so both rows can be written in one transaction
 - R4 transition name on t: p over old.c and new.c          every update satisfies p
 - R5 cardinality name on t: col -> parent max N            at most N rows per value of col (parent
-  is the table col refers to)
+  is the table col refers to).  `min N` instead (or as well): no transaction removes or changes the
+  rows of a parent so that fewer than N are left, unless it deletes the parent too ("a squad always
+  keeps a captain"; a new parent may start with none); `where p` counts only the rows p is TRUE of
+  (p reads the row's own columns and constants), e.g. `squad_id -> squads min 1 where role = 'captain'`.
 - R6 column_rule name on t: role read|write c1, c2         the role may read or write only these
   columns of the table (without a column rule the role's policies cover all columns)
 - R7 column_rule name on t: role write c1, c2 when p       when p holds of the row being edited (p
@@ -121,7 +124,7 @@ rule       := ID KIND [NAME] 'on' TABLE ':' body ['requirement' STRING]
 body       := ROLE COMMAND MODE ['using' pred] ['check' pred]      (policy)
             | pred                                                 (check, transition)
             | '(' COL ',' COL ')' 'in' RELATION 'on_delete' ('restrict' | 'cascade' | 'set_null') ['deferred']   (inclusion)
-            | COL '->' TABLE 'max' INT                             (cardinality)
+            | COL '->' TABLE ['max' INT] ['min' INT] ['where' pred]   (cardinality, max or min or both)
             | ROLE ('read' | 'write') COL (',' COL)* ['when' pred]  (column_rule; when: write only)
 property   := ID TEMPLATE ... ['description' STRING]              (forms as listed above)
 term       := column | old.column | new.column | @context | 'text' | 123 | true | false

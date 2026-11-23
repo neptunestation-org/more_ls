@@ -37,6 +37,8 @@ CASES = {
     "hierarchy": (specs.hierarchy_spec, Mutation.HIERARCHY_SHALLOW, None),
     "hierarchy_depth": (specs.hierarchy_spec, Mutation.HIERARCHY_NO_DEPTH_CHECK, None),
     "cardinality": (specs.cardinality_spec, Mutation.CARDINALITY_OFF_BY_ONE, None),
+    "cardinality_min": (specs.min_count_spec, Mutation.CARDINALITY_MIN_OFF_BY_ONE, None),  # #61
+    "cardinality_where": (specs.min_count_spec, Mutation.CARDINALITY_WHERE_DROPPED, None),  # #61
     "composed": (specs.composed_spec, Mutation.HOP_VISIBILITY_DROPPED, None),  # D56
     "mixed_case": (specs.mixed_case_spec, Mutation.IDENT_UNQUOTED, None),  # D58
     "enum": (specs.enum_spec, Mutation.IN_DROP_LAST, None),  # D59
