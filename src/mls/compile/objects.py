@@ -14,7 +14,10 @@ from mls.compile.cardinality import (
 from mls.compile.cardinality import parent_fk_def as card_parent_fk_def
 from mls.compile.check import check_def
 from mls.compile.column import privileges
-from mls.compile.fk import fk_def
+from mls.compile.fk import (
+    fk_def, incl_fn_ddl, incl_fn_name, incl_target_fn_ddl, incl_target_fn_name, incl_target_trigger_ddl,
+    incl_target_trigger_name, incl_trigger_ddl, is_filtered,
+)
 from mls.compile.hardening import platform_revokes, revoke_platform_ddl
 from mls.compile.hierarchy import (
     depth_check_def, depth_fn_ddl, depth_fn_name, depth_trigger_ddl, member_fk_def, parent_fk_def,
@@ -148,6 +151,16 @@ def objects(spec: Spec, mutations: frozenset[Mutation] = frozenset()) -> Objects
     for r in spec.checks():
         o.constraints[(r.table, r.name)] = ConstraintObj(r.table, r.name, "check", check_def(r, sc), r.id)
     for r in spec.inclusions():
+        if is_filtered(spec, r):  # #54: two constraint triggers, no foreign key
+            fn = incl_fn_name(r)
+            o.functions[fn] = FunctionObj(fn, f"{q(fn)}()", incl_fn_ddl(spec, r, mutations), INTERNAL_ROLE, (), r.id)
+            o.triggers[(r.table, r.name)] = TriggerObj(r.table, r.name, fn, incl_trigger_ddl(r, mutations), r.id)
+            if Mutation.INCLUSION_TARGET_UNCHECKED not in mutations:
+                fn, tg, target = incl_target_fn_name(r), incl_target_trigger_name(r), spec.relations[r.relation].table
+                o.functions[fn] = FunctionObj(fn, f"{q(fn)}()", incl_target_fn_ddl(spec, r, mutations),
+                                              INTERNAL_ROLE, (), r.id)
+                o.triggers[(target, tg)] = TriggerObj(target, tg, fn, incl_target_trigger_ddl(spec, r, mutations), r.id)
+            continue
         o.constraints[(r.table, r.name)] = ConstraintObj(r.table, r.name, "fk", fk_def(r, sc), r.id)
     for r in all_transitions(spec):
         fn = transition_fn_name(r)

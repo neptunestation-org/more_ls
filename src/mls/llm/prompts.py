@@ -41,7 +41,7 @@ triggers, grants).  You never write SQL.
 - {"table": t, "key": k, "value": v, "where": p}   only the rows of t where p is TRUE; p reads t's own
   columns and constants only.  E.g. the managers: {"table": "building_staff", "key": "user_id",
   "value": "building_id", "where": {"cmp": [{"col": "role"}, "=", {"const": "manager"}]}}.  Not in
-  inclusion rules, invariants or hierarchies.  In a policy the key is a context value or a constant,
+  invariants or hierarchies.  In a policy the key is a context value or a constant,
   never a column.  A constant key asks about the parent row's state: is the floor open? A relation
   keyed by the state column, text, bool or enum, read with a constant: {"table": "floors", "key":
   "status", "value": "id"} as {"member": {"relation": "floor_in_state", "key": {"const": "open"},
@@ -80,7 +80,10 @@ triggers, grants).  You never write SQL.
   is deleted is unassigned"); the role must be able to make that edit itself.
   Add "deferred": true when its
   foreign key closes a cycle (R's table refers back to this one, as a membership refers to its
-  organization): it is then checked at commit, so both rows can be written in one transaction
+  organization): it is then checked at commit, so both rows can be written in one transaction.
+  R may have a condition ("an organization's owner is one of its members with role 'owner'"); then it
+  is always "on_delete": "restrict", "deferred": true, and demoting or removing the referenced row is
+  refused
 - transition: {"kind": "transition", "predicate": p over {"old": c} and {"new": c}}  every update satisfies p
 - cardinality: {"kind": "cardinality", "group": col, "parent": table, "max": N}  at most N rows per group value.
   "min": N instead (or as well): no transaction removes or changes the rows of a parent so that fewer

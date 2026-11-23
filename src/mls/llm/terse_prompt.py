@@ -36,7 +36,7 @@ triggers, grants).  You never write SQL.
   of them, is the primary key or a unique constraint of t.  The owner of a row is one: relation owns_building = buildings(owner_id, id)
 - relation R = t(k, v) where p        only the rows of t where p is TRUE; p reads t's own columns and
   constants only.  E.g. relation manager_of = building_staff(user_id, building_id) where role = 'manager'.
-  Not in inclusion rules, invariants or hierarchies.  In a policy the key is a context value or a
+  Not in invariants or hierarchies.  In a policy the key is a context value or a
   constant, never a column.  A constant key asks about the parent row's state: is the floor open? A
   relation keyed by the state column, text, bool or enum, read with a constant: relation
   floor_in_state = floors(status, id) read as floor_in_state('open', floor_id), or a bool column
@@ -71,7 +71,10 @@ triggers, grants).  You never write SQL.
   keeps them and sets a (nullable) first column NULL ("a delivery whose rider is deleted is
   unassigned"); the role must be able to make that edit itself.  Append `deferred` when its foreign key closes a
   cycle (R's table refers back to t, as a membership refers to its organization): it is then
-  checked at commit, so both rows can be written in one transaction
+  checked at commit, so both rows can be written in one transaction.  R may have a condition
+  ("an organization's owner is one of its members with role 'owner'": (owner_id, id) in owners_of on_delete
+  restrict deferred, owners_of = members(user_id, org_id) where role = 'owner'); then it is always
+  `on_delete restrict deferred`, and demoting or removing the referenced row is refused
 - R4 transition name on t: p over old.c and new.c          every update satisfies p
 - R5 cardinality name on t: col -> parent max N            at most N rows per value of col (parent
   is the table col refers to).  `min N` instead (or as well): no transaction removes or changes the

@@ -362,7 +362,8 @@ class Oracle:
 
     def _fk_restrict_violation(self, table: str, old: Row, new: Row | None, db: Database) -> bool:
         """ON DELETE/UPDATE RESTRICT: removing a referenced (key, value) pair of a relation
-        backed by `table`, or a referenced single-column key, errors if any row references it.  A
+        backed by `table`, or a referenced single-column key, errors if any row references it
+        (#54: for a relation with a condition, also an update that makes the condition not TRUE).  A
         cascade inclusion's referencing rows are deleted with the row instead (#60), so only its
         update side refuses."""
         for fk in simple_fks(self.spec):
@@ -374,10 +375,16 @@ class Oracle:
             if any(r is not old and r[fk.column] == key for r in db.tables.get(fk.table, [])):
                 return True
         for rname, rel in self.spec.base_relations().items():
-            if rel.table != table:
+            if rel.table != table or rel.key is None:
                 continue
             pair = (old[rel.key], old[rel.value])
-            if new is not None and (new[rel.key], new[rel.value]) == pair:
+            if rel.where is not None:  # #54: the pair leaves only if the old row held it, TRUE condition
+                if None in pair or not holds(rel.where, old, {CONTEXT_NOW: None}, db):
+                    continue
+                if new is not None and (new[rel.key], new[rel.value]) == pair \
+                        and holds(rel.where, new, {CONTEXT_NOW: None}, db):
+                    continue
+            elif new is not None and (new[rel.key], new[rel.value]) == pair:
                 continue
             for inc in self.spec.inclusions():
                 if inc.relation != rname or (new is None and inc.on_delete != "restrict"):

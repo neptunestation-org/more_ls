@@ -319,7 +319,8 @@ def generate_dataset(spec: Spec, adapter: Adapter, rnd: Chooser, rows_per_table:
             rows.append(r)
         for rname, rel in spec.base_relations().items():
             if rel.table == table and rel.key is not None:  # a set is no inclusion target
-                gen.facts[rname] = [(r[rel.key], r[rel.value]) for r in rows]
+                gen.facts[rname] = [(r[rel.key], r[rel.value]) for r in rows  # #54: its condition TRUE
+                                    if rel.where is None or eval_pred(rel.where, r, {}, Database({})) is True]
     return ds
 
 

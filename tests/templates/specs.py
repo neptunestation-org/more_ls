@@ -514,6 +514,42 @@ def condition_spec() -> Spec:
     return make(d)
 
 
+def filtered_inclusion_spec(with_rule: bool = True) -> Spec:
+    """#54: team_tasks where every project names a lead, `projects(lead_id, team_id)`, who must be a
+    member of its team with role 'a': an inclusion into `lead_of`, a relation with a condition,
+    so constraint triggers checked at commit.  A member edits their own membership row (R5, R6: a
+    demotion or a removal of a project's lead is refused) and adds and edits their teams' projects
+    (R7, R8: a project naming someone who is no lead is refused).  The mutations drop the
+    condition (any member leads), the trigger on `team_members` (a lead is demoted under their
+    project) and the deferral (a project and its lead's row cannot be written in either order)."""
+    d = json.loads((EXAMPLE.parent / "team_tasks.mls.json").read_text())
+    d["tables"]["team_members"]["columns"]["role"] = {"type": "text", "nullable": True}
+    d["tables"]["projects"]["columns"]["lead_id"] = {"type": "uuid", "nullable": False}
+    d["relations"]["lead_of"] = {"table": "team_members", "key": "user_id", "value": "team_id",
+                                 "where": {"cmp": [{"col": "role"}, "=", {"const": "a"}]}}
+    own = {"cmp": [{"col": "user_id"}, "=", {"ctx": "uid"}]}
+    member = {"member": {"relation": "member_of", "key": {"ctx": "uid"}, "value": {"col": "team_id"}}}
+    d["rules"] += [
+        {"id": "I1", "kind": "inclusion", "name": "project_lead_leads", "table": "projects",
+         "columns": ["lead_id", "team_id"], "relation": "lead_of", "on_delete": "restrict", "deferred": True},
+    ][:1 if with_rule else 0] + [
+        {"id": "R5", "kind": "policy", "name": "member_edits_own_membership", "table": "team_members",
+         "role": "authenticated", "command": "update", "mode": "permissive", "using": own, "check": own},
+        {"id": "R6", "kind": "policy", "name": "member_leaves", "table": "team_members", "role": "authenticated",
+         "command": "delete", "mode": "permissive", "using": own},
+        {"id": "R7", "kind": "policy", "name": "member_adds_projects", "table": "projects", "role": "authenticated",
+         "command": "insert", "mode": "permissive", "check": member},
+        {"id": "R8", "kind": "policy", "name": "member_edits_projects", "table": "projects", "role": "authenticated",
+         "command": "update", "mode": "permissive", "using": member, "check": member},
+    ]
+    return make(d)
+
+
+
+def filtered_inclusion_base_spec() -> Spec:
+    """#54: the same without the inclusion, the migration's starting point."""
+    return filtered_inclusion_spec(with_rule=False)
+
 def set_spec() -> Spec:
     """#63: team_tasks with a nullable `projects.public`.  `public_projects` is a set relation, the
     ids of the projects whose `public` is TRUE (NULL is UNKNOWN: not public), and `public_tasks`

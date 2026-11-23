@@ -101,14 +101,18 @@ def rule(spec: Spec, r: Rule) -> str:
     if isinstance(r, InclusionRule):
         rel = spec.relations[r.relation]
         c1, c2 = r.columns
+        where = getattr(rel, "where", None)  # #54: a relation with a condition
         return (f"Every row of {r.table} with both {c1} and {c2} set has ({c1}, {c2}) listed in "
-                f"{r.relation} (table {rel.table}); "
+                f"{r.relation} (table {rel.table}" + (f", the rows where {pred(spec, where)}" if where else "")
+                + "); "
                 + (f"such a {r.relation} entry cannot be changed while a row of {r.table} refers to it, "
                    f"and removing it deletes the rows of {r.table} that refer to it."
                    if r.on_delete == "cascade" else
                    f"such a {r.relation} entry cannot be changed while a row of {r.table} refers to it, "
                    f"and removing it sets {r.columns[0]} to empty on the rows of {r.table} that refer to it."
                    if r.on_delete == "set_null" else
+                   f"such a {r.relation} entry cannot be removed, changed or stop meeting that condition while "
+                   f"a row of {r.table} refers to it." if where else
                    f"such a {r.relation} entry cannot be removed or changed while a row of {r.table} "
                    f"refers to it.")
                 + (" It is checked when the transaction commits, so the two rows may be written in either "

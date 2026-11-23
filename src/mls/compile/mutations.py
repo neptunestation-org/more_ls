@@ -31,6 +31,10 @@ class Mutation(str, Enum):
     RELATION_NULL_KEY_MATCHES = "relation_null_key_matches"  # a relation's subquery also takes rows with a NULL key
     MEMBER_NULL_PASSES = "member_null_passes"  # a membership that holds when its value is NULL
     INCLUSION_NOT_DEFERRED = "inclusion_not_deferred"  # a deferred inclusion's foreign key checked per statement
+    # #54: an inclusion into a relation with a condition, compiled to constraint triggers
+    INCLUSION_CONDITION_DROPPED = "inclusion_condition_dropped"  # its triggers check the pair, not the condition
+    INCLUSION_TARGET_UNCHECKED = "inclusion_target_unchecked"    # no trigger on the relation's table
+    INCLUSION_NO_LOCK = "inclusion_no_lock"                      # the referenced row read without FOR SHARE
     CASCADE_AS_RESTRICT = "cascade_as_restrict"  # #60: an on_delete cascade inclusion compiled ON DELETE RESTRICT
     CARDINALITY_MIN_OFF_BY_ONE = "cardinality_min_off_by_one"  # #61: a minimum one row lower than the rule's
     CARDINALITY_WHERE_DROPPED = "cardinality_where_dropped"    # #61: every row counted, the condition ignored

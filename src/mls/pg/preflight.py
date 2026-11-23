@@ -206,4 +206,28 @@ def preflight(conn: psycopg.Connection, new: Spec, old: Spec | None = None, sche
                 n, s, sql = _count_and_sample(cur, src, cond, samples)
                 if n:
                     out.append(Violation(c.rule_id, c.table, what, n, s, sql, cond))
+            # #54: an inclusion into a relation with a condition is a trigger, which (unlike a
+            # foreign key's VALIDATE) never reads the rows already there: they are checked here
+            from mls.compile.fk import incl_fn_name, is_filtered
+
+            for r in new.inclusions():
+                if not is_filtered(new, r):
+                    continue
+                fn = incl_fn_name(r)
+                if o_obj is not None and fn in o_obj.functions and o_obj.functions[fn].ddl == n_obj.functions[fn].ddl:
+                    continue
+                live = live_cols[r.table]
+                rel = new.relations[r.relation]
+                if live is None or any(c not in live for c in r.columns):
+                    continue
+                c1, c2 = r.columns
+                if live_cols.get(rel.table) is None:
+                    exists = "false"
+                else:
+                    exists = (f"exists (select 1 from {q(schema)}.{q(rel.table)} x where x.{q(rel.key)} = t.{q(c1)} "
+                              f"and x.{q(rel.value)} = t.{q(c2)} and ({sc.pred(rel.where, rel.table)}) is true)")
+                cond = f"t.{q(c1)} is not null and t.{q(c2)} is not null and not {exists}"
+                n, s, sql = _count_and_sample(cur, _source(new, schema, r.table, live), cond, samples)
+                if n:
+                    out.append(Violation(r.id, r.table, f"have ({c1}, {c2}) not in {r.relation}", n, s, sql, cond))
     return PreflightResult(out, notes, errors)

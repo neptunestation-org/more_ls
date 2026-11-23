@@ -140,7 +140,7 @@ union member the renderer does not cover.
   `check.relation_scope`); facts are the rows where it is TRUE (`relation_row_axioms` is an
   iff), the subquery conjoins it (`chain.condition`, mutation `RELATION_CONDITION_DROPPED`),
   its visibility policy is its own (`key = k and cond`) and the grant adds its columns
-  (`chain.read_columns`); refused as an inclusion target, hierarchy members and in invariants.
+  (`chain.read_columns`); refused as hierarchy members and in invariants (an inclusion target since D86).
   The lifter reads the extra WHERE conditions (`Lifter.condition`); fixture `specs.condition_spec`.
 - D62: a filtered relation implies its unfiltered twin on the same table, key and value
   (`obligations.subset_axioms`, inside `relation_axioms`); test `SUBSET` in `tests/props/test_properties.py`.
@@ -214,6 +214,12 @@ union member the renderer does not cover.
   `mls_lookup_<R>()`; import reads keyless subqueries over a parent key as sets (`SET_ALIAS` marks the
   helper's base); refused as an inclusion target, hierarchy members, in tenant_isolation and
   invariants; fixture `specs.set_spec`, mutation `SET_HELPER_INVOKER`.
+- D86 (#54): an inclusion into a relation with a condition (`restrict deferred` required) compiles to two
+  deferred constraint triggers (`compile/fk.py`: `<name>` reads the target row `FOR SHARE`, `<name>_target`
+  refuses a demotion), owned by `mls_internal`; never assumed by the proofs; preflight counts existing
+  violators; import reads it back (`lift.inclusion_parts`); fixture `specs.filtered_inclusion_spec`,
+  mutations `INCLUSION_CONDITION_DROPPED`, `INCLUSION_TARGET_UNCHECKED`, `INCLUSION_NO_LOCK`
+  (`tests/templates/test_filtered_inclusion.py`).
 - D83 (#61): a cardinality rule has `max` and/or `min` and an optional `where`; `min` is a deferred
   constraint trigger `<name>_min` (at commit, parent row locked; a parent deleted in the transaction
   is exempt), no invariant (refused in `invariant_preserved`), unused by the proofs; fixture

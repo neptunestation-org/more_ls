@@ -22,6 +22,8 @@ def implied_keys(spec: Spec) -> dict[str, dict[str, tuple[str, str]]]:
     out: dict[str, dict[str, tuple[str, str]]] = {}
     for r in spec.inclusions():
         rel = spec.relations[r.relation]
+        if rel.where is not None:
+            continue  # #54: no foreign key; a key within the pair already makes it unique
         t = spec.tables[rel.table]
         keys = ([t.primary_key] if t.primary_key else []) + list(t.unique)
         pair = (rel.key, rel.value)

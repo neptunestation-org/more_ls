@@ -278,9 +278,9 @@ it; a predicate that is UNKNOWN (a NULL column) leaves the row out, as a SQL `WH
 predicate reads the relation table's own columns and constants (comparisons, `in`, `is null`,
 `and`, `or`, `not`); no context value, membership, group, `now_between` or opaque block, since a
 relation does not depend on who asks.  Such a relation may be the base of a composed relation and
-is used like any other in policies, goals, `must_allow`, `tenant_isolation` and `monotone_in`; it
-cannot be the target of an inclusion rule (a foreign key references every row), a hierarchy's
-members, or appear in an invariant (an update of the row's other columns changes it).  The
+is used like any other in policies, goals, `must_allow`, `tenant_isolation` and `monotone_in`, and
+it may be the target of an inclusion rule (section 11.3, checked by triggers at commit).  It cannot
+be a hierarchy's members or appear in an invariant (an update of the row's other columns changes it).  The
 membership subquery is `select value from t where key = k and (<predicate>)`.
 
 Reading a relation in a policy has an implicit cost: because RLS is forced on the
@@ -619,6 +619,29 @@ inclusion deferred.  `mls check` sees the cycles among the spec's own inclusions
 hierarchy and cardinality keys; `mls check --dsn` and `mls preflight` also see the database's
 own foreign keys between the spec's tables (a key declared `DEFERRABLE` does not count).  A key
 onto its own table is not a cycle.
+
+The relation may have a condition: "an organization's owner is one of its members with role
+`owner`" is `orgs(owner_id, id)` into `owners_of = members(user_id, org_id) where role = 'owner'`.  A
+foreign key references every row of its table, so this inclusion compiles to two constraint
+triggers instead, both `DEFERRABLE INITIALLY DEFERRED` and run as `mls_internal`.  It must be
+`"on_delete": "restrict"` and `"deferred": true` (terse: `on_delete restrict deferred`); the
+checker says so otherwise.  As for a foreign key, the pair must be unique in the relation's
+table, and that table cannot be observed (the second trigger is on it).
+
+- On the inclusion's table, after an insert or an update of the two columns, a row with both
+  columns set needs a row of the relation's table with that pair on which the condition is TRUE.
+  That row is read `FOR SHARE`, the lock a foreign key takes, so a transaction that is changing it
+  makes this one wait and then read what it committed.
+- On the relation's table, after an update or a delete, a row that held the pair with its
+  condition TRUE and no longer does (deleted, its pair changed, its condition FALSE or UNKNOWN) is
+  refused while a row of the inclusion's table names the pair.  Demoting the owner is refused.
+
+Both checks run when the transaction commits and read the rows as they are then: a project and
+its lead's row may be written in either order, a role changed and changed back passes, and a row
+written and deleted again in the transaction is not checked.  A violation raises
+`foreign_key_violation`.  The triggers never read the rows already there when they are created,
+so `mls preflight` counts the rows that break a new or changed inclusion of this kind.  The
+proofs do not assume it, as for any deferred inclusion, and it is refused in an invariant.
 
 ### 11.4 `transition`
 
@@ -964,6 +987,7 @@ All names are deterministic functions of the spec, so `mls drift` can match them
 | unique constraint an inclusion needs, added by MLS | `mls_key_<table>_<key>_<value>` |
 | check constraint, foreign key, policy, trigger | the rule's `name` |
 | transition trigger function | `mls_tr_<table>_<name>()` |
+| inclusion into a relation with a condition: trigger functions | `mls_incl_<table>_<name>()` (trigger `<name>` on the table), `mls_incl_<table>_<name>_target()` (trigger `<name>_target` on the relation's table) |
 | column guard trigger function | `mls_cg_<table>_<name>()` (trigger `0_mls_cg_<name>`) |
 | implicit relation policy | `mls_rel_<relation>_<role>_<n>` |
 | hop visibility policy of a composed relation | `mls_rel_<relation>_h<i>_<role>_<n>` on the i-th hop table |
@@ -1192,7 +1216,9 @@ DEFERRED`, the latter a deferred inclusion) becomes an inclusion rule, except on
 such keys checked after each statement, which is listed as foreign with a note; column-level
 grants become column rules; a CHECK the lifter reads becomes a check rule; a trigger of the
 transition template MLS itself emits becomes a transition rule, and one of its column guard
-template (`0_mls_cg_<name>`) a column rule with its role, its columns and its condition.  The compiler's own relation
+template (`0_mls_cg_<name>`) a column rule with its role, its columns and its condition; the
+triggers of an inclusion into a relation with a condition become that inclusion, with the
+relation its condition names.  The compiler's own relation
 policies (`mls_rel_<relation>_<role>_<n>`, which give the relation its name back) and relation
 grants are recognized and not imported as rules.  Listed in the notes and not imported: other
 triggers, other foreign keys, a CHECK the lifter cannot read or that is `NOT VALID`, a CHECK

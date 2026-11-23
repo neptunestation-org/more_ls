@@ -18,7 +18,7 @@ from mls.compile.column import grant_ddl, privileges, relations_in
 from mls.compile.hierarchy import hierarchy_ddl
 from mls.compile.internal import internal_policies, internal_role_ddl, lookup_relations
 from mls.compile.lookup import lookup_ddl
-from mls.compile.fk import fk_ddl, fk_def
+from mls.compile.fk import filtered_inclusion_ddl, fk_ddl, fk_def, is_filtered
 from mls.compile.hardening import preamble_ddl, role_ddl, table_hardening_ddl
 from mls.compile.index import index_ddl
 from mls.compile.mutations import Mutation
@@ -128,6 +128,9 @@ def compile_spec(spec: Spec, mutations: frozenset[Mutation] | set[Mutation] = fr
         s.add("checks", adopted_constraint_ddl(r.table, r.name, check_def(r, sc), mutations)
               if r.table in adopted else check_ddl(r, sc), r.id)
     for r in spec.inclusions():
+        if is_filtered(spec, r):  # #54
+            s.add("fks", filtered_inclusion_ddl(spec, r, sc), r.id)
+            continue
         s.add("fks", adopted_constraint_ddl(r.table, r.name, fk_def(r, sc), mutations)
               if r.table in adopted else fk_ddl(r, sc), r.id)
     for r in all_transitions(spec):

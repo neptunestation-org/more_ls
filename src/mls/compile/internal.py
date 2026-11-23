@@ -28,7 +28,18 @@ def internal_reads(spec: Spec) -> dict[str, set[str]]:
     for rel in lookup_relations(spec):  # D67: the lookup helpers read every level's table
         for lvl in levels(spec, rel):
             out.setdefault(lvl.table, set()).add("select")
+    for r in filtered_inclusions(spec):  # #54: FOR SHARE needs update on the referenced table
+        out.setdefault(r.table, set()).add("select")
+        out.setdefault(spec.relations[r.relation].table, set()).update({"select", "update"})
     return out
+
+
+def filtered_inclusions(spec: Spec) -> list:
+    """#54: the inclusions into a relation with a condition, which compile to triggers."""
+    from mls.spec.model import Relation
+
+    return [r for r in spec.inclusions()
+            if isinstance(spec.relations.get(r.relation), Relation) and spec.relations[r.relation].where is not None]
 
 
 def lookup_relations(spec: Spec) -> list[str]:
@@ -37,7 +48,7 @@ def lookup_relations(spec: Spec) -> list[str]:
 
 
 def needs_internal_role(spec: Spec) -> bool:
-    return bool(spec.hierarchies or spec.cardinalities() or lookup_relations(spec))
+    return bool(spec.hierarchies or spec.cardinalities() or lookup_relations(spec) or filtered_inclusions(spec))
 
 
 def internal_role_ddl(spec: Spec) -> list[str]:

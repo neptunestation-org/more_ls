@@ -55,6 +55,8 @@ CASES = {
     "storefront": (specs.storefront_spec, Mutation.LOOKUP_KEY_DROPPED, None),  # D70
     "nullable_relation": (specs.nullable_relation_spec, Mutation.RELATION_NULL_KEY_MATCHES, None),  # #49
     "lookup_condition": (specs.lookup_spec, Mutation.RELATION_CONDITION_DROPPED, None),
+    "filtered_inclusion": (specs.filtered_inclusion_spec, Mutation.INCLUSION_CONDITION_DROPPED, None),  # #54
+    "filtered_inclusion_target": (specs.filtered_inclusion_spec, Mutation.INCLUSION_TARGET_UNCHECKED, None),
 }
 
 

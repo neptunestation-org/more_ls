@@ -1736,6 +1736,51 @@ def transition_expr(trigger_def: str, function: str, body: str) -> str | None:
     return b.group(1) if b else None
 
 
+
+_ID = r'"?(\w+)"?'
+INCLUSION_TRIGGER = re.compile(rf'^CREATE CONSTRAINT TRIGGER {_ID} AFTER INSERT OR UPDATE OF {_ID}, {_ID} ON {_ID} '
+                               r'DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE (?:FUNCTION|PROCEDURE) '
+                               rf'{_ID}\(\)$')
+INCLUSION_TARGET_TRIGGER = re.compile(rf'^CREATE CONSTRAINT TRIGGER {_ID} AFTER UPDATE OR DELETE ON {_ID} '
+                                      r'DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE (?:FUNCTION|PROCEDURE) '
+                                      rf'{_ID}\(\)$')
+INCLUSION_BODY = re.compile(
+    rf'^\s*begin\s+if new\.{_ID} is null or new\.{_ID} is null then return null; end if;\s+'
+    rf'if not exists \(select 1 from {_ID} where .*? then return null; end if;\s+'
+    rf'perform 1 from {_ID} where {_ID} = new\."?\1"? and {_ID} = new\."?\2"? and \((.*)\) is true for share;\s+'
+    r"if not found then\s+raise exception '[^']* is not in (\w+)'[^;]*;\s+end if;\s+return null;\s+end\s*$", re.DOTALL)
+
+
+@dataclass
+class InclusionText:
+    name: str
+    columns: tuple[str, str]
+    target: str      # the relation's table
+    key: str
+    value: str
+    condition: str   # the condition's text, read of the target's rows
+    relation: str    # the relation's name, as its message gives it
+
+
+def inclusion_parts(trigger_def: str, function: str, body: str) -> InclusionText | str | None:
+    """#54: the inclusion the compiler's referencing-side trigger checks (`compile/fk.py`), or
+    "target" for its trigger on the relation's table (part of the same rule), or None for any
+    other trigger: a hand-written trigger is never read."""
+    d = trigger_def.strip()
+    m = INCLUSION_TARGET_TRIGGER.match(d)
+    if m is not None:
+        return "target" if m.group(3) == function == f"mls_incl_{m.group(1)}" and m.group(1).endswith("_target") \
+            else None
+    m = INCLUSION_TRIGGER.match(d)
+    if m is None or m.group(5) != function or function != f"mls_incl_{m.group(4)}_{m.group(1)}":
+        return None
+    b = INCLUSION_BODY.match(body)
+    if b is None or (b.group(1), b.group(2)) != (m.group(2), m.group(3)):
+        return None
+    return InclusionText(m.group(1), (m.group(2), m.group(3)), b.group(4), b.group(5), b.group(6), b.group(7),
+                         b.group(8))
+
+
 GUARD_BODY = re.compile(
     r"^\s*begin\s+if \((.*)\) is true and \(to_jsonb\(new\) - array\[(.*?)\]::text\[\]\) is distinct from "
     r"\(to_jsonb\(old\) - array\[\2\]::text\[\]\) then\s+raise exception 'MLS column rule \w+ on \w+ violated' "

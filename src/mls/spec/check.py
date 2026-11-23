@@ -1023,11 +1023,22 @@ class Checker:
                      f"name a relation with a key on '{rel.table}', or a foreign key the schema keeps")
             return
         if rel.where is not None:
-            self.err(path + ".relation", f"'{r.relation}' has a condition; an inclusion rule is a foreign "
-                                         f"key, which references every row of '{rel.table}'",
-                     f"name a relation without a condition on '{rel.table}', or state the condition as a "
-                     f"check rule")
-            return
+            # #54 (D86): not a foreign key, which references every row of its table, but constraint
+            # triggers checked when the transaction commits; a referenced row whose condition stops
+            # holding is refused, never followed
+            if r.on_delete != "restrict":
+                self.err(path + ".on_delete", f"'{r.relation}' has a condition, so inclusion '{r.name}' is checked "
+                                              f"by triggers, not a foreign key, and a delete or an update that takes "
+                                              f"a pair out of '{r.relation}' can only be refused",
+                         "use on_delete restrict, or name a relation without a condition")
+            if not r.deferred:
+                self.err(path + ".deferred", f"'{r.relation}' has a condition, so inclusion '{r.name}' is checked "
+                                             f"by triggers when the transaction commits",
+                         "mark it deferred (`on_delete restrict deferred`; in JSON \"deferred\": true)")
+            if rel.table in self.spec.tables and self.spec.tables[rel.table].mode == "observed":
+                self.err(path + ".relation", f"'{r.relation}' has a condition, so inclusion '{r.name}' needs a "
+                                             f"trigger on '{rel.table}', and MLS changes nothing on an observed table",
+                         f"adopt '{rel.table}' (mode adopted), or name a relation without a condition")
         t = self.spec.tables[r.table]
         ok = True
         for j, c in enumerate(r.columns):
@@ -1140,6 +1151,15 @@ class Checker:
                         if not isinstance(rule, (CheckRule, InclusionRule, CardinalityRule)):
                             self.err(ipath + ".rule", f"rule '{inv.rule}' is a {rule.kind}; only "
                                                       f"check, inclusion and cardinality rules are invariants")
+                        elif isinstance(rule, InclusionRule) and isinstance(self.spec.relations.get(rule.relation),
+                                                                            Relation) \
+                                and self.spec.relations[rule.relation].where is not None:
+                            # #54: an invariant cannot read a relation with a condition (an update of
+                            # its table can take a pair out without changing the pair's columns)
+                            self.err(ipath + ".rule", f"inclusion '{inv.rule}' is into '{rule.relation}', which has "
+                                                      f"a condition; an invariant cannot read one, and the "
+                                                      f"inclusion holds only when a transaction commits",
+                                     "leave it out of the invariants (the compiler enforces it)")
                         elif isinstance(rule, CardinalityRule) and rule.max is None:
                             # #61: a new parent may start with fewer than `min`, so it is no invariant
                             self.err(ipath + ".rule", f"cardinality rule '{inv.rule}' sets only a minimum, "
@@ -1212,6 +1232,8 @@ def fk_action_errors(spec: Spec, rows: list[dict]) -> list[MlsError]:
     for i, r in enumerate(spec.rules):
         if not isinstance(r, InclusionRule) or r.relation not in spec.relations:
             continue
+        if getattr(spec.relations[r.relation], "where", None) is not None:
+            continue  # #54: its triggers run at commit, after any action of the table's own keys
         parent = spec.relations[r.relation].table
         for fk in rows:
             if (fk["table"], fk["name"]) in own or fk["table"] != r.table or fk["parent"] != parent \

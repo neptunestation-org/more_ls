@@ -75,6 +75,9 @@ writers) is in `docs/design/archive/ROADMAP.md`, "Parallel track — Lean 4".
 - **Relations without a key (#63, D84)** are not transcribed: `Pred.member` takes a key.  A set is
   the relation with every fact's key a fixed constant, so the transcription is `Pred.member` with a
   constant key and the set's row axiom, the untranscribed relation row axiom above.
+- **Inclusions into a relation with a condition (#54, D86)** are not transcribed: `Relational.lean`'s
+  inclusion is a foreign key onto every row of the target.  The triggers' at-commit check is the
+  deferred inclusion's gap above with the relation's condition gap: the predicate is the same.
 - **Cardinality `where` and `min` (#61, D83)** are not transcribed: `Cardinality.lean` counts every
   row of a group against a maximum; the condition on the counted rows and the commit-time minimum
   (which the proofs do not use) are not modelled.

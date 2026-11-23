@@ -1762,3 +1762,41 @@ with dynamic SQL), the invitation expiry `now() - interval '24 hours'`, and the 
 subquery `user_id <> (select primary_owner_user_id ...)`.  Tests: the helper test (a volatile helper
 is now inlined), `test_a_volatile_helper_with_a_defaulted_switch_reads_as_two_relations` (basejump's
 shape in its own schema), the fold and inlining shapes in `tests/pg/test_lift.py`.
+
+**D86. An inclusion into a relation with a condition is two deferred constraint triggers (#54,
+amends D61 and D75).**  The aural-oss takeover needed "an organization's owner is always one of its
+members with role OWNER", `organizations(ownerId, id) ⊆ organization_members(userId, workspaceId)
+where role = 'OWNER'`; D61 refused a relation with a condition as an inclusion target because an
+inclusion was a foreign key, so the loop wrote the plain inclusion and dropped the role.  Decision
+(the recommended option, accepted 2026-11-23): such an inclusion compiles (`compile/fk.py`) to a
+constraint trigger `<name>` on the inclusion's table (after insert or update of its columns) and one
+`<name>_target` on the relation's table (after update or delete), both DEFERRABLE INITIALLY DEFERRED,
+SECURITY DEFINER as mls_internal (which gets select on both tables and update on the target, for the
+lock).  Choices: (1) `on_delete restrict` and `deferred` are required, not implied (invariant 4: the
+spec says what it means): a trigger can only refuse, and a check that reads the relation's current
+rows belongs at commit.  (2) Each check reads the rows as they are when it runs: the referencing side
+skips a pair no row holds any more (written and deleted, or changed again, in the transaction); the
+target side skips a pair another row still holds with the condition TRUE.  (3) Concurrency under READ
+COMMITTED: the referencing side reads the referenced row FOR SHARE, as a foreign key's RI trigger
+does.  A writer that changed the row holds its row lock, so the check waits, and the row is
+re-evaluated against the committed version.  Without the lock, a demotion whose check ran before the
+naming committed, and a naming whose check read the not yet demoted row, both commit; mutation
+`INCLUSION_NO_LOCK`, `tests/templates/test_filtered_inclusion.py`.  The target side needs no lock: a
+naming that is not yet committed takes its lock at its own check and waits for the demoter.  (4) The
+pair stays unique in its table (the D60 requirement, no key added: a key within the pair already
+makes it unique), so only one row holds a pair and the target side's "another row still holds it"
+is never two transactions' write skew.  (5) The triggers do not validate the rows already there, as
+the cardinality triggers do not; `mls preflight` counts them (new or changed function bodies), and
+the migration acceptance pairs `filtered_inclusion_base_spec` and back.  (6) Proofs: never assumed,
+as for any deferred inclusion (`row_constraints` and `relation_axioms` leave deferred ones out); the
+relation is never `backed` in the induction step (D61), so no RESTRICT guard is assumed; refused in
+`invariant_preserved`.  The oracle refuses an update or delete of the target row that takes the pair
+out of the relation (old condition TRUE, new pair different or condition not TRUE).  (7) Import reads
+the referencing trigger back (`lift.inclusion_parts`: trigger, function name and body), lifts the
+condition and takes the relation's name from the raise message; the target trigger is part of the
+same rule.  Refused: an observed target (no trigger may go on it), cascade and set_null.  Mutations:
+`INCLUSION_CONDITION_DROPPED` and `INCLUSION_TARGET_UNCHECKED` (differential, fixture
+`specs.filtered_inclusion_spec`), `INCLUSION_NOT_DEFERRED` (reused) and `INCLUSION_NO_LOCK` (dedicated
+tests).  Considered: a foreign key onto the unfiltered pair plus a CHECK-like trigger (two objects
+for one rule, and the FK's RESTRICT would still be immediate while the condition's is deferred); a
+generated column `is_owner` with a partial key (changes the schema of an adopted table).

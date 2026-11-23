@@ -48,6 +48,7 @@ ROUND_TRIP = {
     "comember": specs.comember_spec,  # #33: hops through membership tables (and the self-join) read back
     "nullable_relation": specs.nullable_relation_spec,  # #49: a relation over a nullable key
     "storefront": specs.storefront_spec,  # D70: a constant-keyed helper call reads back as its relation
+    "filtered_inclusion": specs.filtered_inclusion_spec,  # #54: the inclusion's triggers read back as the rule
 }
 
 

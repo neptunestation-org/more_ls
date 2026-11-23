@@ -196,6 +196,13 @@ obligation, no implicit relation policy and no column grant.
   it (the stored-row constraints and the relation axioms leave it out).  Its `RESTRICT` side is
   immediate, as for any inclusion.  An inclusion that closes a cycle of FKs checked after each
   statement is refused (two inserts would fail in either order).
+- An inclusion into a relation with a condition is no FK but two deferred constraint triggers
+  (`restrict` and `deferred` only): at commit, a row with both columns set has a row of the
+  relation's table holding the pair with `T(p)`, read `FOR SHARE`; and a row of that table that
+  held a referenced pair with `T(p)` and no longer does (deleted, pair changed, `p` FALSE or
+  UNKNOWN) is refused.  Its predicate is the same `is_null(c1) ∨ ... ∨ member(rel, c1, c2)`, with
+  the relation's facts the rows where `p` is TRUE; it holds on committed states, so, like any
+  deferred inclusion, no obligation assumes it, and no invariant may name it.
 - An `on_delete cascade` inclusion's FK deletes the referring rows in the statement that deletes
   the referenced row, as the table owner, past their policies.  For an invariant the rows left
   are the ones that did not refer to it, the same guard as `RESTRICT` gives.  Nothing else may read

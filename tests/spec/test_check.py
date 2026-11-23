@@ -557,8 +557,13 @@ def test_a_relation_condition_is_checked_and_its_in_expanded():
         assert any(e.path.startswith("$.relations.lead_of.where") and text in e.message for e in errors(d)), where
     d["relations"]["lead_of"]["where"] = {"cmp": [{"col": "role"}, "=", {"const": "a"}]}
     d["rules"].append({"id": "R9", "kind": "inclusion", "name": "lead_task", "table": "tasks",
-                       "columns": ["title", "project_id"], "relation": "lead_of", "on_delete": "restrict"})
-    assert has(errors(d), f"$.rules[{len(d['rules']) - 1}].relation", "'lead_of' has a condition")
+                       "columns": ["title", "project_id"], "relation": "lead_of", "on_delete": "cascade"})
+    # #54: an inclusion into it is checked at commit by triggers, so deferred and restrict only
+    i = len(d["rules"]) - 1
+    assert has(errors(d), f"$.rules[{i}].deferred", "'lead_of' has a condition")
+    assert has(errors(d), f"$.rules[{i}].on_delete", "can only be refused")
+    d["rules"][i] |= {"on_delete": "restrict", "deferred": True}
+    assert [e.path for e in errors(d)] == [f"$.rules[{i}].columns[0]"]  # title is no uuid; nothing else
 
 
 def test_a_relation_over_a_nullable_column_is_accepted_and_its_null_rows_are_no_pairs():

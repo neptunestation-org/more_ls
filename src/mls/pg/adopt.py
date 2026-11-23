@@ -45,7 +45,7 @@ from mls.compile.internal import INTERNAL_ROLE
 from mls.errors import MlsError, SpecError
 from mls.pg.catalog import _strip_schema, bypass_paths
 from mls.pg.lift import (
-    CAST_TO_MLS, Env, Unreadable, function_body, inline_functions, split_args, inline_lookups, restore_calls, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr, guard_parts,
+    CAST_TO_MLS, Env, Unreadable, function_body, inline_functions, split_args, inline_lookups, restore_calls, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr, guard_parts, inclusion_parts,
     mls_type,
 )
 from mls.pg.lift import IsTrue as _IsTrue
@@ -783,6 +783,33 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
         # other trigger is listed
         for tg in t["triggers"]:
             what = f"trigger {tg['name']} on {name}"
+            inc = inclusion_parts(tg["def"], tg["function"], tg["body"])
+            if inc == "target":  # #54: read with the trigger on the inclusion's table
+                continue
+            if inc is not None:
+                unknown = [f"{tb}.{c}" for tb, cs in ((name, inc.columns), (inc.target, (inc.key, inc.value)))
+                           for c in cs if tb not in modelled or c not in modelled[tb]]
+                if unknown or inc.target not in governed:
+                    notes.append(f"{what} is listed, not imported (" + (f"columns {', '.join(unknown)} are not "
+                                 f"modelled" if unknown else f"table {inc.target} is observed") + ")")
+                    continue
+                r = lift_expr(inc.target, inc.condition, tg["name"], "relation", [])
+                if r.kind != "lifted":
+                    for o in r.opaques:
+                        opaques.pop(o, None)
+                        env.opaques.pop(o, None)
+                    env.invalidate()
+                    notes.append(f"{what} is listed, not imported ({'; '.join(r.reasons)})")
+                    continue
+                rel_names.setdefault((inc.target, inc.key, _cond_key(r.pred)), inc.relation)  # its message names it
+                rname = propose(inc.target, inc.key, inc.value, f"inclusion trigger {tg['name']} on {name} reads it",
+                                r.pred)
+                if rname is None:
+                    continue
+                rules.append({"kind": "inclusion", "name": ident(inc.name), "table": name, "columns": list(inc.columns),
+                              "relation": rname, "on_delete": "restrict", "deferred": True})
+                lifted_n += 1
+                continue
             g = guard_parts(tg["def"], tg["function"], tg["body"])
             if g is not None:  # #57
                 depth = {h["depth"] for h in env.hierarchies.values() if h.get("table") == name}

@@ -35,7 +35,11 @@ PAIRS = [("v_a", "v_b"), ("v_b", "v_c"), ("v_c", "v_d"), ("v_d", "v_a"),
          ("hierarchy_spec", "cardinality_spec"), ("cardinality_spec", "org_base_spec"),
          # D67: membership policies that read their own table, which bring in lookup helpers (and the
          # internal role), and back
-         ("composed_spec", "lookup_spec"), ("lookup_spec", "composed_spec")]
+         ("composed_spec", "lookup_spec"), ("lookup_spec", "composed_spec"),
+         # #54: an inclusion into a relation with a condition (triggers; preflight reads the rows
+         # they would refuse), and back
+         ("filtered_inclusion_base_spec", "filtered_inclusion_spec"),
+         ("filtered_inclusion_spec", "filtered_inclusion_base_spec")]
 
 
 @pytest.mark.parametrize("pair", PAIRS, ids=["->".join(p) for p in PAIRS])
