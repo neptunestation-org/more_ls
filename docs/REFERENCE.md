@@ -619,7 +619,7 @@ Terse: `C2 column_rule rider_edits on deliveries: authenticated write status, pr
 rider_of(@uid, rider_id)`.  When the condition is TRUE of the row being edited (its old image), an
 update by the role changes no column outside the list; an UNKNOWN or FALSE condition limits
 nothing.  The condition is in policy scope without the index shape (§10.2): columns, context
-values, memberships.  It is a guard, not a grant: the role keeps the columns its policies and its
+values, memberships, and a membership may be negated (`not staff_of(@uid, org_id)`).  It is a guard, not a grant: the role keeps the columns its policies and its
 other column rules give it, and the role needs `name`.  Compiles to a `BEFORE UPDATE ... FOR EACH
 ROW WHEN (current_user = '<role>')` trigger `<name>` calling `mls_cg_<table>_<name>()`, which
 raises `insufficient_privilege` (`MLS column rule <name> on <table> violated`) when the condition

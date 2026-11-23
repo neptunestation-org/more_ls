@@ -68,7 +68,8 @@ triggers, grants).  You never write SQL.
 - R6 column_rule name on t: role read|write c1, c2         the role may read or write only these
   columns of the table (without a column rule the role's policies cover all columns)
 - R7 column_rule name on t: role write c1, c2 when p       when p holds of the row being edited (p
-  as in a policy: columns, @context, relations), an edit by the role changes only these columns; for
+  as in a policy: columns, @context, relations; unlike a policy it may negate a relation, since a
+  trigger checks it), an edit by the role changes only these columns; for
   users of one role who differ by row ("a rider edits only the status of a delivery assigned to
   them": ... when rider_of(@uid, rider_id)).  The role's other edits, and the server's, are not limited
   A column rule is per role, not per row: a column some users may see only on some rows (their own
