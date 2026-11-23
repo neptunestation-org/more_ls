@@ -1115,6 +1115,8 @@ fixture `specs.owner_spec` (team_tasks plus `projects.owner_id`, a relation and 
 runs the differential, `POLICY_ALL_RESTRICTIVE`, and the lift round trip.  Rejected: requiring
 the user to add a unique constraint on the pair (a schema change for a fact the key already
 states).
+*Amended 2026-11-23 by D82 (#59):* an inclusion into such a relation no longer needs the declared
+key; the compiler adds `mls_key_<table>_<key>_<value>`.
 
 **D61. A relation with a condition on its own table (#32).**  A relation was a table's whole
 `(key, value)` projection, so "an OWNER or ADMIN member of the organization" had no name, and
@@ -1651,3 +1653,26 @@ when that column is nullable.  Fixture `specs.set_null_spec` (in the lift round 
 `SET_NULL_BOTH` (plain `SET NULL` nulls the NOT NULL tenant too, so the delete fails).  Rejected:
 naming the nulled column (`set_null(c)`): the first column is the referring one in every inclusion
 written so far, and the second is the shared scope that must survive.
+
+**D82. The relations pass writes inclusion targets, and the compiler adds the pair's key (#59, amends D60).**
+Scarpar runs 10 and 11: the relations pass wrote only access paths, used the fact "a variant is in
+its product's shop" as a reason *not* to add `products(id, org_id)`, and the rules pass could not
+enforce the fact (it cannot add relations); the run ended `proved` with the fact in the notes.
+Even with the relation, the inclusion was refused: a foreign key references a key on exactly the
+pair, and scarpar's tables have only their primary key.  The workaround was the skeleton
+(`unique (org_id, id)` plus the relations).  Decision: (1) `ROLE_RELATIONS` says that a fact tying
+a row to a row of another table needs that table's (key, value) as a relation, and that the fact
+holding is no reason to leave it out (example on floors and buildings, outside the corpus); eval
+case `sc_good` withholds its only relation, an inclusion target.  (2) When the pair is unique
+through a key of its table (D60's `pair_unique`) and the table declares no key on exactly the pair,
+the compiler adds `mls_key_<table>_<key>_<value>` (`compile/table.py:implied_keys`): it can fail on
+no data and changes no row's fate, so the proofs and the oracle need nothing.  On an owned or an
+adopted table alike (the adopted form adds it only when missing); never on an observed table, where
+the checker still refuses.  It is a `TableObj.uniques` entry, so migrate adds it in the schema phase
+("add unique", lock observed) and drops it after the constraints, which may reference it; import
+skips `mls_key_*` and reads a foreign key onto one as an inclusion.  The differential cannot see a
+key that changes nothing, so `tests/templates/test_pair_key.py` shows the mutation
+`PAIR_KEY_DROPPED` fails the deploy (the foreign key cannot be created).  Rejected: a structured
+"I need a relation" request from the rules pass routed back to the relations pass (a second round
+trip for what one sentence in the relations prompt covers), and leaving the key to the skeleton
+(the importer cannot know it is wanted).

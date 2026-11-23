@@ -32,6 +32,7 @@ ROUND_TRIP = {
     "fk": specs.fk_spec,
     "fk_cascade": specs.cascade_spec,  # #60: the ON DELETE CASCADE key reads back as a cascade inclusion
     "fk_set_null": specs.set_null_spec,  # #62: ON DELETE SET NULL (doc_id) reads back as a set_null inclusion
+    "fk_implied_key": specs.implied_key_spec,  # #59: MLS's own key is recognized and added again
     "guard": specs.guard_spec,  # #57: the column guard trigger reads back as a column rule with its condition
     "session_setting": specs.session_spec,
     "bigint": specs.bigint_spec,

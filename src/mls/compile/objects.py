@@ -24,7 +24,7 @@ from mls.compile.lookup import lookup_fn_ddl, lookup_fn_name, lookup_fn_sig
 from mls.compile.mutations import Mutation
 from mls.compile.policy import policy_ddl
 from mls.compile.sql import SqlCompiler, q, sql_type
-from mls.compile.table import pk_name, unique_name
+from mls.compile.table import implied_keys, pk_name, unique_name
 from mls.compile.guard import guard_fn_ddl, guard_fn_name, guard_trigger_ddl, guard_trigger_name
 from mls.compile.transition import transition_fn_ddl, transition_fn_name, transition_trigger_ddl
 from mls.identity import get_adapter
@@ -135,11 +135,12 @@ class Objects:
 def objects(spec: Spec, mutations: frozenset[Mutation] = frozenset()) -> Objects:
     sc = SqlCompiler(spec, get_adapter(spec), mutations)
     tables = {}
+    implied = {} if Mutation.PAIR_KEY_DROPPED in mutations else implied_keys(spec)
     for name, t in spec.governed().items():
         tables[name] = TableObj(
             name, {c: ColumnObj(sql_type(col), not col.nullable) for c, col in t.columns.items()},
             tuple(t.primary_key) if t.primary_key else None,
-            {unique_name(name, u): tuple(u) for u in t.unique}, t.mode)
+            {unique_name(name, u): tuple(u) for u in t.unique} | implied.get(name, {}), t.mode)
     o = Objects(list(spec.roles), tables)
     for r in spec.checks():
         o.constraints[(r.table, r.name)] = ConstraintObj(r.table, r.name, "check", check_def(r, sc), r.id)

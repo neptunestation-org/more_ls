@@ -1,0 +1,315 @@
+{
+ "$comment": "shop catalog: a photo stays in its item's shop",
+ "mls_version": "0.1",
+ "identity": {
+  "adapter": "supabase",
+  "context": {
+   "uid": {
+    "source": "auth.uid",
+    "type": "uuid"
+   }
+  }
+ },
+ "roles": [
+  "authenticated"
+ ],
+ "enums": {},
+ "tables": {
+  "shop_staff": {
+   "columns": {
+    "user_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "shop_id": {
+     "type": "int",
+     "nullable": false
+    }
+   },
+   "primary_key": [
+    "user_id",
+    "shop_id"
+   ],
+   "unique": [],
+   "mode": "owned",
+   "assume": [],
+   "tags": []
+  },
+  "items": {
+   "columns": {
+    "id": {
+     "type": "int",
+     "nullable": false
+    },
+    "shop_id": {
+     "type": "int",
+     "nullable": false
+    },
+    "title": {
+     "type": "text",
+     "nullable": false
+    }
+   },
+   "primary_key": [
+    "id"
+   ],
+   "unique": [],
+   "mode": "owned",
+   "assume": [],
+   "tags": []
+  },
+  "item_photos": {
+   "columns": {
+    "id": {
+     "type": "int",
+     "nullable": false
+    },
+    "item_id": {
+     "type": "int",
+     "nullable": false
+    },
+    "shop_id": {
+     "type": "int",
+     "nullable": false
+    },
+    "url": {
+     "type": "text",
+     "nullable": false
+    }
+   },
+   "primary_key": [
+    "id"
+   ],
+   "unique": [],
+   "mode": "owned",
+   "assume": [],
+   "tags": []
+  }
+ },
+ "relations": {
+  "staff_of": {
+   "table": "shop_staff",
+   "key": "user_id",
+   "value": "shop_id"
+  },
+  "item_shop": {
+   "table": "items",
+   "key": "id",
+   "value": "shop_id"
+  }
+ },
+ "hierarchies": {},
+ "opaques": {},
+ "rules": [
+  {
+   "id": "R1",
+   "name": "staff_items",
+   "table": "items",
+   "requirement": "staff read, add, edit and remove the items of their shops",
+   "kind": "policy",
+   "role": "authenticated",
+   "command": "all",
+   "mode": "permissive",
+   "using": {
+    "member": {
+     "relation": "staff_of",
+     "key": {
+      "ctx": "uid"
+     },
+     "value": {
+      "col": "shop_id"
+     }
+    }
+   },
+   "check": {
+    "member": {
+     "relation": "staff_of",
+     "key": {
+      "ctx": "uid"
+     },
+     "value": {
+      "col": "shop_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "R2",
+   "name": "staff_photos",
+   "table": "item_photos",
+   "requirement": "staff read, add, edit and remove the photos of their shops",
+   "kind": "policy",
+   "role": "authenticated",
+   "command": "all",
+   "mode": "permissive",
+   "using": {
+    "member": {
+     "relation": "staff_of",
+     "key": {
+      "ctx": "uid"
+     },
+     "value": {
+      "col": "shop_id"
+     }
+    }
+   },
+   "check": {
+    "member": {
+     "relation": "staff_of",
+     "key": {
+      "ctx": "uid"
+     },
+     "value": {
+      "col": "shop_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "R3",
+   "name": "photo_in_item_shop",
+   "table": "item_photos",
+   "requirement": "a photo belongs to the shop of its item; removing an item removes its photos",
+   "kind": "inclusion",
+   "columns": [
+    "item_id",
+    "shop_id"
+   ],
+   "relation": "item_shop",
+   "on_delete": "cascade"
+  }
+ ],
+ "properties": [
+  {
+   "id": "P1",
+   "description": "items are only seen and changed within the staff member's shops",
+   "template": "tenant_isolation",
+   "table": "items",
+   "column": "shop_id",
+   "relation": "staff_of",
+   "key": {
+    "ctx": "uid"
+   },
+   "commands": [
+    "select",
+    "insert",
+    "update",
+    "delete"
+   ]
+  },
+  {
+   "id": "P2",
+   "description": "photos are only seen and changed within the staff member's shops",
+   "template": "tenant_isolation",
+   "table": "item_photos",
+   "column": "shop_id",
+   "relation": "staff_of",
+   "key": {
+    "ctx": "uid"
+   },
+   "commands": [
+    "select",
+    "insert",
+    "update",
+    "delete"
+   ]
+  },
+  {
+   "id": "P3",
+   "description": "a photo always belongs to the same shop as its item",
+   "template": "invariant_preserved",
+   "invariants": [
+    {
+     "rule": "R3"
+    }
+   ]
+  },
+  {
+   "id": "P4",
+   "description": "leaving a shop never grants access",
+   "template": "monotone_in",
+   "relation": "staff_of"
+  },
+  {
+   "id": "P5",
+   "description": "only the catalog tables, and reading the staff list",
+   "template": "least_privilege",
+   "allowed": {
+    "authenticated": {
+     "items": [
+      "select",
+      "insert",
+      "update",
+      "delete"
+     ],
+     "item_photos": [
+      "select",
+      "insert",
+      "update",
+      "delete"
+     ],
+     "shop_staff": [
+      "select"
+     ]
+    }
+   }
+  },
+  {
+   "id": "P6",
+   "description": "staff read the items of their shops",
+   "template": "must_allow",
+   "table": "items",
+   "role": "authenticated",
+   "command": "select",
+   "when": {
+    "member": {
+     "relation": "staff_of",
+     "key": {
+      "ctx": "uid"
+     },
+     "value": {
+      "col": "shop_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "P7",
+   "description": "staff add a photo to an item of their shop",
+   "template": "must_allow",
+   "table": "item_photos",
+   "role": "authenticated",
+   "command": "insert",
+   "when": {
+    "member": {
+     "relation": "staff_of",
+     "key": {
+      "ctx": "uid"
+     },
+     "value": {
+      "col": "shop_id"
+     }
+    }
+   }
+  },
+  {
+   "id": "P8",
+   "description": "staff remove an item of their shop, with its photos",
+   "template": "must_allow",
+   "table": "items",
+   "role": "authenticated",
+   "command": "delete",
+   "when": {
+    "member": {
+     "relation": "staff_of",
+     "key": {
+      "ctx": "uid"
+     },
+     "value": {
+      "col": "shop_id"
+     }
+    }
+   }
+  }
+ ]
+}

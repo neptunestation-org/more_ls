@@ -139,7 +139,10 @@ already have.  A relation names who belongs to what: a base relation is the (key
 of one table (the user column, the group column), possibly only of its rows that meet a condition
 on that table's own columns (the managers among the staff); a composed relation follows a base relation
 through up to three tables, each by a key, to the rows a requirement reaches only indirectly (the
-rooms of the floors of the buildings a user works in).  Write a relation only where a requirement needs one and
+rooms of the floors of the buildings a user works in).  A fact about the data that ties a row to a row of
+another table ("a room is always in the same building as its floor") needs a relation too: the other
+table's (key, value), here floor_building on floors with key id and value building_id, which the rules use to
+enforce the fact; that the fact holds is no reason to leave the relation out.  Write a relation only where a requirement needs one and
 the schema has none that says the same; never restate, rename or change the schema's relations.
 Name each by what it means (staff_of, in_room).  Many schemas need none: then answer with no
 relations.  Do not write rules or properties.  Put any

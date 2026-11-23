@@ -198,7 +198,7 @@ def migrate(old: Spec, new: Spec, allow_destructive: bool = False,
     if n.internal_role and not o.internal_role:
         for s in internal_role_ddl(new):
             schema.add(s, "create role")
-    from mls.compile.table import table_ddl
+    from mls.compile.table import implied_key_ddl, table_ddl
 
     for name in n.tables:
         if name in o.tables:
@@ -219,6 +219,10 @@ def migrate(old: Spec, new: Spec, allow_destructive: bool = False,
         schema.add(f"alter table {q(name)} enable row level security", "enable rls", name)
         if not adopted and Mutation.HARDENING_NO_FORCE not in mutations:
             schema.add(f"alter table {q(name)} force row level security", "force rls", name)
+        for uname, cols in n.tables[name].uniques.items():  # #59: the keys MLS adds itself
+            if uname.startswith("mls_key_"):
+                schema.add(implied_key_ddl(name, uname, cols, adopted), "add unique", name)
+    dropped_keys: list[tuple[str, str]] = []
     for name in sorted(set(o.tables) & set(n.tables)):
         ot, nt = o.tables[name], n.tables[name]
         if ot.mode != nt.mode:
@@ -241,8 +245,8 @@ def migrate(old: Spec, new: Spec, allow_destructive: bool = False,
                 schema.add(f"alter table {q(name)} add constraint {q(uname)} unique "
                            f"({', '.join(q(c) for c in cols)})", "add unique", name)
         for uname in ot.uniques:
-            if uname not in nt.uniques:
-                swap.add(f"alter table {q(name)} drop constraint {q(uname)}", "drop constraint", name)
+            if uname not in nt.uniques:  # after the foreign keys below, which may reference it (#59)
+                dropped_keys.append((f"alter table {q(name)} drop constraint {q(uname)}", name))
     # ---- 2. constraints (NOT VALID) and triggers; 4. validate; 5. rename into place
     for key, c in n.constraints.items():
         prev = o.constraints.get(key)
@@ -266,6 +270,8 @@ def migrate(old: Spec, new: Spec, allow_destructive: bool = False,
     for key, c in o.constraints.items():
         if key not in n.constraints and c.table in n.tables:
             swap.add(f"alter table {q(c.table)} drop constraint {q(c.name)}", "drop constraint", c.table, c.rule_id)
+    for sql, table in dropped_keys:
+        swap.add(sql, "drop constraint", table)
     for name, f in n.functions.items():
         prev = o.functions.get(name)
         if prev is None:

@@ -980,14 +980,19 @@ class Checker:
         if r.columns[0] == r.columns[1]:
             self.err(path + ".columns", "the two columns must differ")
         if rel.key in self.spec.tables[rel.table].columns and rel.value in self.spec.tables[rel.table].columns \
-                and frozenset((rel.key, rel.value)) not in self.key_sets(rel.table):
-            # D60: a relation whose pair is unique only through one of its columns is fine for
-            # policies, but a foreign key references exactly a declared key
+                and frozenset((rel.key, rel.value)) not in self.key_sets(rel.table) \
+                and not (pair_unique(self.key_sets(rel.table), rel.key, rel.value)
+                         and self.spec.tables[rel.table].mode != "observed"):
+            # D60: a foreign key references exactly a key; #59: the compiler adds one itself when a
+            # key of the table lies within the pair, so only a pair that is not unique is refused
             self.err(path + ".relation", f"relation '{r.relation}' is ({rel.key}, {rel.value}) of "
                                          f"'{rel.table}', and an inclusion rule is a foreign key, which "
-                                         f"references a primary key or unique constraint on exactly those "
-                                         f"two columns",
-                     f"add [\"{rel.key}\", \"{rel.value}\"] to tables.{rel.table}.unique")
+                                         f"references a unique pair; no primary key or unique constraint "
+                                         f"of '{rel.table}' lies within ({rel.key}, {rel.value})"
+                                         + (" (and MLS adds no key to an observed table)"
+                                            if self.spec.tables[rel.table].mode == "observed" else ""),
+                     f"add [\"{rel.key}\", \"{rel.value}\"] to tables.{rel.table}.unique, or use a relation "
+                     f"whose key or value is a key of '{rel.table}'")
         if r.on_delete == "set_null" and r.columns[0] in t.columns and not t.columns[r.columns[0]].nullable:
             self.err(path + ".on_delete", f"on_delete set_null sets {r.table}.{r.columns[0]} NULL, and it is "
                                           f"NOT NULL",

@@ -312,6 +312,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
     spec_tables: dict[str, dict] = {}
     modelled: dict[str, set[str]] = {}
     enums: dict[str, list[str]] = {}
+    mls_keys: dict[str, list[list[str]]] = {}  # #59: per table, the keys MLS added (`mls_key_*`)
     for name, t in tables.items():
         cols: dict[str, dict] = {}
         for c in t["columns"]:
@@ -358,6 +359,10 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 if con["name"] != f"{name}_pkey":
                     notes.append(f"primary key of {name} is named {con['name']}, MLS expects {name}_pkey "
                                  f"(drift reports the name)")
+            elif con["type"] == "u" and con["name"].startswith("mls_key_"):
+                # #59: the key MLS adds for an inclusion; the compiler adds it again, and the
+                # foreign key that references it still reads as an inclusion
+                mls_keys.setdefault(name, []).append(con["colnames"])
             elif con["type"] == "u":
                 if set(con["colnames"]) <= set(cols):
                     tb.setdefault("unique", []).append(con["colnames"])
@@ -471,7 +476,8 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
             unmet = [why for bad, why in (
                 (len(con["colnames"]) != 2, f"{len(con['colnames'])} column(s), not a pair"),
                 (con["reftable"] not in spec_tables, f"it refers to {con['reftable']}, outside the spec"),
-                (con["reftable"] in spec_tables and con["refcolnames"] not in key_sets(con["reftable"]),
+                (con["reftable"] in spec_tables
+                 and con["refcolnames"] not in key_sets(con["reftable"]) + mls_keys.get(con["reftable"], []),
                  "the referenced columns are not a key"),
                 (con["match"] != "s", "not MATCH SIMPLE"),
                 (con["upd"] != "r", f"ON UPDATE {actions.get(con['upd'], con['upd'])}"),

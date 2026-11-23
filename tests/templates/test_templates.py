@@ -24,6 +24,7 @@ CASES = {
     "fk_deferred": (specs.deferred_spec, Mutation.FK_MATCH_FULL, None),  # #35
     "fk_cascade": (specs.cascade_spec, Mutation.CASCADE_AS_RESTRICT, None),  # #60
     "fk_set_null": (specs.set_null_spec, Mutation.SET_NULL_BOTH, None),  # #62
+    "fk_implied_key": (specs.implied_key_spec, Mutation.CASCADE_AS_RESTRICT, None),  # #59
     "column": (specs.column_rule_spec, Mutation.COLUMN_TABLE_GRANT, None),
     "time": (specs.time_spec, Mutation.TIME_NULL_CLOSED, None),
     "opaque": (specs.opaque_spec, Mutation.OPAQUE_INVERT, specs.opaque_impl),

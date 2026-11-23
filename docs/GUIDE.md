@@ -1144,8 +1144,8 @@ The compiled policy is `interview_id = any (array(select id from interviews wher
 where interviews.id = candidates.interview_id and interviews.user_id = auth.uid())` is what
 `mls import` reads as this relation, and an `exists` that joins its way up (`from sessions join
 interviews on ...`) as a composed relation through the join.  An inclusion rule into such a
-relation still needs a unique constraint on exactly the pair, since a foreign key references
-nothing else.
+relation compiles to a foreign key onto the pair, and the compiler adds the unique constraint on
+exactly the pair that a foreign key references (`mls_key_interviews_user_id_id`).
 
 **Only some members count.**  `organization_members (user_id, org_id, role)`, and only owners
 and admins manage the projects.  Give the relation a condition on the table's own columns:

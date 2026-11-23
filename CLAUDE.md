@@ -129,8 +129,11 @@ union member the renderer does not cover.
   type; fixture `specs.enum_spec`, mutation `IN_DROP_LAST`, lift shapes in `tests/pg/test_lift.py`.  #39: two references of one enum type compare by `=`/`<>`
   (`check._cmp`; `comparable` still refuses enums), fixture T1, case `enum_transition`.
 - D60: a base relation's pair need only be unique (`model.pair_unique`: some key lies within it),
-  so the owner of a parent row is `projects(owner_id, id)`; an inclusion into one still needs a
-  key on exactly the pair; an enum key column is read with a label key.  The lifter reads an
+  so the owner of a parent row is `projects(owner_id, id)`; an enum key column is read with a label
+  key.  D82 (#59): an inclusion into one gets the key on exactly the pair from the compiler,
+  `mls_key_<table>_<key>_<value>` (`compile/table.py:implied_keys`, a `TableObj.uniques` entry;
+  import skips it), mutation `PAIR_KEY_DROPPED` in `tests/templates/test_pair_key.py`; the relations
+  pass is told to write inclusion targets (eval case `sc_good`).  The lifter reads an
   `exists` over inner joins as a composed relation (`Lifter.exists_join`); fixture
   `specs.owner_spec`.
 - D61: a base relation may carry `where` (its own table's columns and constants,

@@ -25,7 +25,7 @@ from mls.compile.mutations import Mutation
 from mls.compile.objects import objects
 from mls.compile.policy import policy_ddl, replace_policies_ddl
 from mls.compile.sql import SqlCompiler
-from mls.compile.table import table_ddl
+from mls.compile.table import implied_key_ddl, implied_keys, table_ddl
 from mls.compile.guard import guard_ddl
 from mls.compile.transition import transition_ddl
 from mls.errors import CompileError, MlsError
@@ -120,6 +120,10 @@ def compile_spec(spec: Spec, mutations: frozenset[Mutation] | set[Mutation] = fr
         if t.mode == "owned":
             s.add("tables", table_ddl(name, t))  # adopted tables exist; observed ones are not touched
     adopted = {n for n, t in spec.tables.items() if t.mode == "adopted"}
+    if Mutation.PAIR_KEY_DROPPED not in mutations:
+        for table, keys in implied_keys(spec).items():  # #59: before the foreign keys that reference them
+            for kname, cols in keys.items():
+                s.add("keys", implied_key_ddl(table, kname, cols, table in adopted))
     for r in spec.checks():  # on an adopted table the constraint may exist already (D52)
         s.add("checks", adopted_constraint_ddl(r.table, r.name, check_def(r, sc), mutations)
               if r.table in adopted else check_ddl(r, sc), r.id)

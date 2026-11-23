@@ -122,3 +122,25 @@ def test_cardinality_change_replaces_the_trigger_function():
     m = migrate(specs.org_base_spec(), specs.cardinality_spec())
     assert kinds(m, "constraints") == ["replace function"]
     assert any('"mls_card_files_files_per_tenant"' in x and "> 2" in x for x in sqls(m))
+
+
+def test_a_key_mls_added_is_dropped_after_the_foreign_key_that_references_it():
+    """#59: the inclusion goes, and with it the key MLS added for it; the key is dropped after the
+    foreign key, which depends on it."""
+    import json
+
+    from mls.spec.check import check_spec
+    from mls.spec.model import Spec
+
+    v1 = specs.implied_key_spec()
+    d = json.loads(v1.model_dump_json(by_alias=True, exclude_none=True))
+    d["rules"] = [r for r in d["rules"] if r.get("name") != "note_in_doc"]
+    for p in d["properties"]:
+        if "invariants" in p:
+            p["invariants"] = [i for i in p["invariants"] if i.get("rule") != "N2"]
+    m = migrate(v1, check_spec(Spec.model_validate(d)), allow_destructive=True)
+    out = sqls(m)
+    fk = out.index('alter table "doc_notes" drop constraint "note_in_doc"')
+    key = out.index('alter table "docs" drop constraint "mls_key_docs_id_tenant_id"')
+    assert fk < key
+

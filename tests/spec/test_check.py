@@ -490,20 +490,30 @@ def test_enum_declarations_and_columns_are_checked():
 
 def test_a_relation_is_unique_through_a_key_column():
     """D60: `docs(tenant_id, id)` holds each pair once because `id` is the primary key, so it is a
-    relation (the owner-of-parent shape); a foreign key still needs a key on exactly the pair, so
-    an inclusion rule into it is refused with that fix."""
+    relation (the owner-of-parent shape).  A foreign key needs a key on exactly the pair; #59: the
+    compiler adds it (`mls_key_docs_tenant_id_id`), except on an observed table, which MLS never
+    touches, so there an inclusion into it is refused with the fix."""
+    from mls.compile.table import implied_keys
+    from mls.spec.check import check_spec
+    from mls.spec.model import Spec
+
     d = base()
     d["relations"]["doc_tenant"] = {"table": "docs", "key": "tenant_id", "value": "id"}
     assert errors(d) == []
     d["tables"]["admins"]["columns"]["doc_id"] = {"type": "int", "nullable": False}
     d["rules"].append({"id": "R10", "kind": "inclusion", "name": "admin_doc", "table": "admins",
                        "columns": ["tenant_id", "doc_id"], "relation": "doc_tenant", "on_delete": "restrict"})
-    errs = errors(d)
-    e = next(e for e in errs if e.path == "$.rules[9].relation")
-    assert "references a primary key or unique constraint on exactly those two columns" in e.message
-    assert e.fix == 'add ["tenant_id", "id"] to tables.docs.unique'
+    assert errors(d) == []
+    assert implied_keys(check_spec(Spec.model_validate(d))) == {"docs": {"mls_key_docs_tenant_id_id": ("tenant_id", "id")}}
     d["tables"]["docs"]["unique"] = [["tenant_id", "id"]]
     assert errors(d) == []
+    assert implied_keys(check_spec(Spec.model_validate(d))) == {}
+    d["tables"]["docs"]["unique"] = []
+    d["tables"]["docs"]["mode"] = "observed"
+    e = next(e for e in errors(d) if e.path == "$.rules[9].relation")
+    assert "no primary key or unique constraint of 'docs' lies within (tenant_id, id)" in e.message
+    assert "MLS adds no key to an observed table" in e.message
+    assert e.fix.startswith('add ["tenant_id", "id"] to tables.docs.unique')
     d = base()
     d["relations"]["doc_owner"] = {"table": "docs", "key": "level", "value": "tenant_id"}
     assert has(errors(d), "$.relations.doc_owner", "(level, tenant_id) is not unique in 'docs'")

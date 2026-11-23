@@ -263,8 +263,11 @@ is the primary key or a declared unique constraint.  The second case is the owne
 row, `"owns": {"table": "projects", "key": "owner_id", "value": "id"}` with `id` the primary
 key: `member(owns, key=@uid, value=project_id)` on `tasks` reads "the user owns the task's
 project".  An inclusion rule into a relation is a composite foreign key, which references a key
-on exactly the pair, so the checker asks for that unique constraint when the pair is unique only
-through one column.  When the key column is of an enum type, the key is one of its labels:
+on exactly the pair.  When the table declares none, but the pair is unique through one of its
+columns, the compiler adds the constraint itself, `mls_key_<table>_<key>_<value>`: since a key of
+the table lies within the pair, no data can violate it, and it changes nothing a row may do.
+`mls import` recognizes it and leaves it out of the spec, since the compiler adds it again.  On an
+observed table MLS adds nothing, so there the inclusion needs the table's own unique constraint.  When the key column is of an enum type, the key is one of its labels:
 `"open": {"table": "sessions", "key": "status", "value": "id"}` read with key `'IN_PROGRESS'`
 is the sessions in that state.
 
@@ -920,6 +923,7 @@ All names are deterministic functions of the spec, so `mls drift` can match them
 |---|---|
 | primary key | `<table>_pkey` |
 | unique constraint | `<table>_<col>[_<col>...]_key` |
+| unique constraint an inclusion needs, added by MLS | `mls_key_<table>_<key>_<value>` |
 | check constraint, foreign key, policy, trigger | the rule's `name` |
 | transition trigger function | `mls_tr_<table>_<name>()` |
 | column guard trigger function | `mls_cg_<table>_<name>()` (trigger `0_mls_cg_<name>`) |

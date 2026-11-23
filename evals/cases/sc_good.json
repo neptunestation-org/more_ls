@@ -1,0 +1,32 @@
+{
+ "id": "sc_good",
+ "origin": "seed",
+ "requirements": "Shops have staff (shop_staff). Staff read, add, edit and remove the items of their shops and the photos of those items. A photo always belongs to the same shop as its item (item_photos.shop_id is the item's shop_id), and removing an item removes its photos.",
+ "expected_properties": [
+  "Items are only seen and changed within the staff member's shops.",
+  "Photos are only seen and changed within the staff member's shops.",
+  "A photo always belongs to the same shop as its item.",
+  "Leaving a shop never grants access.",
+  "The application role may only use items and item_photos and read shop_staff.",
+  "Staff can read the items of their shops.",
+  "Staff can add a photo to an item of their shop.",
+  "Staff can remove an item of their shop, with its photos."
+ ],
+ "reference_spec": "specs/sc_good.mls.json",
+ "expected_verdicts": {
+  "P1": "PROVED",
+  "P2": "PROVED",
+  "P3": "PROVED",
+  "P4": "PROVED",
+  "P5": "PROVED",
+  "P6": "PROVED",
+  "P7": "PROVED",
+  "P8": "PROVED"
+ },
+ "expected_loop": {
+  "status": "proved"
+ },
+ "withheld_relations": [
+  "item_shop"
+ ]
+}

@@ -202,6 +202,14 @@ def cascade_spec() -> Spec:
     return make(d)
 
 
+def implied_key_spec() -> Spec:
+    """#59: the cascade fixture with docs' `unique (id, tenant_id)` taken away: `id` is the primary
+    key, so the pair is unique anyway and the compiler adds `mls_key_docs_id_tenant_id` itself."""
+    d = json.loads(cascade_spec().model_dump_json(by_alias=True, exclude_none=True))
+    d["tables"]["docs"]["unique"] = [u for u in d["tables"]["docs"].get("unique", []) if set(u) != {"id", "tenant_id"}]
+    return make(d)
+
+
 def set_null_spec() -> Spec:
     """#62: a note's document is in the note's tenant, and deleting the document keeps the note,
     with no document (`on_delete set_null` nulls doc_id, the tenant stays); a member could make
