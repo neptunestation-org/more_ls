@@ -97,6 +97,12 @@ def shadow_snapshot(conn: psycopg.Connection, spec: Spec, script: Script,
                 cur.execute(psql.SQL("grant {} to {}").format(psql.Identifier(r), psql.Identifier(
                     cur.execute("select current_user").fetchone()[0])))
         for name, labels in spec.enums.items():  # the stand-ins' types, named as the live ones print
+            live_labels = cur.execute(
+                """select array(select e.enumlabel from pg_enum e where e.enumtypid = t.oid order by e.enumsortorder)
+                   from pg_type t join pg_namespace n on n.oid = t.typnamespace
+                   where n.nspname = %s and t.typname = %s and t.typtype = 'e'""", (live, name)).fetchone()
+            if live_labels is not None and list(live_labels[0]) == list(labels):
+                continue  # the live type itself: an opaque block's call of a function over it must still resolve
             cur.execute(enum_ddl(name, labels))
         for name, t in spec.tables.items():
             if t.mode == "adopted":  # the script does not create it: stand in for the existing table

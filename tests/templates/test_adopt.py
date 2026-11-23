@@ -531,6 +531,41 @@ def test_one_line_sql_helpers_are_read_inline_and_drift_checks_their_bodies(help
         assert [i.kind for i in changed] == ["differs"] and "has a new body" in changed[0].object
 
 
+
+ENUM_CALL_SQL = """
+do $$ begin if not exists (select from pg_roles where rolname = 'app') then create role app; end if; end $$;
+create type member_role as enum ('owner', 'member');
+create table members (user_id bigint not null, team_id bigint not null, role member_role not null,
+                      primary key (user_id, team_id));
+create table tickets (id bigint primary key, team_id bigint not null);
+alter table tickets enable row level security;
+create function has_role(t bigint, r member_role) returns boolean language plpgsql stable as $f$
+  begin return exists (select 1 from members where team_id = t and role = r); end $f$;
+create policy owner_read on tickets for select to app using (has_role(team_id, 'owner'::member_role));
+"""
+
+
+def test_drift_calls_a_function_over_a_live_enum_type(pg_dsn):
+    """An opaque block that calls a function taking an enum must resolve that function in drift's
+    shadow: the shadow uses the live type when its labels are the spec's, rather than a copy of the
+    same name that no live function takes (basejump's `has_role_on_account(uuid, account_role)`)."""
+    dbname = "mls_enum_call"
+    with psycopg.connect(pg_dsn, autocommit=True) as admin:
+        admin.execute(f'drop database if exists "{dbname}"')
+        admin.execute(f'create database "{dbname}"')
+    try:
+        with psycopg.connect(psycopg.conninfo.make_conninfo(pg_dsn, dbname=dbname), autocommit=True) as conn:
+            conn.execute(ENUM_CALL_SQL)
+            res = import_schema(conn)
+            spec = check_spec(Spec.model_validate(res.spec))
+            assert [o["sql"].strip() for o in res.spec["opaques"].values()] == [
+                "has_role(team_id, 'owner'::member_role)"], res.notes
+            items = drift(conn, spec, compile_spec(spec)).items
+            assert not any("owner_read" in i.object or "enum" in i.object for i in items), [str(i) for i in items]
+    finally:
+        with psycopg.connect(pg_dsn, autocommit=True) as admin:
+            admin.execute(f'drop database if exists "{dbname}"')
+
 HIDDEN_SQL = """
 do $$ begin if not exists (select from pg_roles where rolname = 'app') then create role app; end if; end $$;
 create table members (user_id bigint not null, team_id bigint not null, role text not null,

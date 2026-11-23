@@ -630,3 +630,16 @@ def test_enum_label_shapes():
     assert r.kind == "opaque"
     r, _ = do("""(status = 'Draft'::docstatus)""", env=env)
     assert r.kind == "opaque"
+
+
+def test_a_long_policy_name_keeps_its_role_suffix():
+    """A policy for two roles is imported as one rule per role, the second suffixed with its role.
+    Names are cut at 63 characters, so the suffix goes on a shortened name, never past the cut
+    (chatbot-ui's 'Allow view access to collection files for non-private collections')."""
+    from mls.pg.adopt import ident, suffixed
+
+    name = "Allow view access to collection files for non-private collections"
+    first, second = ident(name), suffixed(name, "authenticated")
+    assert len(first) == len(second) == 63 and first != second
+    assert second.endswith("_authenticated")
+    assert suffixed("short", "anon") == "short_anon"

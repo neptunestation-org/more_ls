@@ -114,6 +114,13 @@ def ident(name: str) -> str:
     return s[:63]
 
 
+def suffixed(name: str, suffix: str) -> str:
+    """`ident(name_suffix)` with the suffix kept whole: a long name is shortened before it, so two
+    suffixes of one long name never truncate to the same identifier."""
+    tail = "_" + ident(suffix).lstrip("_")
+    return ident(name)[:63 - len(tail)] + tail
+
+
 # ----------------------------------------------------------------------------- catalog reads
 def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
     cat: dict[str, Any] = {"tables": {}, "superusers": set(), "roles": {}}
@@ -454,7 +461,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 base_n = name = ident(f"{table}_by_{'_'.join(cols)}")
                 i = 2
                 while name in relations:
-                    name, i = ident(f"{base_n}_{i}"), i + 1
+                    name, i = suffixed(base_n, str(i)), i + 1
         relations[name] = {"table": table, "key": key, "value": value, **({"where": where} if where else {})}
         rel_by_pair[pair] = name
         env.relations[name] = (table, key, value)
@@ -475,7 +482,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
             actions = {"a": "NO ACTION", "r": "RESTRICT", "c": "CASCADE", "n": "SET NULL", "d": "SET DEFAULT"}
             unmet = [why for bad, why in (
                 (len(con["colnames"]) != 2, f"{len(con['colnames'])} column(s), not a pair"),
-                (con["reftable"] not in spec_tables, f"it refers to {con['reftable']}, outside the spec"),
+                (con["reftable"] not in spec_tables, f"it refers to {con['reftable'] or con['refname']}, outside the spec"),
                 (con["reftable"] in spec_tables
                  and con["refcolnames"] not in key_sets(con["reftable"]) + mls_keys.get(con["reftable"], []),
                  "the referenced columns are not a key"),
@@ -583,7 +590,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 sql = restored
             parts += 1
             whole = sql.strip() == text.strip()
-            oname = ident(base) if whole else ident(f"{base}_{parts}")
+            oname = ident(base) if whole else suffixed(base, str(parts))
             if whole:
                 cols = sorted(set(cols) | {c for c in depcols if c in modelled[table]})
             opaques[oname] = {"table": table, "columns": cols, "context": ctx, "relations": rels, "sql": sql}
@@ -646,7 +653,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 preds[which] = r.pred
                 lifted_exprs.append({"table": name, "policy": p, "which": which, "text": text, "result": r,
                                      "caller": set(env.caller_reads), "rules": [
-                                         (ident(p["name"]) if i == 0 else ident(f"{p['name']}_{role}"), role)
+                                         (ident(p["name"]) if i == 0 else suffixed(p["name"], role), role)
                                          for i, role in enumerate(pol_roles)]})
                 what = f"policy {p['name']} on {name}, {'with check' if which == 'check' else 'using'}"
                 if r.kind == "lifted":
@@ -665,7 +672,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 notes.append(f"policy \"{p['name']}\" on {name} is imported as rule {ident(p['name'])} (MLS names are "
                              f"identifiers); until a deploy renames it, drift shows the old name as unexpected")
             for i, role in enumerate(pol_roles):
-                rname = ident(p["name"]) if i == 0 else ident(f"{p['name']}_{role}")
+                rname = ident(p["name"]) if i == 0 else suffixed(p["name"], role)
                 rule = {"kind": "policy", "name": rname, "table": name, "role": role, "command": p["cmd"],
                         "mode": "permissive" if p["permissive"] else "restrictive", **preds}
                 rules.append(rule)
@@ -699,7 +706,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 continue
             if priv == "delete":
                 continue
-            rules.append({"kind": "column_rule", "name": ident(f"{name}_{role}_{access}"), "table": name,
+            rules.append({"kind": "column_rule", "name": suffixed(name, f"{role}_{access}"), "table": name,
                           "role": role, "columns": sorted(cols), "access": access})
         # CHECKs: a stored-row assumption when the lifter reads one (ROADMAP M5), else listed
         for con in t["constraints"]:
