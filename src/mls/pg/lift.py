@@ -704,11 +704,13 @@ class Env:
 
     def validate(self, pred: dict, table: str, scope: str, negated: bool) -> None:
         """Raise Unreadable with the checker's message when `pred` is outside the fragment."""
-        from mls.spec.check import Checker, check_scope, policy_scope, relation_scope, transition_scope
+        from mls.spec.check import (
+            Checker, check_scope, guard_scope, policy_scope, relation_scope, transition_scope,
+        )
 
         ck = Checker(self.spec())
         sc = {"policy": policy_scope, "check": check_scope, "transition": transition_scope,
-              "relation": relation_scope}[scope](table)
+              "relation": relation_scope, "guard": guard_scope}[scope](table)
         ck.pred(_PRED.validate_python(pred), sc, "$", negated)
         if ck.sink.errors:
             e = ck.sink.errors[0]
@@ -1625,6 +1627,40 @@ def transition_expr(trigger_def: str, function: str, body: str) -> str | None:
         return None
     b = TRANSITION_BODY.match(body)
     return b.group(1) if b else None
+
+
+GUARD_BODY = re.compile(
+    r"^\s*begin\s+if \((.*)\) is true and \(to_jsonb\(new\) - array\[(.*?)\]::text\[\]\) is distinct from "
+    r"\(to_jsonb\(old\) - array\[\2\]::text\[\]\) then\s+raise exception 'MLS column rule \w+ on \w+ violated' "
+    r"using errcode = 'insufficient_privilege';\s+end if;\s+return new;\s+end\s*$", re.DOTALL)
+GUARD_TRIGGER = re.compile(r'^CREATE TRIGGER "?0_mls_cg_(\w+)"? BEFORE UPDATE ON "?(\w+)"? FOR EACH ROW '
+                           r"WHEN \(+CURRENT_USER = '(\w+)'::name\)+ EXECUTE (?:FUNCTION|PROCEDURE) "
+                           r'"?(mls_cg_\w+)"?\(\)$')
+_OLD_QUAL = re.compile(r"""(?<![\w"'.])old\.(?=["\w])""")
+
+
+@dataclass
+class GuardText:
+    name: str
+    role: str
+    kept: list[str]  # the columns the comparison leaves out (the rule's, and a hierarchy depth)
+    condition: str   # the condition's text, read of the row (`old.` dropped)
+
+
+def guard_parts(trigger_def: str, function: str, body: str) -> GuardText | None:
+    """#57: the parts of a trigger the column guard template emitted (`compile/guard.py`):
+    `0_mls_cg_<name>` BEFORE UPDATE ... WHEN (current_user = role) calling
+    `mls_cg_<table>_<name>()`, whose body compares the row as jsonb without the listed columns
+    when the condition, read of the old row, is true.  None for any other trigger (a hand-written
+    one is never read)."""
+    m = GUARD_TRIGGER.match(trigger_def.strip())
+    if m is None or m.group(4) != function or function != f"mls_cg_{m.group(2)}_{m.group(1)}":
+        return None
+    b = GUARD_BODY.match(body)
+    if b is None:
+        return None
+    kept = re.findall(r"'((?:[^']|'')*)'", b.group(2))
+    return GuardText(m.group(1), m.group(3), [k.replace("''", "'") for k in kept], _OLD_QUAL.sub("", b.group(1)))
 
 
 def scan_columns(sql: str, cols: dict[str, Any]) -> set[str]:

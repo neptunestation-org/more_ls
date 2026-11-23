@@ -45,7 +45,7 @@ from mls.compile.internal import INTERNAL_ROLE
 from mls.errors import MlsError, SpecError
 from mls.pg.catalog import _strip_schema, bypass_paths
 from mls.pg.lift import (
-    CAST_TO_MLS, Env, Unreadable, function_body, inline_functions, inline_lookups, restore_calls, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr,
+    CAST_TO_MLS, Env, Unreadable, function_body, inline_functions, inline_lookups, restore_calls, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr, guard_parts,
     mls_type,
 )
 from mls.pg.lift import IsTrue as _IsTrue
@@ -745,9 +745,32 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                              f"and drift reports the definition as differs until then")
             if ident(con["name"]) != con["name"]:
                 notes.append(f"{what} is imported as rule {ident(con['name'])} (MLS names are identifiers)")
-        # triggers: the compiler's own transition template is read back; any other trigger is listed
+        # triggers: the compiler's own transition and column guard templates are read back; any
+        # other trigger is listed
         for tg in t["triggers"]:
             what = f"trigger {tg['name']} on {name}"
+            g = guard_parts(tg["def"], tg["function"], tg["body"])
+            if g is not None:  # #57
+                depth = {h["depth"] for h in env.hierarchies.values() if h.get("table") == name}
+                cols = [c for c in g.kept if c not in depth]
+                unknown = [c for c in cols if c not in modelled[name]]
+                if unknown or g.role not in roles:
+                    notes.append(f"{what} is listed, not imported (its "
+                                 + (f"columns {', '.join(unknown)} are not modelled" if unknown
+                                    else f"role {g.role} is not an app role") + ")")
+                    continue
+                r = lift_expr(name, g.condition, tg["name"], "guard", [])
+                if r.kind != "lifted":
+                    for o in r.opaques:
+                        opaques.pop(o, None)
+                        env.opaques.pop(o, None)
+                    env.invalidate()
+                    notes.append(f"{what} is listed, not imported ({'; '.join(r.reasons)})")
+                    continue
+                rules.append({"kind": "column_rule", "name": ident(g.name), "table": name, "role": g.role,
+                              "columns": cols, "access": "write", "when": r.pred})
+                lifted_n += 1
+                continue
             expr = transition_expr(tg["def"], tg["function"], tg["body"])
             if expr is None:
                 notes.append(f"{what} is listed, not imported (only the transition template MLS emits is read back; "

@@ -1573,6 +1573,10 @@ quoted name, so `check --dsn` and `preflight` (`check.guard_order_errors` on
 `catalog.before_update_triggers`) refuse a guard when one of its table's own BEFORE UPDATE row
 triggers still sorts first.  The harness has no foreign triggers, so `tests/templates/test_guard.py`
 ties the order to Postgres, with mutation `GUARD_SORTS_LAST`.
+*Amended 2026-11-23 (#57):* import reads the guard back (`lift.guard_parts`: the trigger and body
+shapes; the condition's `old.` qualifiers dropped and lifted in the guard scope, its membership
+proposed as a relation like a policy's; the hierarchy depth left out of the columns), so a deployed
+spec with a guard re-imports clean; `guard` is in the lift round trip.
 
 **D79. An inclusion may cascade its deletes (#60, amends D22).**
 Scarpar: "a variant or image is in its product's shop, a lesson in its course's shop", and deleting

@@ -32,6 +32,7 @@ ROUND_TRIP = {
     "fk": specs.fk_spec,
     "fk_cascade": specs.cascade_spec,  # #60: the ON DELETE CASCADE key reads back as a cascade inclusion
     "fk_set_null": specs.set_null_spec,  # #62: ON DELETE SET NULL (doc_id) reads back as a set_null inclusion
+    "guard": specs.guard_spec,  # #57: the column guard trigger reads back as a column rule with its condition
     "session_setting": specs.session_spec,
     "bigint": specs.bigint_spec,
     "pg_roles": specs.pg_roles_spec,
@@ -88,6 +89,25 @@ def test_round_trip_per_template(name, pg_dsn):
         # what the source declares as rules comes back as rules of the same kind and name
         kinds = {(r.kind, r.name) for r in source.rules if r.kind != "column_rule"}
         assert kinds <= {(r.kind, r.name) for r in imported.rules}
+    finally:
+        h.close()
+
+
+def test_a_column_guard_reads_back_as_a_column_rule(pg_dsn):
+    """#57: the guard's trigger is read, not listed: its role, its columns and its condition (read
+    of the row, the membership as a relation)."""
+    source = specs.guard_spec()
+    h = deploy(source, pg_dsn, "mls_lift_guard")
+    try:
+        res = import_schema(h.conn)
+        assert not any("0_mls_cg_" in n for n in res.notes), res.notes
+        imported = check_spec(Spec.model_validate(res.spec))
+        (g,) = imported.column_guards()
+        assert (g.name, g.table, g.role, sorted(g.columns)) == ("owner_edits", "docs", "authenticated",
+                                                               ["archived", "level"])
+        when = g.when.model_dump(mode="json", by_alias=True, exclude_none=True)
+        assert when["and"][0] == {"cmp": [{"col": "owner_id"}, "=", {"ctx": "uid"}]}
+        assert when["and"][1]["not"]["member"]["value"] == {"col": "tenant_id"}
     finally:
         h.close()
 

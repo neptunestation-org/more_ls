@@ -246,7 +246,8 @@ union member the renderer does not cover.
   and the script header. `pg/adopt.py` is `mls import` (policies through the lifter; what it
   cannot read an opaque block with its catalog signature; inclusion-shaped FKs as inclusion
   rules; column grants as column rules; readable CHECKs as check rules; the compiler's own
-  transition triggers as transition rules; hardening state as `assume`; the compiler's
+  transition triggers as transition rules, its guard triggers as guards (#57, `lift.guard_parts`);
+  hardening state as `assume`; the compiler's
   `mls_rel_*` policies and relation grants recognized, not imported) and `verify_adopted`
   (`check --dsn`). `pg/lift.py` is the lifter (D46): a tokenizer and recursive-descent parser for
   the deparsed text, an `Env` (the spec so far) and a `Lifter` that reads the compiler's shapes

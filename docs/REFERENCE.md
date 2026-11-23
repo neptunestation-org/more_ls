@@ -1145,7 +1145,8 @@ pair, `MATCH SIMPLE`, `ON UPDATE RESTRICT`, `ON DELETE RESTRICT`, `CASCADE` or `
 DEFERRED`, the latter a deferred inclusion) becomes an inclusion rule, except one per cycle of
 such keys checked after each statement, which is listed as foreign with a note; column-level
 grants become column rules; a CHECK the lifter reads becomes a check rule; a trigger of the
-transition template MLS itself emits becomes a transition rule.  The compiler's own relation
+transition template MLS itself emits becomes a transition rule, and one of its column guard
+template (`0_mls_cg_<name>`) a column rule with its role, its columns and its condition.  The compiler's own relation
 policies (`mls_rel_<relation>_<role>_<n>`, which give the relation its name back) and relation
 grants are recognized and not imported as rules.  Listed in the notes and not imported: other
 triggers, other foreign keys, a CHECK the lifter cannot read or that is `NOT VALID`, a CHECK
