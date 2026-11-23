@@ -1257,9 +1257,19 @@ opaque block of its own text (an expression it cannot parse at all is one block)
 spec always checks.  A call of a Postgres built-in (`length`, `char_length`, `position`, and the
 SQL-standard forms `TRIM(BOTH FROM x)`, `POSITION(a IN b)`, `SUBSTRING(x FROM i FOR n)`,
 `EXTRACT(f FROM x)`) is outside the fragment, and its note names it as a built-in.  A call to a SQL helper of the schema is read as the helper's body when the
-helper is one `select` statement returning a boolean, declared `stable` or `immutable`, and its
+helper is one `select` statement returning a boolean and its
 arguments are the row's columns or constants (`has_org_role(org_id, array['owner', 'admin'])`
-reads as the membership its `exists` holds).  A `security definer` helper qualifies only when its
+reads as the membership its `exists` holds).  A call that leaves out arguments takes their
+declared defaults.  Once the arguments are in place, what they leave constant is folded:
+`'owner' is null` is false and `null is null` true, and an `and` or `or` drops or is decided by its
+constant parts.  A helper whose role filter is `(role = r or r is null)` reads as the owners among
+the members when called with `'owner'` and as every membership when called without a role.  A
+parameter the body writes qualified by the function's name (`has_role.team_id`) is the parameter,
+and the body's own table alias may be anything.  A call compared with `true` (`has_role(team_id) =
+true`) is the call.  A helper that declares no volatility is `volatile`, which Postgres runs with
+a fresh snapshot per call, so it can see changes the statement made before the call.  It is read
+as its body all the same, and the import says so in a note: once the policies are compiled they
+read the statement's snapshot, as a `stable` helper does.  A `security definer` helper qualifies only when its
 owner bypasses the policies of every table its body names, so that it reads every row as a
 relation does.  The table then assumes the helper with the md5 of its body
 (`{"inlined": "function has_org_role(uuid, text[]) md5 ..."}`), and `mls drift` reports a changed

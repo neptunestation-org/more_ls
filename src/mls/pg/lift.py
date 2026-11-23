@@ -739,6 +739,41 @@ MakeOpaque = Callable[[str, list[str], list[str], list[str]], str]  # (sql, colu
 MakeRelation = Callable[[str, str, str, "dict | None"], "str | None"]
 
 
+_PREDICATES = (And, Or, Not, IsNull, Cmp, AnyOf, InList, InSelect, Exists, Like)
+
+
+def _const(node: Node) -> Node | None:
+    """A constant's value node (a cast of one is the constant), or None for anything else."""
+    while isinstance(node, Cast):
+        node = node.x
+    return node if isinstance(node, (Str, Num, Bool, Null)) else None
+
+
+def fold(node: Node) -> Node:
+    """#64: what an inlined helper's body leaves constant once the call's arguments are in place:
+    `<constant> IS [NOT] NULL` is TRUE or FALSE, and `and` / `or` drop their TRUE / FALSE parts (a
+    FALSE part makes an `and` FALSE, a TRUE one an `or` TRUE, whatever the others are, UNKNOWN
+    included).  basejump's `(role = r or r is null)` is `role = 'owner'` for r = 'owner' and TRUE for
+    r = NULL.  Anything else is returned as it is."""
+    if isinstance(node, IsNull):
+        c = _const(node.x)
+        if c is not None:
+            return Bool((isinstance(c, Null)) != node.negated, start=node.start, end=node.end)
+        return node
+    if isinstance(node, (And, Or)):
+        items = [fold(x) for x in node.items]
+        absorb = isinstance(node, Or)  # TRUE absorbs an or, FALSE an and
+        if any(isinstance(x, Bool) and x.value == absorb for x in items):
+            return Bool(absorb, start=node.start, end=node.end)
+        items = [x for x in items if not isinstance(x, Bool)]
+        if not items:
+            return Bool(not absorb, start=node.start, end=node.end)
+        if len(items) == 1:
+            return items[0]
+        return type(node)(items, start=node.start, end=node.end)
+    return node
+
+
 class Lifter:
     def __init__(self, env: Env, table: str, scope: str, make_opaque: MakeOpaque, make_relation: MakeRelation):
         self.env = env
@@ -800,12 +835,21 @@ class Lifter:
             return {"opaque": self.opaque(self.src_text, node.start, node.end)}
 
     def pred(self, node: Node, negated: bool) -> dict:
+        node = fold(node)
         if isinstance(node, Bool):
             return {"lit": node.value}
         if isinstance(node, And):
             return {"and": [self.part(x, negated) for x in node.items]}
         if isinstance(node, Or):
             return {"or": [self.part(x, negated) for x in node.items]}
+        if isinstance(node, Cmp) and node.op in ("=", "<>") and (isinstance(node.l, Bool) or isinstance(node.r, Bool)):
+            # #64: `p = true` is p and `p = false` is not p, also in three values (UNKNOWN stays
+            # UNKNOWN): a helper's call compared with true, its body inlined
+            b, other = (node.l, node.r) if isinstance(node.l, Bool) else (node.r, node.l)
+            if isinstance(other, _PREDICATES):
+                if b.value == (node.op == "="):
+                    return self.part(other, negated)
+                return {"not": self.part(other, not negated)}
         if isinstance(node, Not):
             return {"not": self.part(node.x, not negated)}
         if isinstance(node, IsNull):
@@ -1029,6 +1073,11 @@ class Lifter:
         sub._text = self._text
         quals = {table} | ({alias} if alias else set())
         parts = [sub.pred(_unqualify(n, quals), False) for n in nodes]
+        if {"lit": False} in parts:  # #64: a part folded FALSE: the subquery keeps no row
+            raise Unreadable("the subquery's condition is always false: it reads no row")
+        parts = [x for x in parts if x != {"lit": True}]  # a part folded TRUE keeps every row
+        if not parts:
+            return None
         p = parts[0] if len(parts) == 1 else {"and": parts}
         self.env.validate(p, table, "relation", False)
         return p
@@ -1413,7 +1462,7 @@ class Lifter:
         if base in self.env.builtins and schema in ("", "pg_catalog"):
             return (f"calls {base}(), a Postgres built-in function: MLS predicates compare columns with constants "
                     f"and context values and call no functions such as string, date or arithmetic ones")
-        return (f"calls {node.name}(), a function the lifter does not read: only a stable or immutable "
+        return (f"calls {node.name}(), a function the lifter does not read: only a "
                 f"one-statement SQL function returning boolean is read as its body (a SECURITY DEFINER one only "
                 f"when its owner bypasses the policies of the tables it reads), with arguments that are the "
                 f"row's columns or constants")
@@ -1551,6 +1600,24 @@ def function_body(src: str) -> str | None:
     return m.group(1)
 
 
+def split_args(text: str) -> list[str]:
+    """A comma-separated list of SQL expressions (a function's argument defaults, as
+    `pg_get_expr(proargdefaults)` prints them), split at its top-level commas."""
+    out, depth, quote, start = [], 0, False, 0
+    for j, ch in enumerate(text):
+        if ch == "'":
+            quote = not quote
+        elif not quote and ch in "([":
+            depth += 1
+        elif not quote and ch in ")]":
+            depth -= 1
+        elif not quote and ch == "," and depth == 0:
+            out.append(text[start:j].strip())
+            start = j + 1
+    out.append(text[start:].strip())
+    return [x for x in out if x]
+
+
 def inline_functions(text: str, table: str, columns: set[str], functions: dict[str, dict],
                      calls: list[tuple[str, str]] | None = None) -> str:
     """#52: every call of a one-statement SQL helper (`functions`: name -> {"params", "expr"},
@@ -1582,13 +1649,17 @@ def inline_functions(text: str, table: str, columns: set[str], functions: dict[s
                 j += 1
             args.append(text[start:j - 1])
             args = [a.strip() for a in args if a.strip() or f["params"]]
+            # #64: a shorter call takes the defaults of the parameters it leaves out
+            missing = (f.get("defaults") or [None] * len(f["params"]))[len(args):]
+            if len(args) < len(f["params"]) and all(d is not None for d in missing):
+                args = args + list(missing)
             subst = _function_args(args, table, columns) if len(args) == len(f["params"]) else None
             if subst is None:
                 out.append(text[i:j])
                 i = j
                 continue
             alias = DEFINER_ALIAS if f.get("definer") else "mls_inline"
-            body = _FUNC_FROM.sub(lambda t: f"{t.group(1)} {t.group(2)} {alias}", f["expr"])
+            body = _FUNC_FROM.sub(lambda t: f"{t.group(1)} {t.group(2)} {alias}", _unalias(f["expr"], alias))
             for n, (param, arg) in enumerate(zip(f["params"], subst), start=1):
                 body = re.sub(r'(?<![\w."$])(?:"' + re.escape(param) + '"|' + re.escape(param) + r')(?![\w"])|\$'
                               + str(n) + r'(?!\d)', lambda _: f"({arg})", body) if param else re.sub(
@@ -1613,6 +1684,21 @@ def restore_calls(sql: str, calls: list[tuple[str, str]]) -> str | None:
     if "mls_inline" in sql or DEFINER_ALIAS in sql or any(sql.strip() in body for body, _ in calls if sql.strip() != body):
         return None
     return sql
+
+
+_FROM_ALIAS = re.compile(r'\b(from|join)\s+("?[a-z_][a-z0-9_]*"?)\s+(?:as\s+)?(?!(?:where|join|on|inner|left|right|'
+                         r'full|cross|group|order|limit|union)\b)([a-z_][a-z0-9_]*)\b', re.IGNORECASE)
+
+
+def _unalias(expr: str, alias: str) -> str:
+    """#64: a helper body's own table alias (`from account_user wu where wu.user_id = ...`) taken
+    out and its columns qualified with `alias`, the one the inlined FROM gets to say how it reads
+    (`mls_definer`, `mls_inline`)."""
+    for m in list(_FROM_ALIAS.finditer(expr)):
+        table, own = m.group(2), m.group(3)
+        expr = re.sub(rf'(?<![\w."]){re.escape(own)}\.', f"{alias}.", expr)
+        expr = expr.replace(m.group(0), f"{m.group(1)} {table}", 1)
+    return expr
 
 
 def _function_args(args: list[str], table: str, columns: set[str]) -> list[str] | None:

@@ -1738,3 +1738,27 @@ say `<> 'private'` or NULL.  Template tests: fixture `specs.set_spec` (team_task
 `set_condition` (`RELATION_CONDITION_DROPPED`), the lift round trip `set`, the lift shapes
 `test_rows_of_a_parent_that_meet_a_condition_are_a_set`.  On chatbot-ui all four policies now
 import with no opaque block and the compiled script deploys as Supabase's `postgres`.  Lean: known gap.
+
+**D85. Import reads a volatile helper with defaults and a NULL switch (#64, amends D73).**
+basejump guards almost every table with `has_role_on_account(account_id, account_role default
+null)`, one `select exists(...)` over `account_user` filtering `(role = arg or arg is null)`,
+SECURITY DEFINER, declaring no volatility, called as `has_role_on_account(id) = true` and
+`has_role_on_account(account_id, 'owner') = true`; 10 of its 14 policies stayed opaque.  Decision (the
+recommended option, accepted 2026-11-23): (1) a VOLATILE one-statement SQL helper is inlined too,
+with a note.  Volatility only changes the snapshot: a volatile call sees the changes its statement
+made before it, a stable one (and the compiled policy) reads the statement's snapshot, so the
+readings differ only for a statement that changes the tables the helper reads and is checked by a
+policy calling it, and only in what `before` (today's policies) says, never in what the compiled
+spec enforces.  (2) A shorter call takes the defaults (`pg_get_expr(proargdefaults)`, split by
+`lift.split_args`).  (3) `lift.fold` folds `<constant> IS [NOT] NULL` and the constant parts of
+`and`/`or`, so the switch is `role = 'owner'` or nothing; a relation condition that folds TRUE is
+none, one that folds FALSE stays opaque.  (4) `p = true`/`p <> false` is `p` and `p = false` is `not p`
+(exact in three values).  (5) The body's parameters written `fn.param` are the parameter
+(`adopt._qualified_params`), its own table alias is replaced by the inlined one (`lift._unalias`), and
+the import schema's qualifier is stripped.  Considered: requiring `stable` (the user would have to
+change the function before the takeover, though the takeover replaces the policies that call it
+anyway).  On basejump 4 policies stay partly opaque, each for an expected reason: `is_set()` (PL/pgSQL
+with dynamic SQL), the invitation expiry `now() - interval '24 hours'`, and the primary owner's
+subquery `user_id <> (select primary_owner_user_id ...)`.  Tests: the helper test (a volatile helper
+is now inlined), `test_a_volatile_helper_with_a_defaulted_switch_reads_as_two_relations` (basejump's
+shape in its own schema), the fold and inlining shapes in `tests/pg/test_lift.py`.

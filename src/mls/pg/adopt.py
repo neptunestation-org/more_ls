@@ -45,7 +45,7 @@ from mls.compile.internal import INTERNAL_ROLE
 from mls.errors import MlsError, SpecError
 from mls.pg.catalog import _strip_schema, bypass_paths
 from mls.pg.lift import (
-    CAST_TO_MLS, Env, Unreadable, function_body, inline_functions, inline_lookups, restore_calls, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr, guard_parts,
+    CAST_TO_MLS, Env, Unreadable, function_body, inline_functions, split_args, inline_lookups, restore_calls, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr, guard_parts,
     mls_type,
 )
 from mls.pg.lift import IsTrue as _IsTrue
@@ -85,6 +85,16 @@ def _hop_base(env, table: str, using: str) -> tuple | None:
 
     lift(using, table, sandbox, "policy", lambda *a: "_", make_relation)
     return seen[0] if seen else None
+
+
+def _qualified_params(expr: str, fname: str, params: list[str]) -> str:
+    """#64: a parameter written qualified by its function's name (`has_role_on_account.account_id`,
+    how a body tells a parameter from a column of the same name) as the bare parameter, so that the
+    call's argument takes its place."""
+    for p in params:
+        if p:
+            expr = re.sub(rf'(?<![\w."])"?{re.escape(fname)}"?\."?{re.escape(p)}"?(?![\w"])', p, expr)
+    return expr
 
 
 def _cond_key(where: dict | None) -> str | None:
@@ -138,13 +148,15 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
         # #52: the schema's one-statement SQL helpers that return a boolean, read back inline.  A
         # SECURITY DEFINER one counts only when its owner bypasses the policies of every table its
         # body names (then its body reads all rows, as a relation does); an invoker one reads as
-        # the same subquery written in the policy would.
+        # the same subquery written in the policy would.  #64: a VOLATILE one too (the default for
+        # a function that declares none), with its parameters' defaults for a shorter call
         cur.execute("""select p.proname, coalesce(p.proargnames, '{}'), p.pronargs, p.prosrc,
-                              oidvectortypes(p.proargtypes), md5(p.prosrc), p.prosecdef
+                              oidvectortypes(p.proargtypes), md5(p.prosrc), p.prosecdef,
+                              p.provolatile = 'v', p.pronargdefaults, pg_get_expr(p.proargdefaults, 0)
                        from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_language l on l.oid = p.prolang
                          join pg_roles o on o.oid = p.proowner
                        where n.nspname = %s and l.lanname = 'sql' and not p.proretset and p.prorettype = 'bool'::regtype
-                         and p.provolatile in ('s', 'i') and p.proname not like 'mls\\_%%'
+                         and p.proname not like 'mls\\_%%'
                          and (not p.prosecdef or o.rolsuper or o.rolbypassrls or not exists (
                            select 1 from pg_class t join pg_namespace tn on tn.oid = t.relnamespace
                            where t.relkind in ('r', 'p') and tn.nspname not in ('pg_catalog', 'information_schema')
@@ -153,11 +165,16 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
                          and (select count(*) from pg_proc q where q.proname = p.proname and q.pronamespace = p.pronamespace) = 1""",
                     (schema,))
         cat["functions"] = {}
-        for fname, argnames, nargs, src, types, digest, definer in cur.fetchall():
-            expr = function_body(src)
+        for fname, argnames, nargs, src, types, digest, definer, volatile, ndefaults, defaults in cur.fetchall():
+            expr = function_body(_strip_schema(src, schema))  # #64: `basejump.account_user` is the table
             if expr is not None:
+                expr = _qualified_params(expr, fname, (list(argnames) + [""] * nargs)[:nargs])
+                given = split_args(_strip_schema(defaults, schema)) if defaults else []
                 cat["functions"][fname] = {"params": (list(argnames) + [""] * nargs)[:nargs], "expr": expr,
-                                           "assume": f"function {fname}({types}) md5 {digest}", "definer": definer}
+                                           "assume": f"function {fname}({types}) md5 {digest}", "definer": definer,
+                                           "volatile": volatile,
+                                           "defaults": [None] * (nargs - ndefaults) + given if len(given) == ndefaults
+                                           else [None] * nargs}
         cur.execute("select distinct proname from pg_proc where pronamespace = 'pg_catalog'::regnamespace")
         cat["builtins"] = frozenset(r[0] for r in cur.fetchall())
         cur.execute("select rolname, rolsuper, rolcanlogin, rolbypassrls from pg_roles")
@@ -556,6 +573,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
     # --- policies through the lifter (D46); what it cannot read is an opaque block
     opaques: dict[str, dict] = {}
     inlined_by: dict[str, set[str]] = {}  # #52: per table, the helpers its policies were read through
+    volatile_by: dict[str, set[str]] = {}  # #64: those among them that are VOLATILE
     lifted_exprs: list[dict] = []  # #41: every policy expression lifted, with the memberships read as the caller
     depcols_of: dict[str, dict[str, list[str]]] = {}
     # #35: a cycle of inclusions checked after each statement cannot be stated (the checker refuses
@@ -610,6 +628,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                          top_is_true=top_is_true)
                 used = {re.match(r"\w+", call).group(0) for _, call in calls}
                 inlined_by.setdefault(table, set()).update(cat["functions"][n]["assume"] for n in used)
+                volatile_by.setdefault(table, set()).update(n for n in used if cat["functions"][n]["volatile"])
                 return r
             except Retry:  # an opaque part inside a helper's body: read the text with the calls as written
                 calls.clear()
@@ -925,6 +944,11 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
         spec_tables[t].setdefault("assume", []).extend({"inlined": f} for f in sorted(fns))
         notes.append(f"table {t}: its policies call {', '.join(f.split(' md5 ')[0] for f in sorted(fns))}, read "
                      f"inline as the body each has now (assumed; drift reports a changed body)")
+        for f in sorted(volatile_by.get(t, ())):
+            notes.append(f"table {t}: function {f}() is VOLATILE (it declares no volatility) and is read as its "
+                         f"body, which sees the statement's snapshot: a statement that changes the tables it reads "
+                         f"and is checked by a policy that calls it may see fewer of its own changes once the "
+                         f"policies are compiled (declare it stable to say it reads one snapshot)")
     spec = {"mls_version": "0.1", "identity": {"adapter": adapter, "context": context}, "roles": roles,
             "enums": enums, "tables": spec_tables, "relations": relations, "opaques": opaques, "rules": rules, "properties": []}
 

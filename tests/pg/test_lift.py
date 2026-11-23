@@ -681,3 +681,38 @@ def test_a_parent_condition_on_a_column_that_is_no_key_stays_opaque():
     r, _ = do("(team_id IN ( SELECT projects.team_id FROM projects WHERE (projects.sharing <> 'private'::text)))",
               env=shared_env(), table="tasks")
     assert r.kind == "opaque" and "no key of its own" in " ".join(r.reasons)
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("(('owner'::text IS NULL) OR (level = 1))", {"cmp": [{"col": "level"}, "=", {"const": 1}]}),
+    ("((NULL::text IS NULL) OR (level = 1))", {"lit": True}),
+    ("((NULL::text IS NOT NULL) AND (level = 1))", {"lit": False}),
+    ("((level = 1) = true)", {"cmp": [{"col": "level"}, "=", {"const": 1}]}),
+    ("((level = 1) = false)", {"not": {"cmp": [{"col": "level"}, "=", {"const": 1}]}}),
+    ("(true <> (level = 1))", {"not": {"cmp": [{"col": "level"}, "=", {"const": 1}]}}),
+])
+def test_constant_parts_fold_and_a_predicate_compared_with_true_is_the_predicate(text, expected):
+    """#64: once an inlined helper's arguments are in place, `<constant> IS NULL` is TRUE or FALSE and
+    an `and` / `or` drops (or is decided by) its constant parts; `p = true` is p, `p = false` not p,
+    in three values as in two."""
+    r, _ = do(text)
+    assert r.kind == "lifted", r.reasons
+    assert r.pred == expected
+
+
+def test_a_helper_body_with_its_own_alias_defaults_and_qualified_parameters_inlines():
+    """#64: the short call takes the parameter's default; the body's alias gives way to the inlined
+    one, and a parameter written `fn.param` is the parameter."""
+    from mls.pg.adopt import _qualified_params
+    from mls.pg.lift import inline_functions, split_args
+
+    expr = _qualified_params("exists(select 1 from members m where m.team_id = has_role_on.team_id "
+                             "and (m.role = has_role_on.role or has_role_on.role is null))",
+                             "has_role_on", ["team_id", "role"])
+    assert "has_role_on." not in expr
+    fns = {"has_role_on": {"params": ["team_id", "role"], "expr": expr, "definer": True,
+                           "defaults": [None, "NULL::text"]}}
+    out = inline_functions("(has_role_on(team_id) = true)", "tickets", {"team_id"}, fns)
+    assert "from members mls_definer" in out and "mls_definer.team_id = (\"tickets\".\"team_id\")" in out
+    assert "(NULL::text) is null" in out and " m." not in out
+    assert split_args("NULL::text, 'a, b'::text, ARRAY[1, 2]") == ["NULL::text", "'a, b'::text", "ARRAY[1, 2]"]

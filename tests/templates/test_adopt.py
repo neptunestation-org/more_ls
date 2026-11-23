@@ -508,18 +508,18 @@ def helpers(pg_dsn):
 def test_one_line_sql_helpers_are_read_inline_and_drift_checks_their_bodies(helpers):
     """#52: a stable one-statement SQL helper returning a boolean is read as its body: a SECURITY
     DEFINER one whose owner bypasses the table's policies (it reads every row, as a relation does)
-    and an invoker one.  A volatile helper, and a definer one whose owner the policies bind, stay
-    opaque calls.  The table assumes each inlined helper with its body's md5, and drift reports a
-    changed body as a difference."""
+    and an invoker one; #64: a volatile one too, with a note.  A definer one whose owner the policies
+    bind stays an opaque call.  The table assumes each inlined helper with its body's md5, and drift
+    reports a changed body as a difference."""
     res = import_schema(helpers)
     spec = check_spec(Spec.model_validate(res.spec))
-    assert sorted(o["sql"].strip() for o in res.spec["opaques"].values()) == [
-        "is_member_v(team_id)", "is_member_w(team_id)"], res.notes
+    assert sorted(o["sql"].strip() for o in res.spec["opaques"].values()) == ["is_member_w(team_id)"], res.notes
+    assert any("function is_member_v() is VOLATILE" in n for n in res.notes), res.notes
     rules = {r.name: r for r in spec.policies()}
     assert "member" in json.dumps(rules["member_read"].using.model_dump(by_alias=True, exclude_none=True))
     assert "member" in json.dumps(rules["admin_edit"].using.model_dump(by_alias=True, exclude_none=True))
     assumed = sorted(a.inlined.split(" md5 ")[0] for a in spec.tables["tickets"].assume if hasattr(a, "inlined"))
-    assert assumed == ["function has_role(bigint, text[])", "function is_member(bigint)"]
+    assert assumed == ["function has_role(bigint, text[])", "function is_member(bigint)", "function is_member_v(bigint)"]
     helpers.execute("drop policy v_read on tickets; drop policy w_read on tickets")
     spec = check_spec(Spec.model_validate(import_schema(helpers).spec))
     script = compile_spec(spec)
@@ -563,6 +563,55 @@ def test_drift_calls_a_function_over_a_live_enum_type(pg_dsn):
                 "has_role(team_id, 'owner'::member_role)"], res.notes
             items = drift(conn, spec, compile_spec(spec)).items
             assert not any("owner_read" in i.object or "enum" in i.object for i in items), [str(i) for i in items]
+    finally:
+        with psycopg.connect(pg_dsn, autocommit=True) as admin:
+            admin.execute(f'drop database if exists "{dbname}"')
+
+
+BASEJUMP_SQL = """
+do $$ begin if not exists (select from pg_roles where rolname = 'app') then create role app; end if; end $$;
+create schema bj;
+create table bj.members (user_id bigint not null, team_id bigint not null, role text not null,
+                         primary key (user_id, team_id));
+create table bj.tickets (id bigint primary key, team_id bigint not null);
+alter table bj.tickets enable row level security;
+alter table bj.members enable row level security;
+create function bj.has_role_on(team_id bigint, role text default null) returns boolean language sql
+  security definer set search_path = public as $f$
+select exists(select 1 from bj.members m
+              where m.user_id = nullif(current_setting('app.uid', true), '')::bigint
+                and m.team_id = has_role_on.team_id
+                and (m.role = has_role_on.role or has_role_on.role is null))
+$f$;
+create policy member_read on bj.tickets for select to app using (bj.has_role_on(team_id) = true);
+create policy owner_delete on bj.tickets for delete to app using (bj.has_role_on(team_id, 'owner') = true);
+"""
+
+
+def test_a_volatile_helper_with_a_defaulted_switch_reads_as_two_relations(pg_dsn):
+    """#64, basejump's `has_role_on_account`: a VOLATILE definer helper in its own schema, whose
+    body aliases its table and names its parameters by the function's name, called with and
+    without its defaulted role, compared with true.  The default fills the short call, and the
+    switch `(m.role = r or r is null)` folds per call: no role is the plain membership, 'owner' the
+    owners among the members."""
+    dbname = "mls_basejump"
+    with psycopg.connect(pg_dsn, autocommit=True) as admin:
+        admin.execute(f'drop database if exists "{dbname}"')
+        admin.execute(f'create database "{dbname}"')
+    try:
+        with psycopg.connect(psycopg.conninfo.make_conninfo(pg_dsn, dbname=dbname), autocommit=True) as conn:
+            conn.execute(BASEJUMP_SQL)
+            res = import_schema(conn, schema="bj")
+            spec = check_spec(Spec.model_validate(res.spec))
+            assert res.spec["opaques"] == {}, res.notes
+            rels = {(r.key, r.value, json.dumps(r.where.model_dump(by_alias=True, exclude_none=True)) if r.where else None)
+                    for r in spec.base_relations().values()}
+            assert rels == {("user_id", "team_id", None),
+                            ("user_id", "team_id", '{"cmp": [{"col": "role"}, "=", {"const": "owner"}]}')}
+            assert any("function has_role_on() is VOLATILE" in n for n in res.notes), res.notes
+            items = drift(conn, spec, compile_spec(spec), schema="bj").items
+            assert any(i.kind == "assumed" and "has_role_on(bigint, text)" in i.object for i in items), \
+                [str(i) for i in items]
     finally:
         with psycopg.connect(pg_dsn, autocommit=True) as admin:
             admin.execute(f'drop database if exists "{dbname}"')
