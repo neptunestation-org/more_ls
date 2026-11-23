@@ -388,10 +388,13 @@ class Parser:
             return name, {"of": first, "through": hops}
         self.eat("(")
         key = self.name("the key column")
-        self.eat(",")
-        value = self.name("the value column")
+        if self.at(","):
+            self.advance()
+            value = self.name("the value column")
+            out = {"table": first, "key": key, "value": value}
+        else:  # #63: one column, a set of values
+            out = {"table": first, "value": key}
         self.eat(")")
-        out = {"table": first, "key": key, "value": value}
         if self.at_word("where"):  # D61: the rows of the table the relation keeps
             self.advance()
             out["where"] = self.pred(f"{self.path}.where")
@@ -760,6 +763,9 @@ class Parser:
             rel = self.name()
             self.eat("(")
             key = self.term(path)
+            if not self.at(","):  # #63: a set relation's membership names the value only
+                self.eat(")")
+                return {"member": {"relation": rel, "value": key}}
             self.eat(",")
             value = self.term(path)
             self.eat(")")

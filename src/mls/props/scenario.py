@@ -121,9 +121,16 @@ def render_scenario(spec: Spec, ob: Obligation, model: Model) -> Scenario:
             listed.append(base)
     for rname, tag in listed:
         rel = spec.relations[rname]
-        kt = spec.tables[rel.table].columns[rel.key].type
         vt = spec.tables[rel.table].columns[rel.value].type
         f = rel_fun(rname, tag)
+        if rel.key is None:  # #63: a set's facts are its values, all with the one key
+            from mls.logic.tvl import SET_KEY
+
+            sc.relations[rname + (f"@{tag}" if tag else "")] = [
+                [_render(spec, vt, b, consts, now)] for b in sorted(universe.get(vt, ()))
+                if model.app(f, SET_KEY.value, b)]
+            continue
+        kt = spec.tables[rel.table].columns[rel.key].type
         pairs = [[_render(spec, kt, a, consts, now), _render(spec, vt, b, consts, now)]
                  for a in sorted(universe.get(kt, ())) for b in sorted(universe.get(vt, ()))
                  if model.app(f, a, b)]

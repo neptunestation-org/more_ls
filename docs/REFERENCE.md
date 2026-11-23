@@ -316,6 +316,23 @@ granting every row with that key to whoever asks, so a signed-out shopper checki
 is active could list the active products of every shop.  The helper answers the question and
 grants no row.
 
+**Relations without a key** are sets: the rows of a table that meet a condition, by the table's
+own key.  `"shared_collections": {"table": "collections", "value": "id", "where": {"cmp": [{"col":
+"sharing"}, "<>", {"const": "private"}]}}` (terse: `relation shared_collections = collections(id)
+where sharing <> 'private'`) is the collections that are not private, and a membership in it names
+the value only: `{"member": {"relation": "shared_collections", "value": {"col": "collection_id"}}}`
+(terse: `shared_collections(collection_id)`) on `collection_files` reads "the file's collection is
+not private".  The value must be the primary key or a single-column unique column, so that each
+value is one row's; NULL in it, or a condition that is UNKNOWN, leaves the row out.  Without a
+condition the set is every row's key.  A set may be the base of a composed relation (the files of
+the collections that are not private, `shared_collections . collection_files(collection_id,
+file_id)`), whose memberships name no key either.  It is never a context value's, so its lookup
+always goes through a helper, as a constant key's does, and takes no argument:
+`v = any((select mls_lookup_<R>())::<type>[])`.  A visibility policy would grant every row the
+condition keeps to every role that reads it, while the helper grants none.  A set cannot be the
+target of an inclusion rule (a foreign key references a pair), a hierarchy's members or a
+`tenant_isolation` property's relation (both are per key), and an invariant cannot read one.
+
 **Composed relations** (SEMANTICS §3.4) follow a base relation through up to three tables:
 
     "relations": {
@@ -868,7 +885,7 @@ grammar:
     selector   := has_column(COL [TYPE]) | named(T, ...) | tagged(TAG) | all | and(sel, ...) | or(sel, ...)
     property   := ID TEMPLATE [table role command which]: ... ['description' STRING]
     term       := column | old.column | new.column | @context | 'text' | 123 | true | false
-    atom       := term op term | term in (const, ...) | term is null | relation(key, value)
+    atom       := term op term | term in (const, ...) | term is null | relation(key, value) | relation(value)
                 | in_group(h, key, value) | now_between(from | -, until | -) | opaque(name) | true | false
     pred       := atom | not pred | pred and pred | pred or pred   (not > and > or; a nested same-
                                                                    connective group keeps its parens)
@@ -955,7 +972,7 @@ All names are deterministic functions of the spec, so `mls drift` can match them
 | hierarchy depth trigger and function | `mls_h_<hierarchy>_depth` |
 | hierarchy parent-immutable trigger | `mls_h_<hierarchy>_parent_immutable` (function `mls_tr_<table>_mls_h_<hierarchy>_parent_immutable`) |
 | hierarchy reachability function | `mls_reach_<hierarchy>(key)` |
-| lookup helper (a membership whose subquery would recurse) | `mls_lookup_<relation>(key)` |
+| lookup helper (a membership whose subquery would recurse, is keyed by a constant, or names a relation without a key) | `mls_lookup_<relation>(key)`, or `mls_lookup_<relation>()` without a key |
 | cardinality trigger function | `mls_card_<table>_<name>()` |
 | cardinality minimum trigger and function | `<name>_min`, `mls_card_<table>_<name>_min()` |
 | index | `mls_ix_<table>_<col>[_<col>...]` |
@@ -1223,7 +1240,8 @@ reports each as `hardening` until it is fixed or the spec assumes it.
 | any of the membership shapes above with more conditions on the relation table (`... and rel.role = any (array[...])`) | `member` over a relation with that condition (one relation per table, pair and condition, named `<table>_by_<columns>` unless the compiler's visibility policy names it); a condition the relation fragment cannot hold keeps the whole membership opaque |
 | `rel.key = 'const'` in a membership subquery with no context value | the membership's key (`member(r, key='const', ...)`); with two such constants and no context value the membership stays opaque |
 | `col = any ((select mls_reach_<h>(<ctx>))::t[])` | `in_group`, when the spec declares hierarchy `h` |
-| `col = any ((select mls_lookup_<r>(<ctx>))::t[])`, a lookup helper the compiler created | `member`, read from the helper's body as the subquery it holds; the relation keeps the helper's name |
+| `col = any ((select mls_lookup_<r>(<ctx>))::t[])`, a lookup helper the compiler created | `member`, read from the helper's body as the subquery it holds; the relation keeps the helper's name (a helper without an argument is a relation without a key) |
+| `col in (select id from t where <condition>)`, its `= any (array(...))` and correlated `exists` twins, with `id` a key of `t` on its own and no key filter | a relation without a key, `t(id) where <condition>`, and a membership naming the value only |
 | `col = any (array(select v from T where k = any (array(select ... from rel where key = <ctx>))))`, or the same nesting of `in (select ...)`, up to three levels | `member` over a composed relation: an identical chain in the spec is reused, else one is proposed (named `<base>_<last table>`) with a note; when a hop's pair is not unique or a hop column is nullable the policy stays opaque |
 | `col is [not] null`, `and`, `or`, `not`, `true`, `false` | the same |
 | `(f is null or f <= (select now())) and (u is null or (select now()) < u)` | `now_between` |

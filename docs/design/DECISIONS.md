@@ -1709,3 +1709,32 @@ accepted".  The diff now lists the cardinality rules only one version has (`diff
 compared by table, group, parent, bounds and condition, not by name) as integrity changes stated
 rather than proved, counts them in the summary and the exit code, and the eval grader counts them
 as differences.
+
+**D84. A relation may have no key: a set of one table's rows that meet a condition (#63, extends D61, D70).**
+chatbot-ui shares rows by a flag on their parent: `collection_id in (select id from collections
+where sharing <> 'private')` on `collection_files`, and the same on `file_items`, `messages` and,
+one table further, `files`.  MLS could not state it: a relation needs a key, a membership key must
+be a context value or a constant (a column key is a per-row correlated subquery), and `key = value`
+was refused, so import kept all four policies opaque.  Decision (the recommended option, accepted
+2026-11-23): `Relation.key` and `MemberBody.key` are optional.  A relation without a key is a set,
+`T(v) where p` (terse `relation s = t(v) where p`, atom `s(col)`); `v` must be a single-column key of
+`T`, so the row axiom `v ∈ S ⇔ ¬null(v) ∧ T(p(row))` stays exact, and a composed relation may start
+from one.  Encoding: one fixed key `κ` (`logic/tvl.py:SET_KEY`, `IntVal(0)`; the oracle's
+`pg/model.py:SET_KEY`), so the row axioms, hop chains, up-hops, subset axioms and the diff's ties
+are a relation's with a constant key and nothing else changes.  Compilation: a set is never a
+context value's, so like a constant key (D70) its lookup always goes through a definer helper, here
+without an argument, `mls_lookup_<R>()`; a visibility policy `using (p)` would open every row the
+condition keeps to every reader.  Its base level is aliased `mls_definer_set` when import inlines
+the helper, so the round trip reads a set back even when `p` is `col = constant`, which the lifter
+otherwise reads as a constant key (D60).  The lifter reads a keyless `IN`, `= any (array(...))` and
+correlated `EXISTS` over a key of the parent as a set, and nested ones as composed from it.  Refused:
+a set as an inclusion target (a foreign key references a pair), as hierarchy members and in
+`tenant_isolation` (both per key), and in invariants.  Considered: a parent-column atom
+(`collections(collection_id).sharing`), more general but a correlated per-row lookup and a new
+function per parent column; keying a relation by the flag (`collections(sharing, id)`), which cannot
+say `<> 'private'` or NULL.  Template tests: fixture `specs.set_spec` (team_tasks with a nullable
+`projects.public`, a set and a set composed through `tasks`), cases `set` (mutation
+`SET_HELPER_INVOKER`: the helper reads as the caller, so non-members see no public task) and
+`set_condition` (`RELATION_CONDITION_DROPPED`), the lift round trip `set`, the lift shapes
+`test_rows_of_a_parent_that_meet_a_condition_are_a_set`.  On chatbot-ui all four policies now
+import with no opaque block and the compiled script deploys as Supabase's `postgres`.  Lean: known gap.

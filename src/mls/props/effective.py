@@ -67,8 +67,8 @@ def _implicit_policies(spec: Spec) -> list[PolicyRule]:
     for p, role, table, exprs in spec.caller_reads():  # a column guard reads as the caller too (#50)
         for e in exprs:
             for m in members_in(e, []):
-                if is_routed(spec, table, m.relation):
-                    continue  # D67: a helper reads it, without the caller's policies
+                if is_routed(spec, table, m.relation) or m.key is None:
+                    continue  # D67: a helper reads it, without the caller's policies (#63: a set, always)
                 lv = levels(spec, m.relation)
                 base = base_name(spec, m.relation)
                 key_json = m.key.model_dump_json()

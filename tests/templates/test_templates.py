@@ -47,6 +47,8 @@ CASES = {
     "owner": (specs.owner_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),  # D60
     "condition": (specs.condition_spec, Mutation.RELATION_CONDITION_DROPPED, None),  # D61
     "lookup": (specs.lookup_spec, Mutation.LOOKUP_KEY_DROPPED, None),  # D67
+    "set": (specs.set_spec, Mutation.SET_HELPER_INVOKER, None),  # #63
+    "set_condition": (specs.set_spec, Mutation.RELATION_CONDITION_DROPPED, None),  # #63
     "nullable_member": (specs.nullable_member_spec, Mutation.MEMBER_NULL_PASSES, None),  # #42
     "up": (specs.up_spec, Mutation.HOP_VISIBILITY_DROPPED, None),  # #43
     "comember": (specs.comember_spec, Mutation.HOP_VISIBILITY_DROPPED, None),  # #33

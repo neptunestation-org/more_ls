@@ -122,7 +122,7 @@ def scale_load_sql(spec: Spec, adapter: Adapter, n_rows: int, n_users: int = 100
     other tables n_rows rows with values spread over the same pools.  Constraints are not needed
     for plan shape, so callers deploy the script without checks/fks/transitions."""
     out = []
-    relation_tables = {rel.table for rel in spec.base_relations().values()}
+    relation_tables = {rel.table for rel in spec.base_relations().values() if rel.key is not None}
     hier_tables = {h.table: h for h in spec.hierarchies.values()}
     for h in hier_tables.values():
         # node i has parent i // 10 (none for 1..9) and depth floor(log10 i): the pool of

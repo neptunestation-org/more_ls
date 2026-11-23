@@ -655,3 +655,34 @@ def test_a_cardinality_rule_needs_a_bound_and_a_minimum_is_no_invariant():
     j = bad["properties"].index(p)
     assert has(errors(bad), f"$.properties[{j}].invariants[{len(p['invariants']) - 1}].rule",
                "sets only a minimum, which is no invariant")
+
+
+def test_a_set_relation_names_a_key_of_its_table_and_its_memberships_no_key():
+    """#63: a relation without a key is a set of one table's key values; a membership in it names
+    the value only, and a keyed relation's membership still needs its key.  A set is no inclusion
+    target, no hierarchy's members and no tenant isolation's relation, and an invariant cannot
+    read one."""
+    from tests.templates import specs
+
+    def fresh():
+        return json.loads(specs.set_spec().model_dump_json(by_alias=True, exclude_none=True))
+
+    assert errors(fresh()) == []
+    d = fresh()
+    d["relations"]["public_projects"]["value"] = "team_id"
+    assert has(errors(d), "$.relations.public_projects.value", "is not a key of 'projects' on its own")
+    d = fresh()
+    i = next(i for i, r in enumerate(d["rules"]) if r["id"] == "R5")
+    d["rules"][i]["using"]["member"]["key"] = {"ctx": "uid"}
+    assert has(errors(d), f"$.rules[{i}].using.member.key", "has no key")
+    d = fresh()
+    del d["rules"][0]["using"]["member"]["key"]
+    assert has(errors(d), "$.rules[0].using.member.key", "has a key: a membership in it names a key")
+    d = fresh()
+    d["rules"].append({"id": "X", "kind": "inclusion", "name": "x", "table": "tasks",
+                       "columns": ["project_id", "id"], "relation": "public_projects", "on_delete": "restrict"})
+    assert has(errors(d), f"$.rules[{len(d['rules']) - 1}].relation", "has no key; an inclusion rule")
+    d = fresh()
+    d["properties"].append({"id": "PX", "template": "tenant_isolation", "table": "tasks", "column": "project_id",
+                            "relation": "public_projects", "key": {"ctx": "uid"}, "commands": ["select"]})
+    assert has(errors(d), f"$.properties[{len(d['properties']) - 1}].relation", "has no key; tenant isolation")

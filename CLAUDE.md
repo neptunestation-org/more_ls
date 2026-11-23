@@ -208,6 +208,11 @@ union member the renderer does not cover.
 - M4 (the LLM loop and evals): `src/mls/llm/CLAUDE.md`. Tests never call the API (`MLS_LLM_SCRIPT=<json>`
   or `ScriptedClient` replays answers); terse is the default, so tests that script JSON answers pass
   `syntax="json"` / `--syntax json`.
+- D84 (#63): a relation may have no key, a set (`Relation.key`/`MemberBody.key` None, `chain.is_set`;
+  value a single-column key), encoded with one key `tvl.SET_KEY`; always routed to a no-argument
+  `mls_lookup_<R>()`; import reads keyless subqueries over a parent key as sets (`SET_ALIAS` marks the
+  helper's base); refused as an inclusion target, hierarchy members, in tenant_isolation and
+  invariants; fixture `specs.set_spec`, mutation `SET_HELPER_INVOKER`.
 - D83 (#61): a cardinality rule has `max` and/or `min` and an optional `where`; `min` is a deferred
   constraint trigger `<name>_min` (at commit, parent row locked; a parent deleted in the transaction
   is exempt), no invariant (refused in `invariant_preserved`), unused by the proofs; fixture

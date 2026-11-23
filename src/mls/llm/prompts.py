@@ -47,6 +47,12 @@ triggers, grants).  You never write SQL.
   "status", "value": "id"} as {"member": {"relation": "floor_in_state", "key": {"const": "open"},
   "value": {"col": "floor_id"}}}, or keyed by a bool column with {"const": true}.  It grants no rows:
   only whether the floor is open.
+- {"table": t, "value": v, "where": p}   a set, no key: the v of every row of t where p is TRUE (every
+  row without "where"); v is the primary key or a single-column unique column of t.  A row whose
+  parent row meets a condition: {"table": "floors", "value": "id", "where": {"cmp": [{"col":
+  "visibility"}, "<>", {"const": "private"}]}} as public_floors, read as {"member": {"relation":
+  "public_floors", "value": {"col": "floor_id"}}}, with no key.  A composed relation may start from
+  a set.  Not in inclusion rules, invariants, hierarchies or tenant_isolation.
 - {"of": R, "through": [{"table": t1, "key": k1, "value": v1}, ...]}   composed: (u, x) when (u, y) is a
   pair of the base relation R, a t1 row has k1 = y and v1 = x (and so on through each hop); 1 to 3
   hops; each hop's key and value are different NOT NULL columns, the key has the type of the previous
@@ -140,7 +146,9 @@ ROLE_RELATIONS = """You complete the SCHEMA of a database access-control spec, b
 or properties: you write the RELATIONS the business requirements need that the schema does not
 already have.  A relation names who belongs to what: a base relation is the (key, value) projection
 of one table (the user column, the group column), possibly only of its rows that meet a condition
-on that table's own columns (the managers among the staff); a composed relation follows a base relation
+on that table's own columns (the managers among the staff), or a set without a key, the rows of one
+table that meet a condition (the floors open to the public), for a row readable when its parent
+row meets one; a composed relation follows a base relation
 through up to three tables, each by a key, to the rows a requirement reaches only indirectly (the
 rooms of the floors of the buildings a user works in).  A fact about the data that ties a row to a row of
 another table ("a room is always in the same building as its floor") needs a relation too: the other

@@ -71,6 +71,8 @@ def pred(spec: Spec, p: Pred, row: str = "the row", top: bool = True) -> str:
         return f"{term(spec, l, row)} {OPS[op]} {term(spec, r, row)}"
     if isinstance(p, Member):
         m = p.member
+        if m.key is None:  # #63: a set relation
+            return f"{term(spec, m.value, row)} is among the {m.relation}"
         if isinstance(m.key, Const):  # D60: a constant key, e.g. the sessions in one state
             return f"{term(spec, m.value, row)} is among the {m.relation} for {term(spec, m.key, row)}"
         return f"{term(spec, m.value, row)} is among {term(spec, m.key, row)}'s {m.relation}"
@@ -221,7 +223,8 @@ def scenario(spec: Spec, sc) -> str:
         vals = ", ".join(f"{k} = {_v(v)}" for k, v in r["values"].items())
         parts.append(f"{_row_label(name)} of {r['table']}" + (f" with {vals}" if vals else ""))
     for name, pairs in sc.relations.items():
-        shown = ", ".join(f"({_v(a)}, {_v(b)})" for a, b in pairs) if pairs else "no entries"
+        shown = ", ".join(f"({', '.join(_v(x) for x in pair)})" if len(pair) > 1 else _v(pair[0])
+                          for pair in pairs) if pairs else "no entries"
         parts.append(f"{name} has {shown}")
     for name, pairs in getattr(sc, "hops", {}).items():
         shown = ", ".join(f"({_v(a)}, {_v(b)})" for a, b in pairs) if pairs else "no rows"
@@ -330,6 +333,8 @@ def composed_line(spec: Spec, name: str) -> str:
     if user_keyed(spec, name):
         return f"{steps}: a user's {name} are {phrase} whose {hops[-1].key} is among that user's {r.of}."
     k = _base_key(spec, name)
+    if k is None:  # #63: composed from a set
+        return f"{steps}: {name} are {phrase} whose {hops[-1].key} is among the {r.of}."
     return f"{steps}: for each {k}, {name} are {phrase} whose {hops[-1].key} is among the {r.of} for that {k}."
 
 
@@ -339,6 +344,8 @@ def relation_line(spec: Spec, name: str) -> str:
     if isinstance(r, ComposedRelation):
         return composed_line(spec, name)
     cond = "" if r.where is None else f", where {pred(spec, r.where, f'the {r.table} row')}"
+    if r.key is None:  # #63: a set of values, no key
+        return f"{r.table} ({r.value}): {name} are the {r.value} of every {r.table} row{cond}."
     if user_keyed(spec, name):
         return (f"{r.table} ({r.key} → {r.value}): a user's {name} are the {r.value} of every {r.table} row "
                 f"whose {r.key} is that user{cond}.")

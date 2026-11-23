@@ -446,8 +446,9 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                     break
 
     def propose(table: str, key: str, value: str, why: str, where: dict | None = None) -> str | None:
+        cols = value if key is None else f"{key}, {value}"  # #63: a set has no key
         if table not in governed:
-            notes.append(f"relation on {table} ({key}, {value}) not proposed: the table is observed ({why})")
+            notes.append(f"relation on {table} ({cols}) not proposed: the table is observed ({why})")
             return None
         pair = (table, key, value, _cond_key(where))
         if pair in rel_by_pair:
@@ -462,13 +463,14 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 i = 2
                 while name in relations:
                     name, i = suffixed(base_n, str(i)), i + 1
-        relations[name] = {"table": table, "key": key, "value": value, **({"where": where} if where else {})}
+        relations[name] = {"table": table, **({"key": key} if key is not None else {}), "value": value,
+                           **({"where": where} if where else {})}
         rel_by_pair[pair] = name
         env.relations[name] = (table, key, value)
         if where is not None:
             env.conditions[name] = where
         env.invalidate()
-        notes.append(f"relation {name} proposed: ({key}, {value}) of {table}"
+        notes.append(f"relation {name} proposed: ({cols}) of {table}"
                      + (" where its condition holds" if where else "") + f" ({why})")
         return name
 
@@ -908,7 +910,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
             continue
         for rn in relations_in(p.using, relations_in(p.check, set())):
             for rel in levels(checked, rn):
-                rel_reads.setdefault((p.role, rel.table), set()).update((rel.key, rel.value))
+                rel_reads.setdefault((p.role, rel.table), set()).update(c for c in (rel.key, rel.value) if c is not None)
     for r in checked.column_rules():
         if r.access == "read" and rel_reads.get((r.role, r.table)) == set(r.columns) and not any(
                 p.role == r.role and p.table == r.table and p.mode == "permissive" and p.command in ("select", "all")

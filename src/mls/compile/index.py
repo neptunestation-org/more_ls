@@ -94,6 +94,8 @@ def index_specs(spec: Spec) -> list[tuple[str, str, tuple[str, ...]]]:
         want(c.table, [c.group])           # the trigger counts rows per group
     for name in spec.relations:  # D56: every level of a composed relation is looked up by its key
         for rel in levels(spec, name):
+            if rel.key is None:
+                continue  # #63: a set reads its rows by condition; its value is a key already
             t = spec.tables[rel.table]
             keysets = ([tuple(t.primary_key)] if t.primary_key else []) + [tuple(u) for u in t.unique]
             if not any(ks[0] == rel.key for ks in keysets):

@@ -119,8 +119,10 @@ class In(Strict):
 
 
 class MemberBody(Strict):
+    """`(key, value) ∈ relation`; for a set relation (no key column, #63) only `value ∈ relation`,
+    and `key` is absent."""
     relation: str
-    key: Term
+    key: Term | None = None
     value: Term
 
 
@@ -267,9 +269,10 @@ class Table(Strict):
 
 class Relation(Strict):
     """A membership relation: the (key, value) projection of a table, or of its rows where the
-    condition `where` is TRUE (D61)."""
+    condition `where` is TRUE (D61).  Without a key (#63) it is a set: the values of the rows
+    where `where` is TRUE (every row without one), `value` a single-column key of the table."""
     table: str
-    key: str
+    key: str | None = None
     value: str
     where: Pred | None = None
 

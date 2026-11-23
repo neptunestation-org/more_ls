@@ -85,12 +85,14 @@ class SqlCompiler:
         if isinstance(p, Member):
             m = p.member
             lv = levels(self.spec, m.relation)
-            kt = self.spec.tables[lv[0].table].columns[lv[0].key].type
+            kt = None if lv[0].key is None else self.spec.tables[lv[0].table].columns[lv[0].key].type
             if is_routed(self.spec, table, m.relation):
                 from mls.compile.lookup import lookup_call_sql
 
-                # D67: the plain subquery would recurse; the helper reads without the policies
-                return lookup_call_sql(self.spec, m.relation, self.term(m.key, table, kt),
+                # D67: the plain subquery would recurse; the helper reads without the policies.
+                # #63: a set has no key, so its helper takes none (a set is always routed)
+                return lookup_call_sql(self.spec, m.relation,
+                                       None if m.key is None else self.term(m.key, table, kt),
                                        self.term(m.value, table))
             key_match = f"{q(lv[0].key)} = {self.term(m.key, table, kt)}"
             if Mutation.RELATION_NULL_KEY_MATCHES in self.mutations:

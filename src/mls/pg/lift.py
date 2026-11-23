@@ -616,6 +616,12 @@ def strip_check(constraint_def: str) -> str:
 
 
 # ----------------------------------------------------------------------------- environment
+
+def member_body(relation: str, key: dict | None, value: dict) -> dict:
+    """A membership atom's body; a set relation's (#63) has no key."""
+    return {"relation": relation, "value": value} if key is None else {"relation": relation, "key": key, "value": value}
+
+
 @dataclass
 class Env:
     """What the lifter reads an expression against: the spec so far.  `tables` maps a table to
@@ -692,7 +698,7 @@ class Env:
                                             for c, (ty, nu) in cols.items()},
                                 "mode": "adopted" if t in self.governed else "observed"}
                             for t, cols in self.tables.items()},
-                 "relations": {**{n: {"table": t, "key": k, "value": v,
+                 "relations": {**{n: {"table": t, **({"key": k} if k is not None else {}), "value": v,
                                       **({"where": self.conditions[n]} if n in self.conditions else {})}
                                   for n, (t, k, v) in self.relations.items()},
                                **{n: {"of": of, "through": [{"table": t, "key": k, "value": v} for t, k, v in hops]}
@@ -914,7 +920,7 @@ class Lifter:
         does; any other runs as the caller, under the relation table's policies (#41), so it is
         recorded, and refused when the import found those policies hide rows of the relation."""
         atom = self._member(value_node, sel, correlated, outer_value)
-        if DEFINER_ALIAS not in {sel.table_alias, *(a for _, a, _ in sel.joins)}:
+        if not {DEFINER_ALIAS, SET_ALIAS} & {sel.table_alias, *(a for _, a, _ in sel.joins)}:
             rel = atom["member"]["relation"]
             if rel in self.env.hidden:
                 raise Unreadable(f"the subquery runs as the caller, and the policies on {sel.table} hide some of "
@@ -963,7 +969,9 @@ class Lifter:
                 else:
                     rest.append(c)  # D61: a condition on the relation's own rows, or unreadable
             (key_col, key_term), more = self.pick_key(keys)
-            if key_col is None or val_col is None:
+            # #63: no key filter: the parent rows that meet a condition, correlated on a key of their own
+            is_set = key_col is None and val_col is not None and frozenset((val_col,)) in self.env.keys.get(rel_table, [])
+            if (key_col is None and not is_set) or val_col is None:
                 raise Unreadable("EXISTS without both a key filter and a correlation on the row")
             where = self.condition(more + rest, rel_table, sel.table_alias)
             value_json = {"col": outer_col}
@@ -972,16 +980,16 @@ class Lifter:
             value_json, _ = self.term(value_node)
             if hops:
                 name = self.composed_relation((rel_table, key_col, val_col), hops, where)
-                return {"member": {"relation": name, "key": key_term, "value": value_json}}
+                return {"member": member_body(name, key_term, value_json)}
         if rel_table not in self.env.governed:
             raise Unreadable(f"the relation table {rel_table} is observed (not governed): no relation can be declared "
                              f"on it")
-        if not pair_unique(self.env.keys.get(rel_table, []), key_col, val_col):
+        if key_col is not None and not pair_unique(self.env.keys.get(rel_table, []), key_col, val_col):
             raise Unreadable(f"({key_col}, {val_col}) is not unique in {rel_table} (neither the pair nor one of its "
                              f"columns is a key); a relation is a set of pairs (add a unique constraint on the pair "
                              f"to lift this)")
         name = self.declare(rel_table, key_col, val_col, where)
-        return {"member": {"relation": name, "key": key_term, "value": value_json}}
+        return {"member": member_body(name, key_term, value_json)}
 
     def declare(self, table: str, key: str, value: str, where: dict | None) -> str:
         """The relation (table, key, value) with this condition, proposed or reused."""
@@ -1153,7 +1161,8 @@ class Lifter:
         return {"member": {"relation": name, "key": key_term, "value": {"col": outer_col}}}
 
     def chain(self, sel: Select) -> tuple[tuple[str, str, str], dict, list[tuple[str, str, str]], dict | None]:
-        """`select V from R where K = <key> [and <condition>]` is a base level; `select V from T
+        """`select V from R where K = <key> [and <condition>]` is a base level (`select V from R where
+        <condition>` with V a key of R: a set, #63, key None); `select V from T
         where K = any (array(<chain>))` or `... where K in (<chain>)` a hop over a chain (D56).
         Returns the base level (table, key, value), the key term, the hops (table, key, value) in
         order, and the base level's condition (D61)."""
@@ -1197,9 +1206,17 @@ class Lifter:
                              sides[0][1] if sides[0][0] == "key" else sides[1][1], c))
             else:
                 rest.append(c)
-        (key_col, key_term), more = self.pick_key(keys)
+        if sel.table_alias == SET_ALIAS:  # #63: the compiler's set helper: every `=` is condition
+            (key_col, key_term), more = (None, None), [k[2] for k in keys]
+        else:
+            (key_col, key_term), more = self.pick_key(keys)
         if key_col is None:
-            raise Unreadable(f"`{self.src(w)}`: the membership WHERE is not `key = <ctx>`")
+            # #63: no key: the rows of a parent that meet a condition, a set of its keys
+            if frozenset((val_col,)) not in self.env.keys.get(sel.table, []):
+                raise Unreadable(f"`{self.src(w)}`: the membership WHERE is not `key = <ctx>`, and "
+                                 f"{sel.table}.{val_col} is no key of its own, so it is no set of rows either")
+            where = self.condition(more + rest, sel.table, sel.table_alias)
+            return (sel.table, None, val_col), None, [], where
         where = self.condition(more + rest, sel.table, sel.table_alias)
         return (sel.table, key_col, val_col), key_term, [], where
 
@@ -1211,7 +1228,7 @@ class Lifter:
         if rel_table not in self.env.governed:
             raise Unreadable(f"the relation table {rel_table} is observed (not governed): no relation can be declared "
                              f"on it")
-        if not pair_unique(self.env.keys.get(rel_table, []), key_col, val_col):
+        if key_col is not None and not pair_unique(self.env.keys.get(rel_table, []), key_col, val_col):
             raise Unreadable(f"({key_col}, {val_col}) is not unique in {rel_table} (neither the pair nor one of its "
                              f"columns is a key); a relation is a set of pairs (add a unique constraint on the pair "
                              f"to lift this)")
@@ -1508,12 +1525,16 @@ def lookup_calls(text: str, bodies: dict[str, str]) -> list[tuple[str, int, int,
         key = text[m.end():j - 1]
         sub = _LOOKUP_KEY.sub(lambda _: "= " + key, body.group(1), count=1)
         sub = re.sub(r'(\bfrom "[^"]+")', r"\1 " + DEFINER_ALIAS, sub)  # #41: it reads every row
+        if not key.strip():  # #63: a helper without a key is a set's: its base level says so
+            i_ = sub.rindex(" " + DEFINER_ALIAS)
+            sub = sub[:i_] + " " + SET_ALIAS + sub[i_ + len(DEFINER_ALIAS) + 1:]
         out.append((name[len("mls_lookup_"):], m.start(), tail.end(), "ARRAY(" + sub + ")"))
         i = tail.end()
     return out
 
 
 DEFINER_ALIAS = "mls_definer"  # the FROM alias of an inlined SECURITY DEFINER body (#41)
+SET_ALIAS = "mls_definer_set"  # #63: the base level of a set relation's helper, read as a set
 _FUNC_SELECT = re.compile(r"^\s*select\s+(.*?)\s*;?\s*$", re.IGNORECASE | re.DOTALL)
 _FUNC_FROM = re.compile(r'\b(from|join)\s+((?:"?[a-z_][a-z0-9_]*"?\.)?"?[a-z_][a-z0-9_]*"?)(?=\s*(?:where\b|\)|$))',
                         re.IGNORECASE)

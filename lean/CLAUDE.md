@@ -72,6 +72,9 @@ writers) is in `docs/design/archive/ROADMAP.md`, "Parallel track — Lean 4".
   check on a cascade delete are not transcribed: `Relational.lean`'s FK guard is RESTRICT only.
   Nor is set_null (#62, D81): the induction step's nulled-row case, `_set_null_obligations` and the
   oracle's `_set_null_ok`.
+- **Relations without a key (#63, D84)** are not transcribed: `Pred.member` takes a key.  A set is
+  the relation with every fact's key a fixed constant, so the transcription is `Pred.member` with a
+  constant key and the set's row axiom, the untranscribed relation row axiom above.
 - **Cardinality `where` and `min` (#61, D83)** are not transcribed: `Cardinality.lean` counts every
   row of a group against a maximum; the condition on the counted rows and the commit-time minimum
   (which the proofs do not use) are not modelled.

@@ -514,6 +514,39 @@ def condition_spec() -> Spec:
     return make(d)
 
 
+def set_spec() -> Spec:
+    """#63: team_tasks with a nullable `projects.public`.  `public_projects` is a set relation, the
+    ids of the projects whose `public` is TRUE (NULL is UNKNOWN: not public), and `public_tasks`
+    is composed from it through `tasks(project_id, id)`.  Anyone signed in reads the tasks of a
+    public project (R5) and the comments on them (R6), though only members read the project rows
+    themselves (R1), and edits them while they stay in a public project (R7, filtered updates and
+    a WITH CHECK): the set's helper reads `projects` without the caller's policies.  Its
+    mutation reads them as the caller, so a non-member sees no public task; the condition's
+    mutation drops `public = true`.  P1 and P3 (members only) no longer hold, by design."""
+    d = json.loads((EXAMPLE.parent / "team_tasks.mls.json").read_text())
+    d["tables"]["projects"]["columns"]["public"] = {"type": "bool", "nullable": True}
+    d["relations"]["public_projects"] = {"table": "projects", "value": "id",
+                                         "where": {"cmp": [{"col": "public"}, "=", {"const": True}]}}
+    d["relations"]["public_tasks"] = {"of": "public_projects",
+                                      "through": [{"table": "tasks", "key": "project_id", "value": "id"}]}
+    pub = {"member": {"relation": "public_projects", "value": {"col": "project_id"}}}
+    pub_task = {"member": {"relation": "public_tasks", "value": {"col": "task_id"}}}
+    d["rules"] += [
+        {"id": "R5", "kind": "policy", "name": "anyone_reads_public_tasks", "table": "tasks",
+         "role": "authenticated", "command": "select", "mode": "permissive", "using": pub},
+        {"id": "R6", "kind": "policy", "name": "anyone_reads_public_comments", "table": "comments",
+         "role": "authenticated", "command": "select", "mode": "permissive", "using": pub_task},
+        {"id": "R7", "kind": "policy", "name": "anyone_edits_public_tasks", "table": "tasks",
+         "role": "authenticated", "command": "update", "mode": "permissive", "using": pub, "check": pub},
+    ]
+    d["properties"] = [p for p in d["properties"] if p["id"] not in ("P1", "P3")] + [
+        {"id": "P6", "template": "must_allow", "table": "tasks", "role": "authenticated", "command": "select",
+         "when": pub, "description": "anyone signed in reads every task of a public project"},
+        {"id": "P7", "template": "must_allow", "table": "comments", "role": "authenticated", "command": "select",
+         "when": pub_task, "description": "anyone signed in reads every comment on a task of a public project"},
+    ]
+    return make(d)
+
 def lookup_spec() -> Spec:
     """D67: team_tasks where the membership table's own policies read its relations, whose plain
     subqueries Postgres would refuse as infinite recursion: a member reads every membership of

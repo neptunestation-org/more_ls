@@ -28,6 +28,10 @@ from mls.spec.model import (
     NowBetween, OldRef, OpaqueRef, Or, Pred, Spec,
 )
 
+# #63: the one key of a set relation's facts: `v ∈ R` is `R(SET_KEY, v)`, so a set relation, its row
+# axioms, the chains composed from it and the diff's ties are a relation's with a constant key
+SET_KEY = IntVal(0)
+
 
 # The opaque blocks encoded as *free* (#27): each occurrence an independent three-valued value
 # instead of an uninterpreted function of the block's declared inputs.  A proof that still holds
@@ -185,7 +189,7 @@ class Encoder:
             for t_, (tb, col) in ((m.key, (lv[0].table, lv[0].key)), (m.value, (lv[-1].table, lv[-1].value))):
                 if isinstance(t_, Const) and isinstance(t_.const, str):
                     self.const_types.setdefault(t_.const, set()).add(self.spec.tables[tb].columns[col].type)
-            kv, kn = self.term(m.key, row, table)
+            kv, kn = (SET_KEY, FALSE) if m.key is None else self.term(m.key, row, table)
             vv, vn = self.term(m.value, row, table)
             ok = not_(or_(kn, vn))
             fact = self.chain_fact(m.relation, kv, vv)

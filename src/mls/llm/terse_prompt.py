@@ -41,6 +41,12 @@ triggers, grants).  You never write SQL.
   relation keyed by the state column, text, bool or enum, read with a constant: relation
   floor_in_state = floors(status, id) read as floor_in_state('open', floor_id), or a bool column
   read with true.  It grants no rows: only whether the floor is open.
+- relation S = t(v) where p        a set, no key: the v of every row of t where p is TRUE (every row
+  without p); v is the primary key or a single-column unique column of t.  A row whose parent row
+  meets a condition: relation public_floors = floors(id) where visibility <> 'private', read as
+  public_floors(floor_id), with no key.  A composed relation may start from a set: relation
+  public_rooms = public_floors . rooms(floor_id, id).  Not in inclusion rules, invariants,
+  hierarchies or tenant_isolation.
 - relation C = R . t1(k1, v1) . t2(k2, v2)   composed: (u, x) when (u, y) is a pair of the base
   relation R, a t1 row has k1 = y and v1 = x (and so on through each hop); 1 to 3 hops; each hop's
   key and value are different NOT NULL columns, the key has the type of the previous value, and the

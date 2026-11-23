@@ -16,8 +16,15 @@ from mls.spec.model import ComposedRelation, Relation, Spec
 @dataclass(frozen=True)
 class Level:
     table: str
-    key: str
+    key: str | None   # None: the base level of a set relation (#63), no key column
     value: str
+
+
+def is_set(spec: Spec, name: str) -> bool:
+    """#63: the relation (or a prefix of one) starts from a set relation: its facts are values only
+    (encoded with one fixed key, `logic/tvl.py:SET_KEY`), and a membership in it has no key."""
+    rel = spec.relations.get(base_name(spec, name))
+    return isinstance(rel, Relation) and rel.key is None
 
 
 def split(name: str) -> tuple[str, int | None]:
@@ -97,9 +104,9 @@ def hop_prefix(spec: Spec, name: str, i: int) -> str:
     return base_name(spec, name) if i == 1 else prefix(split(name)[0], i - 1)
 
 
-def key_type(spec: Spec, name: str) -> str:
+def key_type(spec: Spec, name: str) -> str | None:
     lv = levels(spec, name)[0]
-    return spec.tables[lv.table].columns[lv.key].type
+    return None if lv.key is None else spec.tables[lv.table].columns[lv.key].type
 
 
 def value_type(spec: Spec, name: str) -> str:
@@ -131,7 +138,7 @@ def read_columns(spec: Spec, name: str) -> list[tuple[str, set[str]]]:
                 cols(x, out)
         return out
 
-    out = [(lv.table, {lv.key, lv.value}) for lv in levels(spec, name)]
+    out = [(lv.table, {c for c in (lv.key, lv.value) if c is not None}) for lv in levels(spec, name)]
     cond = condition(spec, name)
     if cond is not None:
         out[0][1].update(cols(cond, set()))

@@ -17,6 +17,7 @@ approval artifact (D10, D33).  The grammar:
     option     := 'primary_key' '(' names ')' | 'unique' '(' names ')' | 'tags' '(' names ')'
                 | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)' | 'inlined function f(t) md5 h')
     relation   := 'relation' NAME '=' TABLE '(' KEY ',' VALUE ')' ['where' pred]
+                | 'relation' NAME '=' TABLE '(' VALUE ')' ['where' pred]        (a set of values, no key)
                 | 'relation' NAME '=' RELATION ('.' TABLE '(' KEY ',' VALUE ')')+   (D56, ≤ 3 hops)
     hierarchy  := 'hierarchy' NAME '=' TABLE 'id' COL 'parent' COL 'depth' COL 'max_depth' INT 'members' REL
     opaque     := 'opaque' NAME 'on' TABLE '(' [input (',' input)*] ')' 'relations' '(' [names] ')' 'sql' DOLLAR
@@ -28,7 +29,7 @@ approval artifact (D10, D33).  The grammar:
                 | 'and' '(' selector (',' selector)* ')' | 'or' '(' selector (',' selector)* ')'
     property   := ID TEMPLATE [table role command which]: ... ['description' STRING]
     term       := column | old.column | new.column | @context | 'text' | 123 | true | false
-    atom       := term op term | term in (const, ...) | term is null | relation(key, value)
+    atom       := term op term | term in (const, ...) | term is null | relation(key, value) | relation(value)
                 | in_group(h, key, value) | now_between(from | -, until | -) | opaque(name) | true | false
     pred       := atom | not pred | pred and pred | pred or pred   (not > and > or; a nested same-
                                                                    connective group keeps its parens)
@@ -158,6 +159,8 @@ def _pred(p: Pred) -> tuple[str, int]:
         return f"{term(t)} in ({', '.join(term(c) for c in consts)})", ATOM
     if isinstance(p, Member):
         m = p.member
+        if m.key is None:  # #63: a set relation
+            return f"{ident(m.relation)}({term(m.value)})", ATOM
         return f"{ident(m.relation)}({term(m.key)}, {term(m.value)})", ATOM
     if isinstance(p, InGroup):
         g = p.in_group
@@ -346,7 +349,8 @@ def relation(name: str, r: Relation | ComposedRelation) -> str:
     if isinstance(r, ComposedRelation):
         hops = " . ".join(f"{ident(h.table)}({ident(h.key)}, {ident(h.value)})" for h in r.through)
         return f"relation {ident(name)} = {ident(r.of)} . {hops}"
-    out = f"relation {ident(name)} = {ident(r.table)}({ident(r.key)}, {ident(r.value)})"
+    cols = ident(r.value) if r.key is None else f"{ident(r.key)}, {ident(r.value)}"
+    out = f"relation {ident(name)} = {ident(r.table)}({cols})"
     return out + (f" where {pred(r.where)}" if r.where is not None else "")
 
 

@@ -14,7 +14,7 @@ from mls.compile.column import privileges
 from mls.logic.term import (
     FALSE, TRUE, Sort, Term, Var, and_, eq, forall, fun, iff, implies, int_var, le, not_, or_,
 )
-from mls.logic.tvl import Encoder, col_null_var, col_value_var, ctx_var, hop_exists_fun, hop_key_fun, rel_fun, up_fun
+from mls.logic.tvl import SET_KEY, Encoder, col_null_var, col_value_var, ctx_var, hop_exists_fun, hop_key_fun, rel_fun, up_fun
 from mls.spec.chain import base_name, condition, hop_prefix, levels, up_name
 from mls.spec.recursion import is_routed
 from mls.props.effective import (
@@ -107,9 +107,12 @@ def relation_row_axioms(enc: Encoder, rows: dict[str, str]) -> list[Term]:
             continue
         for row, rt in rows.items():
             if rt == rel.table and row != "new":
-                fact = rel_fun(name)(col_value_var(row, rel.key), col_value_var(row, rel.value))
+                # #63: a set relation's facts all have the one key SET_KEY
+                key = SET_KEY if rel.key is None else col_value_var(row, rel.key)
+                fact = rel_fun(name)(key, col_value_var(row, rel.value))
                 cols = enc.spec.tables[rel.table].columns
-                held = [not_(col_null_var(row, c)) for c in (rel.key, rel.value) if cols[c].nullable]
+                held = [not_(col_null_var(row, c)) for c in (rel.key, rel.value)
+                        if c is not None and cols[c].nullable]
                 if rel.where is not None:
                     held.append(enc.T(rel.where, row, rel.table))
                 out.append(iff(fact, and_(*held)) if held else fact)
@@ -117,7 +120,7 @@ def relation_row_axioms(enc: Encoder, rows: dict[str, str]) -> list[Term]:
                 # row's (a riders row whose user_id is NULL is nobody's, not someone else's)
                 single = {next(iter(k)) for k in _key_sets(enc.spec, rel.table) if len(k) == 1}
                 for mine, other in ((rel.value, rel.key), (rel.key, rel.value)):
-                    if mine not in single:
+                    if mine not in single or other is None:  # a set's value is its own fact
                         continue
                     o = int_var(f"ax.{name}.{row}.{other}")
                     pair = (o, col_value_var(row, mine)) if mine == rel.value else (col_value_var(row, mine), o)
@@ -665,7 +668,8 @@ def invariant_preserved(spec: Spec, p: InvariantPreserved) -> list[Obligation]:
         # a relation with a condition (D61) is never read by an invariant (the checker refuses
         # it), and the change axioms below would be wrong for it: an insert adds its pair only
         # when the condition holds
-        backed = {name for name, rel in spec.base_relations().items() if rel.table == t and rel.where is None}
+        backed = {name for name, rel in spec.base_relations().items()
+                  if rel.table == t and rel.where is None and rel.key is not None}  # #63: nor a set
         for cmd in ("insert", "update", "delete"):
             out.extend(_induction_step(spec, p, invs, t, cmd, backed))
     return out
@@ -829,12 +833,18 @@ def relation_visibility_obligations(spec: Spec, only: set[tuple[str, str]] | Non
                 for lvl, rel in enumerate(levels(spec, m.relation)):
                     # level 0: the rows with key = k; a hop (D56): the rows whose key is a value of
                     # the previous level for k
-                    k = (m.relation, lvl, role, m.key.model_dump_json())
+                    k = (m.relation, lvl, role, "" if m.key is None else m.key.model_dump_json())
                     if k in seen:
                         continue
                     seen.add(k)
                     enc = Encoder(spec)
-                    if lvl == 0:
+                    if lvl == 0 and rel.key is None:  # #63: a set reads every row of its table
+                        reach, which = TRUE, f"rows of {rel.table}"
+                        cond = condition(spec, m.relation)
+                        if cond is not None:
+                            reach = enc.T(cond, "x", rel.table)
+                            which += " that meet the relation's condition"
+                    elif lvl == 0:
                         kv, _ = enc.term(m.key, "x", rel.table)
                         reach = eq(col_value_var("x", rel.key), kv)
                         if spec.tables[rel.table].columns[rel.key].nullable:  # #49: a NULL key is no match

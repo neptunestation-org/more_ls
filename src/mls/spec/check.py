@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from pydantic import ValidationError
 
 from mls.errors import ErrorSink, MlsError, SpecError
+from mls.spec.chain import is_set
 from mls.spec.model import (
     MAX_HOPS, ComposedRelation, Relation,
     CONTEXT_NOW, And, BypassAssumed, CardinalityRule, CheckRule, ColRef, ColType, ColumnRule, Cmp, Const, CtxRef,
@@ -386,6 +387,31 @@ class Checker:
                                                     f"cannot read one (a write to a hop table would change "
                                                     f"it, which the induction step does not model)",
                          f"state the invariant over the base relation '{rel.of}' and the hop tables' columns")
+            if self.base_resolves(m.relation) and is_set(self.spec, m.relation):
+                if m.key is not None:
+                    self.err(f"{path}.member.key", f"'{m.relation}' has no key (a set of "
+                                                   f"{self.relation_ends(m.relation)[1][0]} values): a membership "
+                                                   f"in it names only the value", f"remove the key: {m.relation}(col)")
+                if not isinstance(m.value, (ColRef, OldRef, NewRef)):
+                    self.err(f"{path}.member.value", "the membership value must be a column",
+                             "use {\"col\": name}")
+                if scope.name == "invariant":
+                    self.err(f"{path}.member.relation", f"'{m.relation}' is a relation without a key; an "
+                                                        f"invariant cannot read one (an update of its table's rows "
+                                                        f"would change it, which the induction step does not model)",
+                             "state the invariant over the table's columns, or as an inclusion rule")
+                vt = self.term_type(m.value, scope, f"{path}.member.value")
+                ends = self.relation_ends(m.relation)
+                if ends is not None:
+                    rvt = self.col_type(*ends[1])
+                    if vt is not None and rvt is not None and not comparable(vt, rvt):
+                        self.err(f"{path}.member.value", f"value type {vt} does not match relation value "
+                                                         f"{ends[1][0]}.{ends[1][1]}: {rvt}")
+                return
+            if m.key is None:
+                self.err(f"{path}.member.key", f"'{m.relation}' has a key: a membership in it names a key "
+                                               f"and a value", f"{m.relation}(key, col)")
+                return
             kt = self.term_type(m.key, scope, f"{path}.member.key")
             vt = self.term_type(m.value, scope, f"{path}.member.value")
             if isinstance(m.key, ColRef) and not scope.member_col_key:
@@ -672,6 +698,12 @@ class Checker:
         out.extend(frozenset(u) for u in t.unique)
         return out
 
+    def base_resolves(self, name: str) -> bool:
+        """The relation's base relation exists (a composed relation's `of` may not)."""
+        rel = self.spec.relations.get(name)
+        return isinstance(rel, Relation) or (isinstance(rel, ComposedRelation)
+                                             and isinstance(self.spec.relations.get(rel.of), Relation))
+
     def relation_ends(self, name: str) -> tuple[tuple[str, str], tuple[str, str]] | None:
         """((table, key column), (table, value column)) of a relation, or None when it does not
         resolve (its own errors are reported by check_relations)."""
@@ -757,15 +789,26 @@ class Checker:
             ok = True
             for fld in ("key", "value"):
                 c = getattr(rel, fld)
+                if c is None:  # #63: a set relation has no key
+                    continue
                 if c not in self.spec.tables[rel.table].columns:
                     self.err(f"{path}.{fld}", f"unknown column '{c}' of table '{rel.table}'")
                     ok = False
                 # #49: a nullable key or value is allowed; a row with NULL in either is no pair
             if not ok:
                 continue
-            if rel.key == rel.value:
+            if rel.key is None:
+                # #63: a set of values, each one row's: the row axiom `value ∈ R ⇔ T(where(row))` is
+                # exact only when no two rows share the value
+                if frozenset((rel.value,)) not in self.key_sets(rel.table):
+                    self.err(f"{path}.value", f"'{rel.value}' is not a key of '{rel.table}' on its own: a "
+                                              f"relation without a key is a set of values, each of them "
+                                              f"one row's",
+                             f"name the primary key of '{rel.table}' or a single-column unique column, or "
+                             f"give the relation a key column")
+            elif rel.key == rel.value:
                 self.err(path, "key and value must be different columns")
-            if not pair_unique(self.key_sets(rel.table), rel.key, rel.value):
+            elif not pair_unique(self.key_sets(rel.table), rel.key, rel.value):
                 self.err(path, f"({rel.key}, {rel.value}) is not unique in '{rel.table}': a relation is "
                                f"a set of pairs, so the pair, or one of its columns, must be a primary key "
                                f"or unique constraint of the table",
@@ -814,6 +857,9 @@ class Checker:
                 self.err(f"{path}.members", f"'{h.members}' is a composed relation; a hierarchy's members "
                                             f"are one table's (key, value)",
                          f"use a base relation, e.g. '{rel.of}'")
+            elif rel.key is None:
+                self.err(f"{path}.members", f"'{h.members}' has no key; a hierarchy's members are pairs "
+                                            f"of a key and a group", "use a relation with a key column")
             elif rel.where is not None:
                 self.err(f"{path}.members", f"'{h.members}' has a condition; a hierarchy's members are "
                                             f"one table's every (key, value)",
@@ -971,6 +1017,11 @@ class Checker:
                                          f"foreign key, which references one table's (key, value)",
                      f"name a base relation, e.g. '{rel.of}'")
             return
+        if rel.key is None:
+            self.err(path + ".relation", f"'{r.relation}' has no key; an inclusion rule is a foreign key "
+                                         f"onto a pair of columns",
+                     f"name a relation with a key on '{rel.table}', or a foreign key the schema keeps")
+            return
         if rel.where is not None:
             self.err(path + ".relation", f"'{r.relation}' has a condition; an inclusion rule is a foreign "
                                          f"key, which references every row of '{rel.table}'",
@@ -1044,6 +1095,9 @@ class Checker:
                     self.err(path + ".column", f"unknown column '{p.column}'")
                 if p.relation not in self.spec.relations:
                     self.err(path + ".relation", f"unknown relation '{p.relation}'")
+                elif self.base_resolves(p.relation) and is_set(self.spec, p.relation):
+                    self.err(path + ".relation", f"'{p.relation}' has no key; tenant isolation is per key",
+                             "name a relation with a key column")
                 self.term_type(p.key, policy_scope(p.table), path + ".key")
                 if not isinstance(p.key, (CtxRef, Const)):
                     self.err(path + ".key", "the key must be a context value", "use {\"ctx\": name}")

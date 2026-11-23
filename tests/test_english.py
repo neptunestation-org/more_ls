@@ -81,3 +81,16 @@ def test_a_relation_not_looked_up_by_the_user_does_not_say_it_is():
         "tasks (done → id): for each done, done_task are the id of every tasks row with that done.")
     assert english.relation_line(spec, "member_of").startswith("team_members (user_id → team_id): a user's member_of")
     assert english.relation_line(spec, "in_project").endswith("whose team_id is among that user's member_of.")
+
+
+def test_a_set_relation_reads_as_the_rows_its_condition_keeps():
+    """#63: a relation without a key names no user, and a membership in it names the value only."""
+    from mls.english import relation_line, rule
+    from tests.templates import specs
+
+    spec = specs.set_spec()
+    assert relation_line(spec, "public_projects") == (
+        "projects (id): public_projects are the id of every projects row, where the projects row's public is true.")
+    assert relation_line(spec, "public_tasks").endswith("whose project_id is among the public_projects.")
+    r5 = next(r for r in spec.rules if r.id == "R5")
+    assert "the row's project_id is among the public_projects" in rule(spec, r5)

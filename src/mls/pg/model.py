@@ -20,6 +20,9 @@ from mls.spec.model import (
 Row = dict[str, Any]
 TV = bool | None
 
+# #63: the one key of a set relation's facts (no key column), as in the encoding
+SET_KEY = ("set relation",)
+
 
 @dataclass
 class Database:
@@ -88,7 +91,8 @@ def eval_pred(p: Pred, row: Row, ctx: dict[str, Any], db: Database,
         return {"=": lv == rv, "<>": lv != rv, "<": lv < rv, "<=": lv <= rv,
                 ">": lv > rv, ">=": lv >= rv}[op]
     if isinstance(p, Member):
-        k, v = term(p.member.key), term(p.member.value)
+        k = SET_KEY if p.member.key is None else term(p.member.key)
+        v = term(p.member.value)
         if k is None or v is None:
             return None
         return (k, v) in db.facts(p.member.relation)

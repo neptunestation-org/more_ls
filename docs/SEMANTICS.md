@@ -24,6 +24,7 @@ how to write them, and `docs/design/DECISIONS.md` why each choice was made.
 | `in(term, [c1, …, cn])` | sugar for `cmp(term, =, c1) ∨ … ∨ cmp(term, =, cn)`, expanded by the checker before encoding; compiled as `term in (c1, …, cn)` | `col` indexed (one `= any` condition) |
 | `member(rel, key=ctx, val=col)` | `(ctx, col) ∈ rel` | compiles to `col = any(array(select ...))` |
 | `member(R, key=ctx, val=col)`, `R` composed (§3.4) | `∃ t₁…tₙ: (ctx, t₁) ∈ base ∧ T₁(k₁ = t₁, v₁ = t₂) ∧ … ∧ Tₙ(kₙ = tₙ, vₙ = col)` | one nested `= any(array(select ...))` per level, each hop key indexed |
+| `member(S, val=col)`, `S` a relation without a key (`T(v) where p`) | `col ∈ S`: some stored `T` row has `v = col` and `T(p(row))` | `col = any((select mls_lookup_S())::t[])`, a definer helper without an argument |
 | `now_between(from_col, until_col)` | `from <= now < until`, NULL bound = open | indexed bounds or small row set |
 | `in_group(hierarchy, key=ctx, value=col)` | `∃ g: (ctx, g) ∈ members ∧ g = col ∨ g = parent(col) ∨ … ∨ g = parentᵈ(col)` (the row's group is one of the user's groups or lies below one, within depth d) | array InitPlan from a recursive CTE descending from the user's groups |
 | `is_null(col)` | two-valued | — |
@@ -302,7 +303,13 @@ All are "assumptions ∧ ¬goal is UNSAT"; SAT yields a counterexample rendered 
   row.key ∧ <the fact's conditions>` (a courier row whose `user_id` is NULL is nobody's).
   Without these a property over the relation table itself (`team_id in team_members(@uid)` on
   `team_members`) is refuted by a row the relation does not contain, a state no database can be
-  in.
+  in.  A relation without a key (a set, `T(v) where p`, `v` a single-column key of `T`) is encoded
+  as a relation whose every fact has one fixed key `κ`: `col ∈ S` is `S(κ, col)`, the row axiom
+  `S(κ, row.v) ⇔ ¬null(v) ∧ T(p(row))`, and a relation composed from it follows its hops from
+  `κ` as from any key.  A set is never read as the caller: its lookup always goes through a
+  helper (a visibility policy would grant every row the condition keeps), so it has no
+  visibility obligation in a compiled spec; an import reading one from a hand-written subquery
+  checks that the caller sees every row the condition keeps, as for any relation.
 - **Subset axioms:** two base relations over the same table, key and value, where every row
   that meets A's condition meets B's (B has none, or the solver proves `T(a(row)) → T(b(row))`
   under the table's row constraints): `∀x,y: A(x,y) → B(x,y)`.  The owners among a shop's admins,

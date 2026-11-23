@@ -643,3 +643,41 @@ def test_a_long_policy_name_keeps_its_role_suffix():
     assert len(first) == len(second) == 63 and first != second
     assert second.endswith("_authenticated")
     assert suffixed("short", "anon") == "short_anon"
+
+
+def shared_env() -> Env:
+    env = composed_env()
+    env.tables["projects"]["sharing"] = ("text", True)
+    env.invalidate()
+    return env
+
+
+NOT_PRIVATE = {"cmp": [{"col": "sharing"}, "<>", {"const": "private"}]}
+
+
+@pytest.mark.parametrize("text, table, hops", [
+    ("(project_id IN ( SELECT projects.id FROM projects WHERE (projects.sharing <> 'private'::text)))", "tasks", []),
+    ("(EXISTS ( SELECT 1 FROM projects p WHERE ((p.id = tasks.project_id) AND (p.sharing <> 'private'::text))))",
+     "tasks", []),
+    ("(task_id IN ( SELECT tasks.id FROM tasks WHERE (tasks.project_id IN ( SELECT projects.id FROM projects "
+     "WHERE (projects.sharing <> 'private'::text)))))", "comments", [("tasks", "project_id", "id")]),
+])
+def test_rows_of_a_parent_that_meet_a_condition_are_a_set(text, table, hops):
+    """#63: chatbot-ui's sharing: `col in (select id from parent where cond)` names no key, only the
+    parent rows its condition keeps, so it is a set relation (no key) of the parent's own key; its
+    correlated EXISTS twin is the same set, and a nested subquery is composed from it."""
+    env = shared_env()
+    r, _ = do(text, env=env, table=table)
+    assert r.kind == "lifted", r.reasons
+    assert "key" not in r.pred["member"]
+    name = r.pred["member"]["relation"]
+    of = env.composed[name][0] if hops else name
+    assert env.relations[of] == ("projects", None, "id") and env.conditions[of] == NOT_PRIVATE
+    assert list(env.composed[name][1]) == hops if hops else name not in env.composed
+
+
+def test_a_parent_condition_on_a_column_that_is_no_key_stays_opaque():
+    """A set's value must be a key of its table on its own: `team_id` of projects is not."""
+    r, _ = do("(team_id IN ( SELECT projects.team_id FROM projects WHERE (projects.sharing <> 'private'::text)))",
+              env=shared_env(), table="tasks")
+    assert r.kind == "opaque" and "no key of its own" in " ".join(r.reasons)

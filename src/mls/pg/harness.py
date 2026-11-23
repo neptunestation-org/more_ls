@@ -18,7 +18,7 @@ from psycopg import sql as psql
 from mls.compile.column import privileges
 from mls.compile.plan import Script
 from mls.identity import Adapter, get_adapter
-from mls.pg.model import Database, Oracle, Row, eval_pred, holds
+from mls.pg.model import SET_KEY, Database, Oracle, Row, eval_pred, holds
 from mls.props.effective import simple_fks
 from mls.spec.chain import levels
 from mls.spec.model import CONTEXT_NOW, INT_RANGE, Spec
@@ -41,6 +41,9 @@ class Dataset:
             if rel.where is not None:  # D61: the rows where the condition is TRUE
                 rows = [r for r in rows if eval_pred(rel.where, r, {}, bare) is True]
             # #49: a row with NULL in the key or the value is no pair
+            if rel.key is None:  # #63: a set's facts have the one key SET_KEY
+                rels[name] = {(SET_KEY, r[rel.value]) for r in rows if r[rel.value] is not None}
+                continue
             rels[name] = {(r[rel.key], r[rel.value]) for r in rows
                           if r[rel.key] is not None and r[rel.value] is not None}
         return Database(rels, {t: list(rows) for t, rows in self.tables.items()}, spec=spec)
@@ -224,7 +227,8 @@ def user_columns(spec: Spec, adapter: Adapter) -> set[tuple[str, str]]:
                     out.add((pol.table, l.col))
     for rname in rel_keys:
         rel = levels(spec, rname)[0]
-        out.add((rel.table, rel.key))
+        if rel.key is not None:
+            out.add((rel.table, rel.key))
         for inc in spec.inclusions():
             if inc.relation == rname:
                 out.add((inc.table, inc.columns[0]))
@@ -256,8 +260,10 @@ def chained_columns(spec: Spec) -> dict[str, dict[str, tuple[str, str]]]:
                 # (after a hop up a foreign key the chain's values already refer to this column)
                 # #49: a base relation whose key is nullable too, so that rows with a NULL key
                 # are actually named (and a lookup that took them would show)
-                nullable_key = len(lv) == 1 and spec.tables[lv[0].table].columns[lv[0].key].nullable
-                if (len(lv) > 1 or nullable_key) and isinstance(m.value, ColRef) and pol.table != lv[-1].table \
+                nullable_key = len(lv) == 1 and lv[0].key is not None \
+                    and spec.tables[lv[0].table].columns[lv[0].key].nullable
+                # #63: a set's members are the parent rows' keys, which the row should mostly name
+                if (len(lv) > 1 or nullable_key or lv[0].key is None) and isinstance(m.value, ColRef) and pol.table != lv[-1].table \
                         and not is_up(spec, lv[-1]):
                     out.setdefault(pol.table, {})[m.value.col] = (lv[-1].table, lv[-1].value)
     return out
@@ -312,7 +318,7 @@ def generate_dataset(spec: Spec, adapter: Adapter, rnd: Chooser, rows_per_table:
                 continue
             rows.append(r)
         for rname, rel in spec.base_relations().items():
-            if rel.table == table:
+            if rel.table == table and rel.key is not None:  # a set is no inclusion target
                 gen.facts[rname] = [(r[rel.key], r[rel.value]) for r in rows]
     return ds
 

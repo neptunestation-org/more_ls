@@ -35,7 +35,7 @@ class Use:
     relation: str
     tables: tuple[str, ...]   # the relation's levels' tables, base first
     reads_rows: bool    # a SELECT (or FOR ALL) policy's USING: a step of a later lookup's expansion
-    const_key: bool = False   # keyed by a constant, not a context value
+    const_key: bool = False   # keyed by a constant, not a context value; or a set (#63), no key
 
 
 def members(p: Pred | None, out: list[MemberBody]) -> list[MemberBody]:
@@ -64,7 +64,8 @@ def uses(spec: Spec) -> list[Use]:
         for expr, steps in exprs:
             for m in members(expr, []):
                 lv = tuple(lvl.table for lvl in levels(spec, m.relation))
-                out.append(Use(role, table, r.id, m.relation, lv, steps, isinstance(m.key, Const)))
+                out.append(Use(role, table, r.id, m.relation, lv, steps,
+                               m.key is None or isinstance(m.key, Const)))
     return out
 
 

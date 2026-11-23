@@ -236,7 +236,8 @@ def test_import_of_the_brownfield_fixture(brownfield):
     o = spec.opaques[by_name["only_open_projects"].check.opaque]
     assert o.columns == ["project_id"] and o.context == [] and "projects" in o.sql
     assert list(spec.opaques) == [by_name["only_open_projects"].check.opaque]
-    assert any("only open projects" in n and "membership WHERE is not `key = <ctx>`" in n for n in res.notes)
+    # #63: no key over a key of projects is a set; its condition, a LIKE, is what stays out
+    assert any("only open projects" in n and "LIKE" in n for n in res.notes), [n for n in res.notes if "open" in n]
     assert any(n.startswith("lint:") and "auth.uid()" in n and "index-friendly" in n for n in res.notes)
     assert any(n.startswith("lint:") and "correlated EXISTS" in n for n in res.notes)
     # the CHECKs over NOT NULL columns are check rules; the trigger is listed
