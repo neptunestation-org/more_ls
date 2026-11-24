@@ -41,6 +41,8 @@ def assumptions(spec: Spec, results: list[PropertyResult]) -> list[str]:
                "remain trusted")
     if adapter.trusted_note:
         trusted += f"; {adapter.trusted_note}"
+    if adapter.service_note and any(r in spec.roles for r in adapter.service_roles):
+        trusted += f"; {adapter.service_note}"
     if internal:
         trusted += ("; the internal role mls_internal owns the generated SECURITY DEFINER helpers "
                     "(group reachability, depth and counting triggers) and may read the tables they "

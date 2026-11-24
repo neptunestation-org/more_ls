@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 
+import psycopg
 import pytest
 
 from mls.compile import compile_spec
@@ -71,3 +72,34 @@ def test_drift_is_clean(deployed):
     name, spec, h = deployed
     res = drift(h.conn, spec, compile_spec(spec))
     assert res.ok, [str(i) for i in res.items]
+
+
+def test_the_platform_service_roles_deploy_and_keep_their_rules(supabase):
+    """#68: authenticator (a member of service_role) and supabase_auth_admin (CREATEROLE, reserved)
+    are named by a spec's rules: the deploy, as postgres, leaves both roles alone, keeps their
+    policies, and drift is clean; the differential test agrees for every role."""
+    from mls.spec import check_spec
+    from mls.spec.syntax import parse
+    from tests.props.test_properties import SERVICE
+
+    spec = check_spec(parse(SERVICE % ""))
+    h = Harness(spec, compile_spec(spec), supabase.dsn, "mls_supa_service", prepare=supabase.prepare)
+    try:
+        h.deploy()
+        with h.conn.cursor() as cur:
+            cur.execute("select rolcreaterole from pg_roles where rolname = 'supabase_auth_admin'")
+            assert cur.fetchone() == (True,)
+            cur.execute("select roles::text[] from pg_policies where tablename = 'claims' order by policyname")
+            assert ["authenticator"] in [r[0] for r in cur.fetchall()]
+        res = drift(h.conn, spec, compile_spec(spec))
+        assert res.ok, [str(i) for i in res.items]
+        # the harness acts as each role by SET ROLE; only the image's superuser may grant that one
+        with psycopg.connect(supabase.admin_dsn, autocommit=True) as admin:
+            admin.execute("grant supabase_auth_admin to postgres")
+        diff = run_differential(spec, h.script, h.dsn, h.dbname, harness=h, seed=1,
+                                rows_per_table=20, n_contexts=8, ops_per_context=15)
+        assert diff.ok, diff.summary()
+    finally:
+        h.close()
+        with psycopg.connect(supabase.admin_dsn, autocommit=True) as admin:
+            admin.execute("revoke supabase_auth_admin from postgres")

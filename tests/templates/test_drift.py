@@ -30,6 +30,11 @@ TAMPER = {
     "trigger_body": ('create or replace function "mls_tr_docs_tenant_immutable"() returns trigger language plpgsql '
                      'as $$ begin return new; end $$', "differs: function mls_tr_docs_tenant_immutable"),
     "bypassrls": ('alter role "authenticated" bypassrls', "role authenticated has BYPASSRLS"),
+    # #68: an app role that can become a role bypassing the policies, directly or through another
+    "escalation": ('create role mls_esc_bypass bypassrls; create role mls_esc_mid; '
+                   'grant mls_esc_bypass to mls_esc_mid; grant mls_esc_mid to "authenticated"',
+                   "role authenticated can become mls_esc_bypass, which bypasses the policies"),
+    "createrole": ('alter role "authenticated" createrole', "role authenticated has CREATEROLE"),
     "dropped_column": ('alter table "docs" drop column "archived" cascade', "missing: column docs.archived"),
     "nullability": ('alter table "docs" alter column "level" drop not null', "differs: column docs.level"),
 }

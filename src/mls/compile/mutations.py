@@ -15,6 +15,7 @@ class Mutation(str, Enum):
     TIME_NULL_CLOSED = "time_null_closed"            # NULL bound closes the interval
     INDEX_NONE = "index_none"                        # emit no indexes
     HARDENING_NO_FORCE = "hardening_no_force"        # skip FORCE ROW LEVEL SECURITY
+    ROLE_ESCALATION_UNCHECKED = "role_escalation_unchecked"  # #68: deploy an app role that can become a bypassing role
     OPAQUE_INVERT = "opaque_invert"                  # negate opaque SQL
     MIGRATE_SKIP_VALIDATE = "migrate_skip_validate"  # leave migrated constraints NOT VALID
     HIERARCHY_SHALLOW = "hierarchy_shallow"          # reach one level less than max_depth

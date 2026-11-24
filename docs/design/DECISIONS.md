@@ -1853,3 +1853,26 @@ members).  The oracle already refused it; only the proof was unsound.
   that omit a column: they are right for update-only roles.
 - A guard (`when`) is a trigger on updates and never limits an insert; the loop's repair uses it
   when the requirement speaks of edits only.
+
+**D90. Supabase's service roles are trusted but keep their rules (#68; amends D87).**  The
+supabase-tenant-rbac deploy stopped on `alter role supabase_auth_admin nocreaterole`: Supabase
+reserves the role and it really has CREATEROLE.  And `authenticator` is a member of `service_role`
+(BYPASSRLS), so the proved "authenticator may only read user_claims" was false in Postgres: no
+check looked at an app role's memberships (drift did only for `mls_internal`).
+- *Rule:* an adapter may declare platform service roles (`Adapter.service_roles`; Supabase:
+  `authenticator`, `supabase_auth_admin`).  A spec names them like any role and their rules
+  compile, so the API's pre-request hook and the auth hook keep their reads (D87's reason for not
+  trusting them stands).  But they can act as a trusted role, so they are trusted:
+  `identity.base.bounded_roles` leaves them out of tenant_isolation, write_subset_read,
+  column_immutable, monotone_in and least_privilege; the checker refuses custom, changes_only,
+  role_separation and a least_privilege allowance naming one; the report's trusted roles name
+  them; the deploy creates them if missing and never alters them.
+- Every other app role that can become (`pg_has_role(.., 'MEMBER')`, so through other roles too) a
+  BYPASSRLS or superuser role is refused: the deploy raises with the membership and the fix
+  (`hardening.escalation_check_ddl`, mutation `ROLE_ESCALATION_UNCHECKED`), `check --dsn` reports
+  it (`adopt.role_escalation_errors`), drift reports it and CREATEROLE as `hardening`.
+- *Rejected:* trusting them like `service_role` (their policies would be dropped, D87);
+  refusing them (the takeover could not deploy, and GoTrue's hook would lose its read);
+  dropping them from the spec (same).
+- `must_allow` about a service role still proves: what the platform needs from its policies is
+  a lower bound, and the rules deliver it whatever else the role can do.

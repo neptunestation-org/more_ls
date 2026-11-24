@@ -24,7 +24,8 @@ def test_phases_and_ordering():
     names = [p.name for p in m.phases]
     assert names == ["schema", "constraints", "indexes", "validate", "swap", "cleanup", "destructive"]
     assert [p.transactional for p in m.phases] == [True, True, False, False, True, False, True]
-    assert kinds(m, "schema")[:2] == ["create table", "create table"]  # owner guard, then the new table
+    # the owner guard, the kept roles' re-check (#68), then the new table
+    assert [k for k in kinds(m, "schema") if k != "check role"][:2] == ["create table", "create table"]
     assert "add column" in kinds(m, "schema")
     assert kinds(m, "constraints").count("add check not valid") == 3 and "replace function" in kinds(m, "constraints")
     assert kinds(m, "indexes") == ["create index concurrently"]

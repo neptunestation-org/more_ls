@@ -348,8 +348,10 @@ two-valued `p2 ∧ ¬p1` UNSAT is wrong where `p1` is UNKNOWN on a row `p2` admi
 
 ## 8. Explicit assumptions in every proof report
 
-Identity adapter assumption; trusted roles (owner, superuser, and the internal role `mls_internal`
-that owns the SECURITY DEFINER helpers) after hardening; the `assume` entries of adopted tables
+Identity adapter assumption; trusted roles (owner, superuser, the internal role `mls_internal`
+that owns the SECURITY DEFINER helpers, and the platform's service roles, which can act as a
+trusted role: their rules are deployed and their lower bounds proved, but no upper bound speaks
+for them) after hardening; the `assume` entries of adopted tables
 (an app-role owner, unforced row-level security, an app role with BYPASSRLS, each trusted),
 and the lists of adopted and observed tables; isolation level for non-engine-enforced
 constructs (cardinality relies on the parent-row lock under READ COMMITTED); opaque blocks used,

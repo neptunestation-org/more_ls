@@ -1174,6 +1174,7 @@ class Checker:
                 for role, tabs in p.allowed.items():
                     if role not in self.spec.roles:
                         self.err(f"{path}.allowed.{role}", f"unknown role '{role}'")
+                    self.service_role(role, f"{path}.allowed.{role}", "least_privilege")
                     for t in tabs:
                         if t not in self.spec.tables:
                             self.err(f"{path}.allowed.{role}.{t}", f"unknown table '{t}'")
@@ -1219,6 +1220,7 @@ class Checker:
             elif isinstance(p, ChangesOnly):
                 if p.role not in self.spec.roles:
                     self.err(path + ".role", f"unknown role '{p.role}'")
+                self.service_role(p.role, path + ".role", "changes_only")
                 cols = self.spec.tables[p.table].columns
                 for j, c in enumerate(p.columns):
                     if c not in cols:
@@ -1229,6 +1231,7 @@ class Checker:
             elif isinstance(p, Custom):
                 if p.role not in self.spec.roles:
                     self.err(path + ".role", f"unknown role '{p.role}'")
+                self.service_role(p.role, path + ".role", "custom")
                 self.pred(p.goal, goal_scope(p.table), path + ".goal")
             elif isinstance(p, MustAllow):
                 if p.role not in self.spec.roles:
@@ -1238,6 +1241,16 @@ class Checker:
                 for j, role in enumerate(p.roles):
                     if role not in self.spec.roles:
                         self.err(f"{path}.roles[{j}]", f"unknown role '{role}'")
+                    self.service_role(role, f"{path}.roles[{j}]", "role_separation")
+
+    def service_role(self, role: str, path: str, template: str) -> None:
+        """#68: no upper bound holds for a platform service role (it can act as a trusted role)."""
+        from mls.identity import get_adapter
+
+        if role in self.spec.roles and role in get_adapter(self.spec).service_roles:
+            self.err(path, f"'{role}' is a platform service role: it can act as a trusted role, so a "
+                           f"{template} property cannot bound what it reaches",
+                     f"state what it must be able to do with must_allow, and leave it out of {template}")
 
 
 def fk_cycle_errors(spec: Spec, database: list) -> list[MlsError]:

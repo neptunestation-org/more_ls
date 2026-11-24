@@ -1022,7 +1022,8 @@ def database_checks(conn: psycopg.Connection, schema: str = "public"):
 
 def verify_adopted(conn: psycopg.Connection, spec: Spec, schema: str = "public") -> list[MlsError]:
     """`mls check --dsn`: every adopted table exists with the columns and types the spec declares,
-    every observed table exists, and no owned table is owned by an app role (D45)."""
+    every observed table exists, no owned table is owned by an app role (D45), and no app role can
+    become a role that bypasses the policies (#68)."""
     errors: list[MlsError] = database_checks(conn, schema)(spec)
     with conn.transaction():
         cat = _read(conn, schema)
@@ -1074,7 +1075,29 @@ def verify_adopted(conn: psycopg.Connection, spec: Spec, schema: str = "public")
                                                                    f"catalog, declared {col.type}",
                                        f"declare it as {mls_type(lc['type']) or 'a type MLS does not model'}",
                                        "check"))
-    return errors
+    return errors + role_escalation_errors(conn, spec)
+
+
+def role_escalation_errors(conn: psycopg.Connection, spec: Spec) -> list[MlsError]:
+    """#68, for `check --dsn`: an app role (not a platform service role) that can become a role
+    bypassing the policies; no upper bound about it would hold, and the deploy refuses it.
+    (CREATEROLE the deploy removes, and drift reports it after.)"""
+    from mls.compile.hardening import CAN_BECOME
+    from mls.identity.base import bounded_roles
+
+    bounded = bounded_roles(spec)
+    with conn.cursor() as cur:
+        cur.execute("""select a.rolname, b.rolname from pg_roles a join pg_roles b
+                         on b.oid <> a.oid and (b.rolbypassrls or b.rolsuper)
+                        and """ + CAN_BECOME.format(a="a.oid", b="b.oid") + """
+                       where a.rolname = any(%s) order by 1, 2""", (bounded,))
+        found = cur.fetchall()
+    return [MlsError(f"$.roles[{spec.roles.index(r)}]",
+                     f"app role '{r}' can become '{x}', which bypasses the policies, so no property can "
+                     f"bound what '{r}' reaches",
+                     f"revoke '{x}' from '{r}' (and through every role between), or take '{r}' out of the "
+                     f"roles if it is meant to be trusted", "check")
+            for r, x in found]
 
 
 def _hidden_memberships(spec: Spec, lifted: list[dict]) -> dict[tuple[str, str], set[str]]:

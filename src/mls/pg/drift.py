@@ -194,6 +194,7 @@ def compare(spec: Spec, expected: Snapshot, actual: Snapshot) -> tuple[list[Drif
     items: list[DriftItem] = []
     notes: list[str] = []
     trusted = get_adapter(spec).trusted_roles
+    service = get_adapter(spec).service_roles
     for name, labels in spec.enums.items():  # D59: the database owns the type; the spec states its labels
         live = actual.get("enums", {}).get(name)
         if live is None:
@@ -291,10 +292,18 @@ def compare(spec: Spec, expected: Snapshot, actual: Snapshot) -> tuple[list[Drif
                 if _assumed(spec, t, BypassAssumed, r):
                     notes.append(f"role '{r}' has no BYPASSRLS now; the assumption {{\"bypassrls\": \"{r}\"}} on "
                                  f"table '{t}' is no longer needed")
+        if r in service:  # #68: the platform's own role; the deploy never alters it
+            continue
         if a["super"]:
             items.append(DriftItem("hardening", f"role {r} is a superuser"))
         if a["can_set_replication_role"]:
             items.append(DriftItem("hardening", f"role {r} may SET session_replication_role"))
+        if r in spec.roles:  # #68: an app role that can act as a trusted one
+            for x in a.get("escalates_to", []):
+                items.append(DriftItem("hardening", f"role {r} can become {x}, which bypasses the policies "
+                                                    f"(fix: revoke {x} from {r}, through every role between)"))
+            if a.get("createrole"):
+                items.append(DriftItem("hardening", f"role {r} has CREATEROLE"))
         if spec.identity.adapter == "session_setting" and r in spec.roles:  # D47
             for fn in a["app_setters"]:
                 items.append(DriftItem("hardening", f"role {r} may execute {fn}, which sets app.*"))

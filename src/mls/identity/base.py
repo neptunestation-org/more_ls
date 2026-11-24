@@ -21,6 +21,11 @@ class Adapter(ABC):
     platform_roles: tuple[str, ...] = ()
     trusted_roles: tuple[str, ...] = ()
     trusted_note: str = ""
+    # #68: the platform's own service roles.  They log in and reach rows through their own rules,
+    # which a spec states and the compiler keeps, but they can act as a trusted role (become one,
+    # or create roles), so no upper bound holds for them and the deploy never alters them.
+    service_roles: tuple[str, ...] = ()
+    service_note: str = ""
 
     def __init__(self, spec: Spec):
         self.spec = spec
@@ -51,6 +56,12 @@ class Adapter(ABC):
     @abstractmethod
     def user_context_name(self) -> str | None:
         """The context name that identifies the user (auth.uid / current_user), if declared."""
+
+
+def bounded_roles(spec: Spec) -> list[str]:
+    """The roles an upper bound speaks for (#68): the spec's roles but the platform's service roles."""
+    service = get_adapter(spec).service_roles
+    return [r for r in spec.roles if r not in service]
 
 
 def get_adapter(spec: Spec) -> Adapter:

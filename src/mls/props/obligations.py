@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from mls.compile.column import privileges
+from mls.identity.base import bounded_roles
 from mls.logic.term import (
     FALSE, TRUE, Sort, Term, Var, and_, eq, forall, fun, iff, implies, int_var, le, not_, or_,
 )
@@ -370,7 +371,7 @@ def _all_relations(spec: Spec, table: str, role: str, cmd: str) -> list[tuple[st
 def tenant_isolation(spec: Spec, p: TenantIsolation) -> list[Obligation]:
     out = []
     goal_pred = Member(member=MemberBody(relation=p.relation, key=p.key, value=ColRef(col=p.column)))
-    for role in spec.roles:
+    for role in bounded_roles(spec):  # #68
         for cmd in p.commands:
             enc = Encoder(spec)
             if cmd == "select":
@@ -393,7 +394,7 @@ def tenant_isolation(spec: Spec, p: TenantIsolation) -> list[Obligation]:
 def column_immutable(spec: Spec, p: ColumnImmutable) -> list[Obligation]:
     out = []
     nullable = spec.tables[p.table].columns[p.column].nullable
-    for role in spec.roles:
+    for role in bounded_roles(spec):  # #68
         enc = Encoder(spec)
         assumptions = update_assumptions(enc, spec, p.table, role)
         ov, nv = col_value_var("old", p.column), col_value_var("new", p.column)
@@ -447,7 +448,7 @@ def monotone_in(spec: Spec, p: MonotoneIn) -> list[Obligation]:
     big, small = rel_fun(p.relation, "big"), rel_fun(p.relation, "small")
     shrink = forall([u, t], implies(small(u, t), big(u, t)))
     for table in spec.tables:
-        for role in spec.roles:
+        for role in bounded_roles(spec):  # #68
             for cmd, which in (("select", "using"), ("insert", "check"), ("update", "using"),
                                ("update", "check"), ("delete", "using")):
                 pred = effective(spec, table, role, cmd, which)
@@ -476,7 +477,7 @@ def monotone_in(spec: Spec, p: MonotoneIn) -> list[Obligation]:
 
 def write_subset_read(spec: Spec, p: WriteSubsetRead) -> list[Obligation]:
     out = []
-    for role in spec.roles:
+    for role in bounded_roles(spec):  # #68
         sel = effective(spec, p.table, role, "select", "using")
         enc = Encoder(spec)
         out.append(Obligation(
@@ -495,7 +496,10 @@ def write_subset_read(spec: Spec, p: WriteSubsetRead) -> list[Obligation]:
 
 def least_privilege(spec: Spec, p: LeastPrivilege) -> list[Obligation]:
     extra = []
+    bounded = set(bounded_roles(spec))  # #68: a service role's grants bound nothing it can reach
     for (role, table), g in sorted(privileges(spec).items()):
+        if role not in bounded:
+            continue
         allowed = set(p.allowed.get(role, {}).get(table, []))
         for cmd, cols in g.items():
             if cmd not in allowed:
@@ -909,7 +913,7 @@ def cascade_obligations(spec: Spec) -> list[Obligation]:
             continue
         rel = spec.relations[inc.relation]
         parent, child = rel.table, inc.table
-        for role in spec.roles:
+        for role in bounded_roles(spec):  # #68: a service role is trusted
             if "delete" not in privs.get((role, parent), {}):
                 continue
             enc = Encoder(spec)
@@ -969,7 +973,7 @@ def _set_null_obligations(spec: Spec, inc: InclusionRule, privs: dict) -> list[O
                         f"such a delete would fail",
         fix=f"let the checks and transition rules on '{child}' allow {c0} to become NULL with every other "
             f"column unchanged, or use on_delete restrict").finish()]
-    for role in spec.roles:
+    for role in bounded_roles(spec):  # #68
         if "delete" not in privs.get((role, parent), {}):
             continue
         enc = Encoder(spec)

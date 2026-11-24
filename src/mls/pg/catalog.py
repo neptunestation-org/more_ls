@@ -11,6 +11,8 @@ from typing import Any
 import psycopg
 from psycopg import sql as psql
 
+from mls.compile.hardening import CAN_BECOME  # #68
+
 Snapshot = dict[str, Any]
 
 
@@ -99,7 +101,11 @@ def snapshot(conn: psycopg.Connection, schema: str, tables: list[str], roles: li
             cur.execute("""select rolbypassrls, rolsuper, rolcanlogin,
                                   has_parameter_privilege(rolname, 'session_replication_role', 'SET'),
                                   array(select m.rolname from pg_auth_members am join pg_roles m on m.oid = am.member
-                                        where am.roleid = pg_roles.oid order by 1)
+                                        where am.roleid = pg_roles.oid order by 1),
+                                  rolcreaterole,
+                                  array(select x.rolname from pg_roles x
+                                        where x.oid <> pg_roles.oid and (x.rolbypassrls or x.rolsuper)
+                                          and """ + CAN_BECOME.format(a="pg_roles.oid", b="x.oid") + """ order by 1)
                            from pg_roles where rolname = %s""", (r,))
             row = cur.fetchone()
             if row is None:
@@ -118,6 +124,7 @@ def snapshot(conn: psycopg.Connection, schema: str, tables: list[str], roles: li
             defaults = cur.fetchone()[0] or []
             out["roles"][r] = {"bypassrls": row[0], "super": row[1], "login": row[2],
                                "can_set_replication_role": row[3], "members": list(row[4]),
+                               "createrole": row[5], "escalates_to": list(row[6]),  # #68
                                "app_setters": setters, "app_defaults": list(defaults)}
     return out
 

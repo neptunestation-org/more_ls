@@ -16,6 +16,12 @@ class SupabaseAdapter(Adapter):
     trusted_roles = ("service_role",)
     trusted_note = ("service_role has BYPASSRLS (Supabase's backend key) and is trusted: it reads and "
                     "writes every row whatever the policies say")
+    service_roles = ("authenticator", "supabase_auth_admin")
+    service_note = ("authenticator (the API's login, which can become service_role) and "
+                    "supabase_auth_admin (the auth service, which can create roles) are the platform's "
+                    "service roles and are trusted: their own rules are deployed and what they must be "
+                    "able to do is proved, but no property bounds what they can reach, and the deploy "
+                    "never alters them")
     assumption = ("Clients reach the database only through Supabase's API layer, which verifies "
                   "the JWT before setting request.jwt.claims; direct database connections by "
                   "untrusted clients are out of scope.")

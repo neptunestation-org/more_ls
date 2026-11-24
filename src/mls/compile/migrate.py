@@ -29,11 +29,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from mls.compile.hardening import (APP_ROLE_ATTRIBUTES, platform_table_revokes, preamble_ddl, revoke_platform_ddl,
-                                   role_attributes_ddl)
+from mls.compile.hardening import (app_role_ddl, escalation_check_ddl, platform_table_revokes, preamble_ddl,
+                                   revoke_platform_ddl)
 from mls.compile.index import index_sql
 from mls.compile.internal import function_owner_ddl, internal_role_ddl
 from mls.compile.mutations import Mutation
+from mls.identity import get_adapter
 from mls.compile.objects import GrantObj, Objects, objects
 from mls.compile.sql import q
 from mls.errors import CompileError, MlsError
@@ -43,6 +44,7 @@ from mls.spec.model import Spec
 # (None: no lock on a user table outlives the statement; GRANT/REVOKE only update catalog rows)
 LOCKS: dict[str, str | None] = {
     "create role": None,
+    "check role": None,  # #68: reads pg_roles, raises; takes no table lock
     "create table": None,
     "revoke all": None,
     "enable rls": "AccessExclusiveLock",
@@ -188,10 +190,8 @@ def migrate(old: Spec, new: Spec, allow_destructive: bool = False,
     # ---- 1. schema
     for r in n.roles:
         if r not in o.roles:
-            schema.add(f"do $mls$ begin\n  if not exists (select 1 from pg_roles where rolname = '{r}') then\n"
-                       f"    create role {q(r)} nologin;\n  end if;\nend $mls$", "create role")
-            schema.add(role_attributes_ddl(r, APP_ROLE_ATTRIBUTES), "create role")
-            schema.add(f"revoke set on parameter session_replication_role from {q(r)}", "create role")
+            for st in app_role_ddl(new, r, mutations):  # #68: a service role is never altered
+                schema.add(st, "create role")
     for r in o.roles:
         if r not in n.roles:
             m.notes.append(f"role '{r}' is no longer used by the spec; roles are global and are not dropped")
@@ -338,7 +338,11 @@ def migrate(old: Spec, new: Spec, allow_destructive: bool = False,
         if name not in n.functions:
             used_by_dropped = any(p.table not in n.tables and q(name) in p.ddl for p in o.policies.values())
             (destr if used_by_dropped else swap).add(f"drop function {f.signature}", "drop function", None, f.rule_id)
-    if not m.empty:  # the owner guard comes first
+    if not m.empty:  # the owner guard comes first, then (#68) the kept roles' re-check: since the
+        # last deploy one may have gained a way to a bypassing role (a new role is checked as created)
+        kept = [r for r in n.roles if r in o.roles and r not in get_adapter(new).service_roles]
+        if Mutation.ROLE_ESCALATION_UNCHECKED not in mutations:
+            schema.statements[0:0] = [MStatement(escalation_check_ddl(r), "check role") for r in kept]
         schema.statements.insert(0, MStatement(preamble_ddl(new)[0], "create table"))
     if destr.statements and not allow_destructive:
         kept = [s.sql for s in destr.statements]

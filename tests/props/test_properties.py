@@ -737,3 +737,76 @@ def test_the_array_fixture_proves():
     from tests.templates.specs import array_spec
 
     assert set(verdicts(array_spec()).values()) == {"PROVED"}, verdicts(array_spec())
+
+
+SERVICE = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated, authenticator, supabase_auth_admin
+
+table members adopted {
+  user_id uuid not null,
+  team_id int not null;
+  primary_key (user_id, team_id);
+  assume ('rls not_forced')
+}
+
+table claims adopted {
+  user_id uuid not null,
+  team_id int not null,
+  secret text;
+  primary_key (user_id);
+  assume ('rls not_forced')
+}
+
+relation member_of = members(user_id, team_id)
+
+rules {
+  R0 policy own_rows on members: authenticated select permissive using user_id = @uid
+  R1 policy own on claims: authenticated select permissive using member_of(@uid, team_id)
+  R2 policy hook on claims: authenticator select permissive using true
+  R3 policy auth_hook on claims: supabase_auth_admin select permissive using true
+}
+
+properties {
+  P1 tenant_isolation claims: team_id in member_of(@uid) for select, insert, update, delete
+  P2 write_subset_read claims
+  P3 column_immutable claims: secret
+  P4 least_privilege: authenticated claims[select]; authenticated members[select]
+  P5 must_allow claims authenticator select: true
+%s}
+"""
+
+
+def test_supabase_service_roles_are_trusted_but_keep_their_rules():
+    """#68: authenticator can become service_role and supabase_auth_admin can create roles, so no
+    upper bound holds for them: tenant isolation, write ⊆ read, immutable columns and the least
+    privilege leave them out, an upper bound naming one is refused, and the report says they are
+    trusted.  Their own rules still compile and their lower bounds still prove."""
+    from mls.errors import SpecError
+    from mls.props.report import assumptions
+    from mls.spec.syntax import parse
+
+    spec = check_spec(parse(SERVICE % ""))
+    results = run_all(spec)
+    assert {r.id: r.verdict for r in results} == {"P1": "PROVED", "P2": "PROVED", "P3": "PROVED",
+                                                    "P4": "PROVED", "P5": "PROVED"}
+    trust = " ".join(assumptions(spec, results))
+    assert "authenticator" in trust and "supabase_auth_admin" in trust and "service_role" in trust
+    assert any("authenticator" in s.sql for s in compile_spec(spec).statements if "create policy" in s.sql.lower())
+
+    with pytest.raises(SpecError) as ei:
+        check_spec(parse(SERVICE % "  P6 changes_only claims authenticator: user_id\n"))
+    e = ei.value.errors[0]
+    assert e.path == "$.properties[5].role" and "authenticator" in e.message and "must_allow" in e.fix
+    # a service role the spec does not declare is only unknown (one error, one fix)
+    text = (SERVICE % "").replace("roles authenticated, authenticator, supabase_auth_admin", "roles authenticated")
+    text = text[:text.index("rules {")] + "rules {\n}\n\nproperties {\n  P1 least_privilege: authenticator claims[select]\n}\n"
+    with pytest.raises(SpecError) as ei:
+        check_spec(parse(text))
+    assert [x.message for x in ei.value.errors] == ["unknown role 'authenticator'"]
+    # a migration re-checks the roles it keeps: they may have gained a way to a bypassing role
+    from mls.compile.migrate import migrate
+    assert migrate(spec, spec).empty
+    grown = check_spec(parse((SERVICE % "").replace("  secret text;", "  secret text,\n  note text;")))
+    sql = migrate(spec, grown).sql()
+    assert "app role authenticated can become" in sql and "app role authenticator can become" not in sql

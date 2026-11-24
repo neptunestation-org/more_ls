@@ -114,6 +114,12 @@ def test_check_dsn_verifies_adopted_tables(adopted, tmp_path, capsys):
     paths = {e.path: e for e in errs}
     assert "adopted table 'docs' has no column 'archived'" in paths["$.tables.docs.columns.archived"].message
     assert "text in the catalog, declared int" in paths["$.tables.docs.columns.note.type"].message
+    # #68: an app role that can become a role bypassing the policies is refused, with the way out
+    with h.conn.transaction(force_rollback=True):
+        with h.conn.cursor() as cur:
+            cur.execute('create role mls_chk_bypass bypassrls; grant mls_chk_bypass to "authenticated"')
+        esc = [e for e in verify_adopted(h.conn, spec) if e.path.startswith("$.roles")]
+    assert len(esc) == 1 and "can become 'mls_chk_bypass'" in esc[0].message and "revoke" in esc[0].fix, esc
     # the same table declared owned, while an app role owns it: refused with the fix
     owned = specs.policy_spec()
     errs = verify_adopted(h.conn, owned)

@@ -148,14 +148,28 @@ the spec does not use; `service_role` is the platform's trusted role (BYPASSRLS 
 backend key) and is kept, named among the trusted roles of every proof report, and not compared
 by `mls drift`.
 
+`supabase` also declares two platform service roles: `authenticator`, the API's login (a member
+of `service_role`, so it can become it), and `supabase_auth_admin`, the auth service (it has
+`CREATEROLE`).  A spec may name them in its roles and give them rules, such as their reads of a
+claims table: the rules are deployed and `must_allow` properties about them prove as for any
+role.  But they can act as a trusted role, so they are trusted: every proof report says so,
+`tenant_isolation`, `write_subset_read`, `column_immutable`, `monotone_in` and
+`least_privilege` leave them out, a `custom`, `changes_only` or `role_separation` property, or a
+`least_privilege` allowance, that names one is an error, and the deploy never alters them
+(Supabase reserves them).
+
 ## 4. `roles`
 
     "roles": ["authenticated", "service"]
 
 The Postgres roles the policies are written for.  The compiler creates a role if it does not
 exist (`NOLOGIN`), and in every case removes `BYPASSRLS`, `SUPERUSER`, `CREATEDB` and
-`CREATEROLE` from it and revokes `SET` on `session_replication_role`.  A role has a privilege
-on a table only through its policies (§11.1) and column rules (§11.6).
+`CREATEROLE` from it and revokes `SET` on `session_replication_role`.  A role that can become,
+directly or through other roles (`SET ROLE` to it; on PG 15, any membership), a role with
+`BYPASSRLS` or `SUPERUSER` is refused: the deploy, and a migration for the roles it keeps, stops
+with the membership and the fix, `mls check --dsn` reports it first, and `mls drift`
+reports it later.  The platform's service roles (§3) are neither altered nor refused.  A role
+has a privilege on a table only through its policies (§11.1) and column rules (§11.6).
 
 The compiler also creates `mls_internal` when a hierarchy, a cardinality limit or a lookup helper
 (§6) needs it (§14).
@@ -1062,7 +1076,8 @@ name them in, so the index set does not depend on rule order.
 Hardening, on every deployment: the preamble refuses to run as an app role; app roles
 lose `BYPASSRLS`, `SUPERUSER`, `CREATEDB`, `CREATEROLE` and `SET` on `session_replication_role`
 (one `ALTER ROLE` per attribute the role has, so a role that has none is not altered: Supabase
-refuses any `ALTER ROLE` on its API roles); the helpers' ownership moves to `mls_internal`
+refuses any `ALTER ROLE` on its API roles; its service roles are not touched at all), and an app
+role that can become a role with `BYPASSRLS` or `SUPERUSER` stops the deploy; the helpers' ownership moves to `mls_internal`
 with `CREATE` on the schema granted for the transfer only (a non-superuser deployer needs it on
 PG 15+); the platform's untrusted roles lose their default privileges (§3);
 every owned table gets `ENABLE` and `FORCE ROW LEVEL SECURITY` (an adopted table only `ENABLE`,
@@ -1090,7 +1105,8 @@ With `--dsn`, the spec's tables are also verified against the catalog: an `adopt
 `observed` table must exist; an `adopted` table must have every column the spec declares, with
 the declared type (a missing column is an error here and drift otherwise); an `owned` table
 that exists must not be owned by an app role (the fix names the `adopted` mode and the
-assumption to add); and no inclusion may close a cycle with the database's own foreign keys
+assumption to add); no app role may be able to become a role with `BYPASSRLS` or `SUPERUSER`;
+and no inclusion may close a cycle with the database's own foreign keys
 (§11.3).
 
 ### `mls prove SPEC [--format md|json] [--out FILE] [--timeout SECONDS]`

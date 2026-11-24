@@ -40,17 +40,49 @@ def role_attributes_ddl(role: str, attributes: dict[str, str]) -> str:
             f"end $mls$")
 
 
-def role_ddl(spec: Spec) -> list[str]:
-    out = []
-    for r in spec.roles:
-        out.append(f"do $mls$ begin\n"
-                   f"  if not exists (select 1 from pg_roles where rolname = '{r}') then\n"
-                   f"    create role {q(r)} nologin;\n"
-                   f"  end if;\n"
-                   f"end $mls$")
-        out.append(role_attributes_ddl(r, APP_ROLE_ATTRIBUTES))
-        out.append(f"revoke set on parameter session_replication_role from {q(r)}")
+# #68: whether role {a} can SET ROLE to {b} (through other roles too).  Attributes such as
+# BYPASSRLS are never inherited, so SET is what escalates; PG 15 has no SET option on a grant.
+CAN_BECOME = ("(case when current_setting('server_version_num')::int >= 160000 "
+              "then pg_has_role({a}, {b}, 'SET') else pg_has_role({a}, {b}, 'MEMBER') end)")
+
+
+def escalation_check_ddl(role: str) -> str:
+    """#68: refuse an app role that can become (directly or through other roles) a role that
+    bypasses the policies: every upper bound about it would be false.  The deploy cannot fix
+    it: the membership may be the platform's own."""
+    return (f"do $mls$ declare x text; begin\n"
+            f"  select string_agg(b.rolname, ', ' order by b.rolname) into x from pg_roles a, pg_roles b\n"
+            f"   where a.rolname = '{role}' and b.oid <> a.oid and (b.rolbypassrls or b.rolsuper)\n"
+            f"     and {CAN_BECOME.format(a='a.oid', b='b.oid')};\n"
+            f"  if x is not null then\n"
+            f"    raise exception 'MLS: app role {role} can become %, which bypasses the policies', x\n"
+            f"      using hint = 'revoke that membership from {role} (and through every role between), "
+            f"or take {role} out of the spec''s roles if it is meant to be trusted';\n"
+            f"  end if;\n"
+            f"end $mls$")
+
+
+def app_role_ddl(spec: Spec, role: str, mutations: frozenset[Mutation] | set[Mutation] = frozenset()) -> list[str]:
+    """Create an app role if missing and harden it.  A platform service role (#68: on Supabase,
+    authenticator and supabase_auth_admin) is the platform's: reserved, never altered."""
+    from mls.identity import get_adapter
+
+    out = [f"do $mls$ begin\n"
+           f"  if not exists (select 1 from pg_roles where rolname = '{role}') then\n"
+           f"    create role {q(role)} nologin;\n"
+           f"  end if;\n"
+           f"end $mls$"]
+    if role in get_adapter(spec).service_roles:
+        return out
+    out.append(role_attributes_ddl(role, APP_ROLE_ATTRIBUTES))
+    if Mutation.ROLE_ESCALATION_UNCHECKED not in mutations:
+        out.append(escalation_check_ddl(role))
+    out.append(f"revoke set on parameter session_replication_role from {q(role)}")
     return out
+
+
+def role_ddl(spec: Spec, mutations: frozenset[Mutation] | set[Mutation] = frozenset()) -> list[str]:
+    return [s for r in spec.roles for s in app_role_ddl(spec, r, mutations)]
 
 
 def platform_revokes(spec: Spec) -> list[str]:

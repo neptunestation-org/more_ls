@@ -114,7 +114,7 @@ def compile_spec(spec: Spec, mutations: frozenset[Mutation] | set[Mutation] = fr
                             "trusted roles: the owner of the MLS schema and superusers",
                             *english.assumption_lines(spec)])
     s.add("preamble", preamble_ddl(spec))
-    s.add("roles", role_ddl(spec))
+    s.add("roles", role_ddl(spec, mutations))
     s.add("roles", internal_role_ddl(spec))
     for name, t in spec.tables.items():
         if t.mode == "owned":

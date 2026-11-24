@@ -227,6 +227,12 @@ union member the renderer does not cover.
   value), scenarios list the tested labels (`Encoder.array_labels`); the harness writes lists cast to
   the column type and reads enum arrays as `text[]`; import reads `= any` / `<> all`, refuses `@>`,
   `<@`, `&&`; fixture `specs.array_spec`, mutation `HAS_NULL_ELEMENT_FALSE`; Lean `Pred.has`.
+- D90 (#68): an adapter's `service_roles` (Supabase: `authenticator`, `supabase_auth_admin`) are named
+  in specs and keep their rules, but are trusted: `identity.base.bounded_roles` drops them from the
+  all-roles upper bounds and least_privilege, the checker refuses upper bounds naming one, the deploy
+  never alters them.  Any other app role that can become a BYPASSRLS/superuser role is refused
+  (`hardening.escalation_check_ddl`, mutation `ROLE_ESCALATION_UNCHECKED`, `adopt.role_escalation_errors`,
+  drift `hardening`); `tests/platform/test_supabase.py` deploys both roles as `postgres`.
 - D83 (#61): a cardinality rule has `max` and/or `min` and an optional `where`; `min` is a deferred
   constraint trigger `<name>_min` (at commit, parent row locked; a parent deleted in the transaction
   is exempt), no invariant (refused in `invariant_preserved`), unused by the proofs; fixture
