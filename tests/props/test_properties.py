@@ -658,3 +658,39 @@ def test_a_set_null_inclusion_nulls_only_what_the_rules_allow():
     next(p for p in kept["properties"] if p["id"] == "P4")["invariants"].append(
         {"table": "doc_notes", "predicate": {"not": {"is_null": {"col": "doc_id"}}}})
     assert verdicts(make(kept))["P4"] == "REFUTED"
+
+
+def test_a_label_test_models_only_arrays_that_exist():
+    """#65 (exact encoding): R6 shows a membership row whenever its test of 'x' is not UNKNOWN.  A
+    FALSE test of 'y' means the array is set and has no NULL element, so the test of 'x' is TRUE or
+    FALSE: P1 holds.  A per-label encoding would refute it with a row no array can be.  Any row
+    at all (P2) is refuted: its array may be NULL."""
+    from tests.templates.specs import array_dict
+
+    d = array_dict()
+    x = {"has": [{"col": "roles"}, {"const": "x"}]}
+    # without C1, whose check (TRUE required) already rules out a NULL array and a NULL element
+    d["rules"] = [r for r in d["rules"] if r["id"] not in ("R6", "C1")] + [
+        {"id": "R6", "kind": "policy", "name": "known_x", "table": "team_members", "role": "authenticated",
+         "command": "select", "mode": "permissive", "using": {"or": [x, {"not": x}]}}]
+    d["properties"] = [
+        {"id": "P1", "template": "must_allow", "table": "team_members", "role": "authenticated", "command": "select",
+         "when": {"not": {"has": [{"col": "roles"}, {"const": "y"}]}}},
+        {"id": "P2", "template": "must_allow", "table": "team_members", "role": "authenticated", "command": "select",
+         "when": {"lit": True}},
+    ]
+    results = {r.id: r for r in run_all(make(d))}
+    assert {k: r.verdict for k, r in results.items()} == {"P1": "PROVED", "P2": "REFUTED"}
+    # the scenario shows an array as the tested labels it holds, NULL for a NULL element
+    sc = next(o.scenario for o in results["P2"].obligations if o.verdict == "REFUTED")
+    roles = sc.rows["r"]["values"]["roles"]
+    assert roles is None or (roles.startswith("{") and "NULL" in roles), roles
+    # perms, tested for no label here, is a value, not an empty array (nor roles' labels)
+    perms = sc.rows["r"]["values"].get("perms")
+    assert perms is None or perms.startswith("array#"), perms
+
+
+def test_the_array_fixture_proves():
+    from tests.templates.specs import array_spec
+
+    assert set(verdicts(array_spec()).values()) == {"PROVED"}, verdicts(array_spec())

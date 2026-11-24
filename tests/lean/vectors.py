@@ -131,6 +131,8 @@ def lpred(p: dict) -> str:
         return f"(Pred.member {lstr(v['relation'])} {lterm(v['key'])} {lterm(v['value'])})"
     if k == "in_group":
         return f"(Pred.inGroup {lstr(v['hierarchy'])} {lterm(v['key'])} {lterm(v['value'])})"
+    if k == "has":  # D88: the label as the encoder interns it
+        return f"(Pred.has {lterm(v[0])} {ARRAY_LABEL_ID[v[1]['const']]})"
     if k == "now_between":
         lo = "none" if v.get("from") is None else f"(some {lterm(v['from'])})"
         hi = "none" if v.get("until") is None else f"(some {lterm(v['until'])})"
@@ -458,10 +460,71 @@ def SH : Schema := Vec.schema ["parent_id"] [("org", "members", 2)]
 /-- The composed-relation spec of the generator: `notes` with nullable project_id, task_id, u. -/
 def SC : Schema := Vec.schema ["project_id", "task_id", "u"] []
 
+/-- The array spec of the generator (D88): `members` with a nullable `roles text[]`. -/
+def SA : Schema := Vec.schema ["roles"] []
+
 /-- `in_group(org, uid, group_id)` -/
 def GP : Pred := Pred.inGroup "org" (Term.ctx "uid") (Term.col "group_id")
 
 '''
+
+
+# the array spec (D88): its labels are interned first, in this order, by every encoder below
+ARRAY_JSON = {
+    "mls_version": "0.1",
+    "identity": {"adapter": "supabase", "context": {"uid": {"source": "auth.uid", "type": "uuid"}}},
+    "roles": ["app"],
+    "tables": {"members": {"mode": "adopted", "columns": {"id": {"type": "int", "nullable": False},
+                                                          "roles": {"type": "text[]", "nullable": True}},
+                           "primary_key": ["id"]}},
+}
+ARRAY = Spec.model_validate(ARRAY_JSON)
+ARRAY_LABELS = ["a", "b"]
+ARRAY_LABEL_ID = {x: 1000 + i for i, x in enumerate(ARRAY_LABELS)}
+N_ARRAY = 60
+
+
+def rand_array_pred(r: random.Random, depth: int = 0) -> dict:
+    if depth >= 2 or r.random() < 0.5:
+        return {"has": [{"col": "roles"}, {"const": r.choice(ARRAY_LABELS)}]}
+    k = r.choice(["and", "or", "not"])
+    if k == "not":
+        return {"not": rand_array_pred(r, depth + 1)}
+    return {k: [rand_array_pred(r, depth + 1) for _ in range(r.randint(1, 2))]}
+
+
+def array_vectors(r: random.Random) -> list[str]:
+    """`has` (D88): random arrays over the labels and NULL, a NULL array among them.  The array's
+    value is its own integer (7), its elements `Env.arr 7`; the valuation's `arr.has` and
+    `arr.has_null` are read off the elements, as `Agrees` requires."""
+    out = []
+    for i in range(N_ARRAY):
+        p = rand_array_pred(r)
+        arr = None if r.random() < 0.2 else [r.choice([*ARRAY_LABELS, None]) for _ in range(r.randint(0, 3))]
+        pred = TypeAdapter(Pred).validate_python(p)
+        concrete = eval_pred(pred, {"id": 1, "roles": arr}, {"uid": UUIDS[0], "now": 0}, Database({}))
+        enc = Encoder(ARRAY)
+        for x in ARRAY_LABELS:
+            enc.const_id(x)
+        T, F = enc.tf(pred, "r", "members")
+        elems = [] if arr is None else [None if x is None else ARRAY_LABEL_ID[x] for x in arr]
+        rels = {"arr.has": lambda v, l, el=elems: v == 7 and l in el,
+                "arr.has_null": lambda v, el=elems: v == 7 and None in el}
+        env = {"r.roles": 0 if arr is None else 7, "r.roles.null": arr is None}
+        t, f = evaluate(T, env, rels), evaluate(F, env, rels)
+        assert not (t and f) and concrete == (True if t else (False if f else None))
+        lelems = "[" + ", ".join(lopt(x) for x in elems) + "]"
+        cols = lcols({"r": {"id": 1, "roles": None if arr is None else 7}})
+        out.append(f"-- A{i}\n"
+                   f"def av{i} : Pred := {lpred(p)}\n"
+                   f"def ac{i} : Cols := {cols}\n"
+                   f"def ae{i} : List (Option Int) := {lelems}\n"
+                   f"#guard Pred.eval SA {{ Vec.env ac{i} [] [] [] with arr := fun v => if v = 7 then ae{i} else [] }} "
+                   f"\"r\" av{i} = {ltv(concrete)}\n"
+                   f"#guard Pred.tf SA {{ Vec.val ac{i} [] [] [] with "
+                   f"arrHas := fun v l => v = 7 && ae{i}.contains (some l), "
+                   f"arrHasNull := fun v => v = 7 && ae{i}.contains none }} \"r\" av{i} = {lpair(t, f)}\n")
+    return out
 
 
 def generate() -> str:
@@ -474,6 +537,8 @@ def generate() -> str:
     parts += outcome_vectors(r)
     parts.append("\n/-! ## Composed relations: the hops and their lookups (D56) -/\n\n")
     parts += chain_vectors(r)
+    parts.append("\n/-! ## A label among an array's elements (D88) -/\n\n")
+    parts += array_vectors(r)
     parts.append("\nend MLS\n")
     return "\n".join(parts)
 

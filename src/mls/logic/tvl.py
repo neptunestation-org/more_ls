@@ -8,7 +8,9 @@ tagged, e.g. `rel.<name>@before`, to talk about two states of one relation).  A 
 (D56) is its base relation read through one lookup per hop: `hop.<table>.<value>` (a row with that
 value exists) and `hop.<table>.<value>.<key>` (its key), functions because the hop's value is a key
 of its table; `(k, v) ∈ base . T(key, value)` is `hop.T.value(v) ∧ base(k, hop.T.value.key(v))`,
-quantifier-free like `in_group`'s unrolled parent.  Opaque blocks are
+quantifier-free like `in_group`'s unrolled parent.  An array column's value is an integer too
+(equal arrays are one value), read through `arr.has(v, label)` and `arr.has_null(v)` (D88).
+Opaque blocks are
 pairs of uninterpreted predicates over their declared inputs, with ¬(T ∧ F) as a side condition.
 """
 from __future__ import annotations
@@ -24,7 +26,7 @@ from mls.logic.term import (
 )
 from mls.spec.chain import base_name, hop_prefix, is_lookup, levels, up_name
 from mls.spec.model import (
-    CONTEXT_NOW, And, ColRef, Const, CtxRef, Cmp, InGroup, IsNull, Lit, Member, NewRef, Not,
+    CONTEXT_NOW, And, ColRef, Const, CtxRef, Cmp, Has, InGroup, IsNull, Lit, Member, NewRef, Not,
     NowBetween, OldRef, OpaqueRef, Or, Pred, Spec,
 )
 
@@ -56,6 +58,10 @@ def col_value_var(row: str, col: str) -> Var:
 
 def col_null_var(row: str, col: str) -> Var:
     return bool_var(f"{row}.{col}.null")
+
+
+ARRAY_HAS = fun("arr.has", Sort.INT, Sort.INT)  # D88: (array value, interned label) -> an element equals it
+ARRAY_HAS_NULL = fun("arr.has_null", Sort.INT)   # D88: the array has a NULL element
 
 
 def ctx_var(name: str) -> Var:
@@ -106,6 +112,8 @@ class Encoder:
     hops_used: set[tuple[str, str, str]] = field(default_factory=set)  # (table, key, value) read by a chain
     rels_used: set[str] = field(default_factory=set)  # base relations whose symbol was emitted
     ups_used: set[tuple[str, int]] = field(default_factory=set)  # (relation, upward hop) read (#43)
+    # (table, array column) -> the labels a `has` tested on it (D88): what a scenario lists
+    array_labels: dict[tuple[str, str], set[str]] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ symbols
     def rel(self, name: str) -> FunDecl:
@@ -175,6 +183,15 @@ class Encoder:
         if isinstance(p, IsNull):
             _, n = self.term(p.is_null, row, table)
             return n, not_(n)
+        if isinstance(p, Has):  # D88: SQL `label = any(col)`, exact
+            col, label = p.has
+            v, n = self.term(col, row, table)
+            elem = "enum" if self._type_of(col, table) == "enum[]" else "text"
+            self.const_types.setdefault(label.const, set()).add(elem)
+            name = col.col if isinstance(col, ColRef) else col.old if isinstance(col, OldRef) else col.new
+            self.array_labels.setdefault((table, name), set()).add(label.const)
+            has = ARRAY_HAS(v, IntVal(self.const_id(label.const)))
+            return and_(not_(n), has), and_(not_(n), not_(has), not_(ARRAY_HAS_NULL(v)))
         if isinstance(p, Cmp):
             l, op, r = p.cmp
             self._note_const_types(l, r, table)

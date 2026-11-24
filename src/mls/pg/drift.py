@@ -118,7 +118,8 @@ def shadow_snapshot(conn: psycopg.Connection, spec: Spec, script: Script,
 
 
 def _live_types(spec: Spec, actual: Snapshot) -> dict[str, dict[str, str]]:
-    """The adopted columns declared text whose live type is another that MLS reads as text."""
+    """The adopted columns declared text (or text[], D88) whose live type is another that MLS reads
+    as that: `varchar(n)`, `varchar(n)[]`."""
     out: dict[str, dict[str, str]] = {}
     for name, t in spec.tables.items():
         live = actual["tables"].get(name)
@@ -126,7 +127,8 @@ def _live_types(spec: Spec, actual: Snapshot) -> dict[str, dict[str, str]]:
             continue
         for c, col in t.columns.items():
             lc = live["columns"].get(c)
-            if col.type == "text" and lc is not None and lc["type"] != "text" and mls_type(lc["type"]) == "text":
+            if col.type in ("text", "text[]") and lc is not None and lc["type"] != col.type \
+                    and mls_type(lc["type"]) == col.type:
                 out.setdefault(name, {})[c] = lc["type"]
     return out
 

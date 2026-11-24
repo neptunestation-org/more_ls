@@ -18,9 +18,11 @@ STATIC_NON_LEAKPROOF = {
     "bool": [],
     "uuid": [],
     "enum": ["=", "<>", "<", "<=", ">", ">="],  # anyenum's operators are not leakproof
+    "text[]": ["&&", "<", "<=", "<>", "<@", "=", ">", ">=", "@>"],  # anyarray's (D88)
+    "enum[]": ["&&", "<", "<=", "<>", "<@", "=", ">", ">=", "@>"],
 }
 PG_TYPE = {"int": "integer", "bigint": "bigint", "text": "text", "bool": "boolean", "timestamp": "timestamptz", "uuid": "uuid",
-           "enum": "anyenum"}
+           "enum": "anyenum", "text[]": "anyarray", "enum[]": "anyarray"}
 
 
 @dataclass
@@ -33,7 +35,7 @@ class LintWarning:
     def __str__(self) -> str:
         return (f"{self.table}.{self.column} ({self.type}): queries filtering on "
                 f"{', '.join(self.operators)} cannot use an index before the row policy "
-                f"(operator is not leakproof); equality is leakproof")
+                f"(operator is not leakproof)" + ("" if "=" in self.operators else "; equality is leakproof"))
 
 
 def protected_tables(spec: Spec) -> set[str]:
@@ -58,7 +60,7 @@ def lint_catalog(spec: Spec, conn: psycopg.Connection) -> list[LintWarning]:
                 cur.execute(
                     """select o.oprname from pg_operator o join pg_proc p on p.oid = o.oprcode
                        where o.oprleft = %s::regtype and o.oprright = o.oprleft and not p.proleakproof
-                         and o.oprname in ('=', '<>', '<', '<=', '>', '>=', '~~', '~~*', '~', '~*')
+                         and o.oprname in ('=', '<>', '<', '<=', '>', '>=', '~~', '~~*', '~', '~*', '@>', '<@', '&&')
                        order by 1""", (PG_TYPE[col.type],))
                 ops = [r[0] for r in cur.fetchall()]
                 if ops:

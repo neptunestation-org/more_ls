@@ -232,7 +232,8 @@ def test_every_column_type_is_a_word_of_the_grammar():
     from mls.spec.model import ColType
     from mls.spec.syntax import TYPES, parse
 
-    assert set(typing.get_args(ColType)) == set(TYPES)
+    # an array type is its element's word and `[]` (D88)
+    assert set(typing.get_args(ColType)) == set(TYPES) | {"text[]", "enum[]"}
     text = ("mls 0.1\n\nidentity session_setting { uid: app.uid bigint }\nroles app\n\n"
             "table t owned {\n  id bigint not null,\n  n int;\n  primary_key (id)\n}\n\n"
             "rules {\n  R1 check big on t: id <> 3000000000 and n <= 2147483647\n}\n\nproperties {\n}\n")
@@ -331,3 +332,17 @@ def test_in_renders_as_its_expansion_after_check():
     assert listing(sugar) == manual
     assert "R10 policy levels on docs: authenticated select permissive using owner_id is null and (level = 2 or level = 3)" in manual
     assert "R10 policy levels on docs: authenticated select permissive using owner_id is null and level in (2, 3)" in listing(sugar, checked=False)
+
+
+def test_an_array_column_and_its_label_test_round_trip():
+    """#65: `text[]` and `enum[] T` columns, and `'label' = any(column)` (also under `not` and on an
+    image), render and parse back to the same spec."""
+    from mls.spec.syntax import parse
+    from tests.templates.specs import array_spec
+
+    spec = array_spec()
+    text = terse.render(spec)
+    assert '"roles" text[],' in text and "perms enum[] Perm;" in text  # `roles` is a keyword: quoted
+    assert """where 'lead' = any("roles")""" in text and """not 'private' = any("roles")""" in text
+    assert """'lead' = any(old."roles") or not 'lead' = any(new."roles")""" in text
+    assert parse(text) == spec

@@ -188,10 +188,13 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
         tables = cur.fetchall()
         for oid, name, rls, force, owner in tables:
             t: dict[str, Any] = {"oid": oid, "rls": rls, "force": force, "owner": owner}
+            # the enum type of an enum column, or of an enum array's elements (D88)
             cur.execute("""select a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), a.attnotnull,
-                                  case when ty.typtype = 'e' and tn.nspname = %s then ty.typname end
+                                  case when et.typtype = 'e' and tn.nspname = %s then et.typname end
                            from pg_attribute a join pg_type ty on ty.oid = a.atttypid
-                                join pg_namespace tn on tn.oid = ty.typnamespace
+                                join pg_type et on et.oid = case when ty.typelem <> 0 and ty.typlen = -1
+                                                                 then ty.typelem else ty.oid end
+                                join pg_namespace tn on tn.oid = et.typnamespace
                            where a.attrelid = %s and a.attnum > 0 and not a.attisdropped
                            order by a.attnum""", (schema, oid))
             t["columns"] = [{"num": r[0], "name": r[1], "type": r[2], "notnull": r[3], "enum": r[4]}
@@ -342,7 +345,8 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
         for c in t["columns"]:
             if c["enum"] is not None and CATALOG_IDENT.match(c["enum"]):  # an enum type of the schema (D59)
                 enums[c["enum"]] = cat["enums"][c["enum"]]
-                cols[c["name"]] = {"type": "enum", "enum": c["enum"], "nullable": not c["notnull"]}
+                cols[c["name"]] = {"type": "enum[]" if c["type"].endswith("[]") else "enum", "enum": c["enum"],
+                                   "nullable": not c["notnull"]}
                 continue
             ty = mls_type(c["type"])
             if ty is None:
@@ -1057,11 +1061,12 @@ def verify_adopted(conn: psycopg.Connection, spec: Spec, schema: str = "public")
                 errors.append(MlsError(f"{path}.columns.{c}", f"adopted table '{name}' has no column '{c}'",
                                        f"remove it from the spec, or add it outside MLS; the table has: "
                                        f"{', '.join(live_cols)}", "check"))
-            elif col.type == "enum" or lc["enum"] is not None:
-                if lc["enum"] != col.enum:
+            elif col.type in ("enum", "enum[]") or lc["enum"] is not None:
+                live_type = "enum[]" if lc["type"].endswith("[]") else "enum"
+                if lc["enum"] != col.enum or (lc["enum"] is not None and live_type != col.type):
                     errors.append(MlsError(f"{path}.columns.{c}", f"column '{name}.{c}' is {lc['type']} in the "
                                                                   f"catalog, declared {col.type} {col.enum or ''}".rstrip(),
-                                           f"declare it as enum {lc['enum']}" if lc["enum"] is not None
+                                           f"declare it as {live_type} {lc['enum']}" if lc["enum"] is not None
                                            else f"declare it as {mls_type(lc['type']) or 'a type MLS does not model'}",
                                            "check"))
             elif mls_type(lc["type"]) != col.type:

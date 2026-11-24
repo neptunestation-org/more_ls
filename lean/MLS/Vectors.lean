@@ -21,6 +21,9 @@ def SH : Schema := Vec.schema ["parent_id"] [("org", "members", 2)]
 /-- The composed-relation spec of the generator: `notes` with nullable project_id, task_id, u. -/
 def SC : Schema := Vec.schema ["project_id", "task_id", "u"] []
 
+/-- The array spec of the generator (D88): `members` with a nullable `roles text[]`. -/
+def SA : Schema := Vec.schema ["roles"] []
+
 /-- `in_group(org, uid, group_id)` -/
 def GP : Pred := Pred.inGroup "org" (Term.ctx "uid") (Term.col "group_id")
 
@@ -3179,6 +3182,430 @@ def cf59 : Facts := [("members", 2, 1)]
 def ch59 : Hops := [("projects.id.team_id", []), ("tasks.id.project_id", [(0, 3), (2, 3)])]
 #guard Pred.eval SC (Vec.env cc59 cx59 cf59 [] ch59) "r" cv59 = TV.unk
 #guard Pred.tf SC (Vec.val cc59 cx59 cf59 [] ch59) "r" cv59 = (⟨false, false⟩ : Pair)
+
+
+/-! ## A label among an array's elements (D88) -/
+
+
+-- A0
+def av0 : Pred := (orChain [(orChain [(Pred.has (Term.col "roles") 1000)]), (Pred.not (Pred.has (Term.col "roles") 1000))])
+def ac0 : Cols := [("r", "id", some 1), ("r", "roles", none)]
+def ae0 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac0 [] [] [] with arr := fun v => if v = 7 then ae0 else [] } "r" av0 = TV.unk
+#guard Pred.tf SA { Vec.val ac0 [] [] [] with arrHas := fun v l => v = 7 && ae0.contains (some l), arrHasNull := fun v => v = 7 && ae0.contains none } "r" av0 = (⟨false, false⟩ : Pair)
+
+-- A1
+def av1 : Pred := (orChain [(Pred.has (Term.col "roles") 1001), (orChain [(Pred.has (Term.col "roles") 1000)])])
+def ac1 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae1 : List (Option Int) := [some 1000, some 1000, some 1001]
+#guard Pred.eval SA { Vec.env ac1 [] [] [] with arr := fun v => if v = 7 then ae1 else [] } "r" av1 = TV.tt
+#guard Pred.tf SA { Vec.val ac1 [] [] [] with arrHas := fun v l => v = 7 && ae1.contains (some l), arrHasNull := fun v => v = 7 && ae1.contains none } "r" av1 = (⟨true, false⟩ : Pair)
+
+-- A2
+def av2 : Pred := (Pred.not (Pred.has (Term.col "roles") 1001))
+def ac2 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae2 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac2 [] [] [] with arr := fun v => if v = 7 then ae2 else [] } "r" av2 = TV.tt
+#guard Pred.tf SA { Vec.val ac2 [] [] [] with arrHas := fun v l => v = 7 && ae2.contains (some l), arrHasNull := fun v => v = 7 && ae2.contains none } "r" av2 = (⟨true, false⟩ : Pair)
+
+-- A3
+def av3 : Pred := (Pred.not (andChain [(Pred.has (Term.col "roles") 1000), (Pred.has (Term.col "roles") 1000)]))
+def ac3 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae3 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac3 [] [] [] with arr := fun v => if v = 7 then ae3 else [] } "r" av3 = TV.tt
+#guard Pred.tf SA { Vec.val ac3 [] [] [] with arrHas := fun v l => v = 7 && ae3.contains (some l), arrHasNull := fun v => v = 7 && ae3.contains none } "r" av3 = (⟨true, false⟩ : Pair)
+
+-- A4
+def av4 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac4 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae4 : List (Option Int) := [some 1000]
+#guard Pred.eval SA { Vec.env ac4 [] [] [] with arr := fun v => if v = 7 then ae4 else [] } "r" av4 = TV.tt
+#guard Pred.tf SA { Vec.val ac4 [] [] [] with arrHas := fun v l => v = 7 && ae4.contains (some l), arrHasNull := fun v => v = 7 && ae4.contains none } "r" av4 = (⟨true, false⟩ : Pair)
+
+-- A5
+def av5 : Pred := (Pred.has (Term.col "roles") 1001)
+def ac5 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae5 : List (Option Int) := [some 1001, none, some 1001]
+#guard Pred.eval SA { Vec.env ac5 [] [] [] with arr := fun v => if v = 7 then ae5 else [] } "r" av5 = TV.tt
+#guard Pred.tf SA { Vec.val ac5 [] [] [] with arrHas := fun v l => v = 7 && ae5.contains (some l), arrHasNull := fun v => v = 7 && ae5.contains none } "r" av5 = (⟨true, false⟩ : Pair)
+
+-- A6
+def av6 : Pred := (Pred.not (orChain [(Pred.has (Term.col "roles") 1001), (Pred.has (Term.col "roles") 1001)]))
+def ac6 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae6 : List (Option Int) := [some 1000]
+#guard Pred.eval SA { Vec.env ac6 [] [] [] with arr := fun v => if v = 7 then ae6 else [] } "r" av6 = TV.tt
+#guard Pred.tf SA { Vec.val ac6 [] [] [] with arrHas := fun v l => v = 7 && ae6.contains (some l), arrHasNull := fun v => v = 7 && ae6.contains none } "r" av6 = (⟨true, false⟩ : Pair)
+
+-- A7
+def av7 : Pred := (andChain [(Pred.not (Pred.has (Term.col "roles") 1001))])
+def ac7 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae7 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac7 [] [] [] with arr := fun v => if v = 7 then ae7 else [] } "r" av7 = TV.tt
+#guard Pred.tf SA { Vec.val ac7 [] [] [] with arrHas := fun v l => v = 7 && ae7.contains (some l), arrHasNull := fun v => v = 7 && ae7.contains none } "r" av7 = (⟨true, false⟩ : Pair)
+
+-- A8
+def av8 : Pred := (orChain [(orChain [(Pred.has (Term.col "roles") 1001)])])
+def ac8 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae8 : List (Option Int) := [none]
+#guard Pred.eval SA { Vec.env ac8 [] [] [] with arr := fun v => if v = 7 then ae8 else [] } "r" av8 = TV.unk
+#guard Pred.tf SA { Vec.val ac8 [] [] [] with arrHas := fun v l => v = 7 && ae8.contains (some l), arrHasNull := fun v => v = 7 && ae8.contains none } "r" av8 = (⟨false, false⟩ : Pair)
+
+-- A9
+def av9 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac9 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae9 : List (Option Int) := [some 1000, none, some 1001]
+#guard Pred.eval SA { Vec.env ac9 [] [] [] with arr := fun v => if v = 7 then ae9 else [] } "r" av9 = TV.tt
+#guard Pred.tf SA { Vec.val ac9 [] [] [] with arrHas := fun v l => v = 7 && ae9.contains (some l), arrHasNull := fun v => v = 7 && ae9.contains none } "r" av9 = (⟨true, false⟩ : Pair)
+
+-- A10
+def av10 : Pred := (Pred.has (Term.col "roles") 1001)
+def ac10 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae10 : List (Option Int) := [none]
+#guard Pred.eval SA { Vec.env ac10 [] [] [] with arr := fun v => if v = 7 then ae10 else [] } "r" av10 = TV.unk
+#guard Pred.tf SA { Vec.val ac10 [] [] [] with arrHas := fun v l => v = 7 && ae10.contains (some l), arrHasNull := fun v => v = 7 && ae10.contains none } "r" av10 = (⟨false, false⟩ : Pair)
+
+-- A11
+def av11 : Pred := (orChain [(orChain [(Pred.has (Term.col "roles") 1001), (Pred.has (Term.col "roles") 1000)])])
+def ac11 : Cols := [("r", "id", some 1), ("r", "roles", none)]
+def ae11 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac11 [] [] [] with arr := fun v => if v = 7 then ae11 else [] } "r" av11 = TV.unk
+#guard Pred.tf SA { Vec.val ac11 [] [] [] with arrHas := fun v l => v = 7 && ae11.contains (some l), arrHasNull := fun v => v = 7 && ae11.contains none } "r" av11 = (⟨false, false⟩ : Pair)
+
+-- A12
+def av12 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac12 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae12 : List (Option Int) := [none, some 1000]
+#guard Pred.eval SA { Vec.env ac12 [] [] [] with arr := fun v => if v = 7 then ae12 else [] } "r" av12 = TV.tt
+#guard Pred.tf SA { Vec.val ac12 [] [] [] with arrHas := fun v l => v = 7 && ae12.contains (some l), arrHasNull := fun v => v = 7 && ae12.contains none } "r" av12 = (⟨true, false⟩ : Pair)
+
+-- A13
+def av13 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac13 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae13 : List (Option Int) := [some 1000, some 1001, some 1000]
+#guard Pred.eval SA { Vec.env ac13 [] [] [] with arr := fun v => if v = 7 then ae13 else [] } "r" av13 = TV.tt
+#guard Pred.tf SA { Vec.val ac13 [] [] [] with arrHas := fun v l => v = 7 && ae13.contains (some l), arrHasNull := fun v => v = 7 && ae13.contains none } "r" av13 = (⟨true, false⟩ : Pair)
+
+-- A14
+def av14 : Pred := (orChain [(Pred.has (Term.col "roles") 1000)])
+def ac14 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae14 : List (Option Int) := [none, none]
+#guard Pred.eval SA { Vec.env ac14 [] [] [] with arr := fun v => if v = 7 then ae14 else [] } "r" av14 = TV.unk
+#guard Pred.tf SA { Vec.val ac14 [] [] [] with arrHas := fun v l => v = 7 && ae14.contains (some l), arrHasNull := fun v => v = 7 && ae14.contains none } "r" av14 = (⟨false, false⟩ : Pair)
+
+-- A15
+def av15 : Pred := (Pred.has (Term.col "roles") 1001)
+def ac15 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae15 : List (Option Int) := [some 1001]
+#guard Pred.eval SA { Vec.env ac15 [] [] [] with arr := fun v => if v = 7 then ae15 else [] } "r" av15 = TV.tt
+#guard Pred.tf SA { Vec.val ac15 [] [] [] with arrHas := fun v l => v = 7 && ae15.contains (some l), arrHasNull := fun v => v = 7 && ae15.contains none } "r" av15 = (⟨true, false⟩ : Pair)
+
+-- A16
+def av16 : Pred := (orChain [(Pred.not (Pred.has (Term.col "roles") 1000)), (andChain [(Pred.has (Term.col "roles") 1001)])])
+def ac16 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae16 : List (Option Int) := [none]
+#guard Pred.eval SA { Vec.env ac16 [] [] [] with arr := fun v => if v = 7 then ae16 else [] } "r" av16 = TV.unk
+#guard Pred.tf SA { Vec.val ac16 [] [] [] with arrHas := fun v l => v = 7 && ae16.contains (some l), arrHasNull := fun v => v = 7 && ae16.contains none } "r" av16 = (⟨false, false⟩ : Pair)
+
+-- A17
+def av17 : Pred := (Pred.not (Pred.has (Term.col "roles") 1000))
+def ac17 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae17 : List (Option Int) := [some 1001]
+#guard Pred.eval SA { Vec.env ac17 [] [] [] with arr := fun v => if v = 7 then ae17 else [] } "r" av17 = TV.tt
+#guard Pred.tf SA { Vec.val ac17 [] [] [] with arrHas := fun v l => v = 7 && ae17.contains (some l), arrHasNull := fun v => v = 7 && ae17.contains none } "r" av17 = (⟨true, false⟩ : Pair)
+
+-- A18
+def av18 : Pred := (andChain [(Pred.not (Pred.has (Term.col "roles") 1001)), (orChain [(Pred.has (Term.col "roles") 1001), (Pred.has (Term.col "roles") 1001)])])
+def ac18 : Cols := [("r", "id", some 1), ("r", "roles", none)]
+def ae18 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac18 [] [] [] with arr := fun v => if v = 7 then ae18 else [] } "r" av18 = TV.unk
+#guard Pred.tf SA { Vec.val ac18 [] [] [] with arrHas := fun v l => v = 7 && ae18.contains (some l), arrHasNull := fun v => v = 7 && ae18.contains none } "r" av18 = (⟨false, false⟩ : Pair)
+
+-- A19
+def av19 : Pred := (Pred.has (Term.col "roles") 1001)
+def ac19 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae19 : List (Option Int) := [none]
+#guard Pred.eval SA { Vec.env ac19 [] [] [] with arr := fun v => if v = 7 then ae19 else [] } "r" av19 = TV.unk
+#guard Pred.tf SA { Vec.val ac19 [] [] [] with arrHas := fun v l => v = 7 && ae19.contains (some l), arrHasNull := fun v => v = 7 && ae19.contains none } "r" av19 = (⟨false, false⟩ : Pair)
+
+-- A20
+def av20 : Pred := (orChain [(orChain [(Pred.has (Term.col "roles") 1000), (Pred.has (Term.col "roles") 1000)]), (Pred.has (Term.col "roles") 1000)])
+def ac20 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae20 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac20 [] [] [] with arr := fun v => if v = 7 then ae20 else [] } "r" av20 = TV.ff
+#guard Pred.tf SA { Vec.val ac20 [] [] [] with arrHas := fun v l => v = 7 && ae20.contains (some l), arrHasNull := fun v => v = 7 && ae20.contains none } "r" av20 = (⟨false, true⟩ : Pair)
+
+-- A21
+def av21 : Pred := (andChain [(Pred.not (Pred.has (Term.col "roles") 1000)), (Pred.has (Term.col "roles") 1000)])
+def ac21 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae21 : List (Option Int) := [none]
+#guard Pred.eval SA { Vec.env ac21 [] [] [] with arr := fun v => if v = 7 then ae21 else [] } "r" av21 = TV.unk
+#guard Pred.tf SA { Vec.val ac21 [] [] [] with arrHas := fun v l => v = 7 && ae21.contains (some l), arrHasNull := fun v => v = 7 && ae21.contains none } "r" av21 = (⟨false, false⟩ : Pair)
+
+-- A22
+def av22 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac22 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae22 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac22 [] [] [] with arr := fun v => if v = 7 then ae22 else [] } "r" av22 = TV.ff
+#guard Pred.tf SA { Vec.val ac22 [] [] [] with arrHas := fun v l => v = 7 && ae22.contains (some l), arrHasNull := fun v => v = 7 && ae22.contains none } "r" av22 = (⟨false, true⟩ : Pair)
+
+-- A23
+def av23 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac23 : Cols := [("r", "id", some 1), ("r", "roles", none)]
+def ae23 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac23 [] [] [] with arr := fun v => if v = 7 then ae23 else [] } "r" av23 = TV.unk
+#guard Pred.tf SA { Vec.val ac23 [] [] [] with arrHas := fun v l => v = 7 && ae23.contains (some l), arrHasNull := fun v => v = 7 && ae23.contains none } "r" av23 = (⟨false, false⟩ : Pair)
+
+-- A24
+def av24 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac24 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae24 : List (Option Int) := [some 1001, some 1000, some 1000]
+#guard Pred.eval SA { Vec.env ac24 [] [] [] with arr := fun v => if v = 7 then ae24 else [] } "r" av24 = TV.tt
+#guard Pred.tf SA { Vec.val ac24 [] [] [] with arrHas := fun v l => v = 7 && ae24.contains (some l), arrHasNull := fun v => v = 7 && ae24.contains none } "r" av24 = (⟨true, false⟩ : Pair)
+
+-- A25
+def av25 : Pred := (Pred.not (Pred.has (Term.col "roles") 1000))
+def ac25 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae25 : List (Option Int) := [some 1000]
+#guard Pred.eval SA { Vec.env ac25 [] [] [] with arr := fun v => if v = 7 then ae25 else [] } "r" av25 = TV.ff
+#guard Pred.tf SA { Vec.val ac25 [] [] [] with arrHas := fun v l => v = 7 && ae25.contains (some l), arrHasNull := fun v => v = 7 && ae25.contains none } "r" av25 = (⟨false, true⟩ : Pair)
+
+-- A26
+def av26 : Pred := (Pred.not (Pred.has (Term.col "roles") 1000))
+def ac26 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae26 : List (Option Int) := [some 1000, some 1001, some 1000]
+#guard Pred.eval SA { Vec.env ac26 [] [] [] with arr := fun v => if v = 7 then ae26 else [] } "r" av26 = TV.ff
+#guard Pred.tf SA { Vec.val ac26 [] [] [] with arrHas := fun v l => v = 7 && ae26.contains (some l), arrHasNull := fun v => v = 7 && ae26.contains none } "r" av26 = (⟨false, true⟩ : Pair)
+
+-- A27
+def av27 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac27 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae27 : List (Option Int) := [none, some 1001, none]
+#guard Pred.eval SA { Vec.env ac27 [] [] [] with arr := fun v => if v = 7 then ae27 else [] } "r" av27 = TV.unk
+#guard Pred.tf SA { Vec.val ac27 [] [] [] with arrHas := fun v l => v = 7 && ae27.contains (some l), arrHasNull := fun v => v = 7 && ae27.contains none } "r" av27 = (⟨false, false⟩ : Pair)
+
+-- A28
+def av28 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac28 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae28 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac28 [] [] [] with arr := fun v => if v = 7 then ae28 else [] } "r" av28 = TV.ff
+#guard Pred.tf SA { Vec.val ac28 [] [] [] with arrHas := fun v l => v = 7 && ae28.contains (some l), arrHasNull := fun v => v = 7 && ae28.contains none } "r" av28 = (⟨false, true⟩ : Pair)
+
+-- A29
+def av29 : Pred := (Pred.has (Term.col "roles") 1001)
+def ac29 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae29 : List (Option Int) := [none, some 1000]
+#guard Pred.eval SA { Vec.env ac29 [] [] [] with arr := fun v => if v = 7 then ae29 else [] } "r" av29 = TV.unk
+#guard Pred.tf SA { Vec.val ac29 [] [] [] with arrHas := fun v l => v = 7 && ae29.contains (some l), arrHasNull := fun v => v = 7 && ae29.contains none } "r" av29 = (⟨false, false⟩ : Pair)
+
+-- A30
+def av30 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac30 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae30 : List (Option Int) := [some 1001, none]
+#guard Pred.eval SA { Vec.env ac30 [] [] [] with arr := fun v => if v = 7 then ae30 else [] } "r" av30 = TV.unk
+#guard Pred.tf SA { Vec.val ac30 [] [] [] with arrHas := fun v l => v = 7 && ae30.contains (some l), arrHasNull := fun v => v = 7 && ae30.contains none } "r" av30 = (⟨false, false⟩ : Pair)
+
+-- A31
+def av31 : Pred := (orChain [(andChain [(Pred.has (Term.col "roles") 1001), (Pred.has (Term.col "roles") 1000)])])
+def ac31 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae31 : List (Option Int) := [some 1001]
+#guard Pred.eval SA { Vec.env ac31 [] [] [] with arr := fun v => if v = 7 then ae31 else [] } "r" av31 = TV.ff
+#guard Pred.tf SA { Vec.val ac31 [] [] [] with arrHas := fun v l => v = 7 && ae31.contains (some l), arrHasNull := fun v => v = 7 && ae31.contains none } "r" av31 = (⟨false, true⟩ : Pair)
+
+-- A32
+def av32 : Pred := (Pred.has (Term.col "roles") 1001)
+def ac32 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae32 : List (Option Int) := [none]
+#guard Pred.eval SA { Vec.env ac32 [] [] [] with arr := fun v => if v = 7 then ae32 else [] } "r" av32 = TV.unk
+#guard Pred.tf SA { Vec.val ac32 [] [] [] with arrHas := fun v l => v = 7 && ae32.contains (some l), arrHasNull := fun v => v = 7 && ae32.contains none } "r" av32 = (⟨false, false⟩ : Pair)
+
+-- A33
+def av33 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac33 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae33 : List (Option Int) := [some 1001, none, some 1000]
+#guard Pred.eval SA { Vec.env ac33 [] [] [] with arr := fun v => if v = 7 then ae33 else [] } "r" av33 = TV.tt
+#guard Pred.tf SA { Vec.val ac33 [] [] [] with arrHas := fun v l => v = 7 && ae33.contains (some l), arrHasNull := fun v => v = 7 && ae33.contains none } "r" av33 = (⟨true, false⟩ : Pair)
+
+-- A34
+def av34 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac34 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae34 : List (Option Int) := [none, none, none]
+#guard Pred.eval SA { Vec.env ac34 [] [] [] with arr := fun v => if v = 7 then ae34 else [] } "r" av34 = TV.unk
+#guard Pred.tf SA { Vec.val ac34 [] [] [] with arrHas := fun v l => v = 7 && ae34.contains (some l), arrHasNull := fun v => v = 7 && ae34.contains none } "r" av34 = (⟨false, false⟩ : Pair)
+
+-- A35
+def av35 : Pred := (orChain [(Pred.has (Term.col "roles") 1000), (Pred.has (Term.col "roles") 1001)])
+def ac35 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae35 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac35 [] [] [] with arr := fun v => if v = 7 then ae35 else [] } "r" av35 = TV.ff
+#guard Pred.tf SA { Vec.val ac35 [] [] [] with arrHas := fun v l => v = 7 && ae35.contains (some l), arrHasNull := fun v => v = 7 && ae35.contains none } "r" av35 = (⟨false, true⟩ : Pair)
+
+-- A36
+def av36 : Pred := (Pred.not (orChain [(Pred.has (Term.col "roles") 1000), (Pred.has (Term.col "roles") 1001)]))
+def ac36 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae36 : List (Option Int) := [none]
+#guard Pred.eval SA { Vec.env ac36 [] [] [] with arr := fun v => if v = 7 then ae36 else [] } "r" av36 = TV.unk
+#guard Pred.tf SA { Vec.val ac36 [] [] [] with arrHas := fun v l => v = 7 && ae36.contains (some l), arrHasNull := fun v => v = 7 && ae36.contains none } "r" av36 = (⟨false, false⟩ : Pair)
+
+-- A37
+def av37 : Pred := (Pred.has (Term.col "roles") 1001)
+def ac37 : Cols := [("r", "id", some 1), ("r", "roles", none)]
+def ae37 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac37 [] [] [] with arr := fun v => if v = 7 then ae37 else [] } "r" av37 = TV.unk
+#guard Pred.tf SA { Vec.val ac37 [] [] [] with arrHas := fun v l => v = 7 && ae37.contains (some l), arrHasNull := fun v => v = 7 && ae37.contains none } "r" av37 = (⟨false, false⟩ : Pair)
+
+-- A38
+def av38 : Pred := (Pred.has (Term.col "roles") 1001)
+def ac38 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae38 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac38 [] [] [] with arr := fun v => if v = 7 then ae38 else [] } "r" av38 = TV.ff
+#guard Pred.tf SA { Vec.val ac38 [] [] [] with arrHas := fun v l => v = 7 && ae38.contains (some l), arrHasNull := fun v => v = 7 && ae38.contains none } "r" av38 = (⟨false, true⟩ : Pair)
+
+-- A39
+def av39 : Pred := (Pred.has (Term.col "roles") 1001)
+def ac39 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae39 : List (Option Int) := [some 1001, none]
+#guard Pred.eval SA { Vec.env ac39 [] [] [] with arr := fun v => if v = 7 then ae39 else [] } "r" av39 = TV.tt
+#guard Pred.tf SA { Vec.val ac39 [] [] [] with arrHas := fun v l => v = 7 && ae39.contains (some l), arrHasNull := fun v => v = 7 && ae39.contains none } "r" av39 = (⟨true, false⟩ : Pair)
+
+-- A40
+def av40 : Pred := (andChain [(Pred.has (Term.col "roles") 1001), (orChain [(Pred.has (Term.col "roles") 1001)])])
+def ac40 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae40 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac40 [] [] [] with arr := fun v => if v = 7 then ae40 else [] } "r" av40 = TV.ff
+#guard Pred.tf SA { Vec.val ac40 [] [] [] with arrHas := fun v l => v = 7 && ae40.contains (some l), arrHasNull := fun v => v = 7 && ae40.contains none } "r" av40 = (⟨false, true⟩ : Pair)
+
+-- A41
+def av41 : Pred := (Pred.has (Term.col "roles") 1001)
+def ac41 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae41 : List (Option Int) := [some 1001]
+#guard Pred.eval SA { Vec.env ac41 [] [] [] with arr := fun v => if v = 7 then ae41 else [] } "r" av41 = TV.tt
+#guard Pred.tf SA { Vec.val ac41 [] [] [] with arrHas := fun v l => v = 7 && ae41.contains (some l), arrHasNull := fun v => v = 7 && ae41.contains none } "r" av41 = (⟨true, false⟩ : Pair)
+
+-- A42
+def av42 : Pred := (Pred.not (Pred.not (Pred.has (Term.col "roles") 1000)))
+def ac42 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae42 : List (Option Int) := [none, some 1000]
+#guard Pred.eval SA { Vec.env ac42 [] [] [] with arr := fun v => if v = 7 then ae42 else [] } "r" av42 = TV.tt
+#guard Pred.tf SA { Vec.val ac42 [] [] [] with arrHas := fun v l => v = 7 && ae42.contains (some l), arrHasNull := fun v => v = 7 && ae42.contains none } "r" av42 = (⟨true, false⟩ : Pair)
+
+-- A43
+def av43 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac43 : Cols := [("r", "id", some 1), ("r", "roles", none)]
+def ae43 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac43 [] [] [] with arr := fun v => if v = 7 then ae43 else [] } "r" av43 = TV.unk
+#guard Pred.tf SA { Vec.val ac43 [] [] [] with arrHas := fun v l => v = 7 && ae43.contains (some l), arrHasNull := fun v => v = 7 && ae43.contains none } "r" av43 = (⟨false, false⟩ : Pair)
+
+-- A44
+def av44 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac44 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae44 : List (Option Int) := [some 1001, some 1001]
+#guard Pred.eval SA { Vec.env ac44 [] [] [] with arr := fun v => if v = 7 then ae44 else [] } "r" av44 = TV.ff
+#guard Pred.tf SA { Vec.val ac44 [] [] [] with arrHas := fun v l => v = 7 && ae44.contains (some l), arrHasNull := fun v => v = 7 && ae44.contains none } "r" av44 = (⟨false, true⟩ : Pair)
+
+-- A45
+def av45 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac45 : Cols := [("r", "id", some 1), ("r", "roles", none)]
+def ae45 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac45 [] [] [] with arr := fun v => if v = 7 then ae45 else [] } "r" av45 = TV.unk
+#guard Pred.tf SA { Vec.val ac45 [] [] [] with arrHas := fun v l => v = 7 && ae45.contains (some l), arrHasNull := fun v => v = 7 && ae45.contains none } "r" av45 = (⟨false, false⟩ : Pair)
+
+-- A46
+def av46 : Pred := (Pred.has (Term.col "roles") 1001)
+def ac46 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae46 : List (Option Int) := [none, some 1001, some 1001]
+#guard Pred.eval SA { Vec.env ac46 [] [] [] with arr := fun v => if v = 7 then ae46 else [] } "r" av46 = TV.tt
+#guard Pred.tf SA { Vec.val ac46 [] [] [] with arrHas := fun v l => v = 7 && ae46.contains (some l), arrHasNull := fun v => v = 7 && ae46.contains none } "r" av46 = (⟨true, false⟩ : Pair)
+
+-- A47
+def av47 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac47 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae47 : List (Option Int) := [some 1001, some 1000, none]
+#guard Pred.eval SA { Vec.env ac47 [] [] [] with arr := fun v => if v = 7 then ae47 else [] } "r" av47 = TV.tt
+#guard Pred.tf SA { Vec.val ac47 [] [] [] with arrHas := fun v l => v = 7 && ae47.contains (some l), arrHasNull := fun v => v = 7 && ae47.contains none } "r" av47 = (⟨true, false⟩ : Pair)
+
+-- A48
+def av48 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac48 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae48 : List (Option Int) := [some 1001]
+#guard Pred.eval SA { Vec.env ac48 [] [] [] with arr := fun v => if v = 7 then ae48 else [] } "r" av48 = TV.ff
+#guard Pred.tf SA { Vec.val ac48 [] [] [] with arrHas := fun v l => v = 7 && ae48.contains (some l), arrHasNull := fun v => v = 7 && ae48.contains none } "r" av48 = (⟨false, true⟩ : Pair)
+
+-- A49
+def av49 : Pred := (orChain [(Pred.has (Term.col "roles") 1001), (orChain [(Pred.has (Term.col "roles") 1000), (Pred.has (Term.col "roles") 1000)])])
+def ac49 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae49 : List (Option Int) := [some 1001, none]
+#guard Pred.eval SA { Vec.env ac49 [] [] [] with arr := fun v => if v = 7 then ae49 else [] } "r" av49 = TV.tt
+#guard Pred.tf SA { Vec.val ac49 [] [] [] with arrHas := fun v l => v = 7 && ae49.contains (some l), arrHasNull := fun v => v = 7 && ae49.contains none } "r" av49 = (⟨true, false⟩ : Pair)
+
+-- A50
+def av50 : Pred := (Pred.has (Term.col "roles") 1001)
+def ac50 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae50 : List (Option Int) := [some 1000, none]
+#guard Pred.eval SA { Vec.env ac50 [] [] [] with arr := fun v => if v = 7 then ae50 else [] } "r" av50 = TV.unk
+#guard Pred.tf SA { Vec.val ac50 [] [] [] with arrHas := fun v l => v = 7 && ae50.contains (some l), arrHasNull := fun v => v = 7 && ae50.contains none } "r" av50 = (⟨false, false⟩ : Pair)
+
+-- A51
+def av51 : Pred := (orChain [(Pred.has (Term.col "roles") 1001), (Pred.has (Term.col "roles") 1000)])
+def ac51 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae51 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac51 [] [] [] with arr := fun v => if v = 7 then ae51 else [] } "r" av51 = TV.ff
+#guard Pred.tf SA { Vec.val ac51 [] [] [] with arrHas := fun v l => v = 7 && ae51.contains (some l), arrHasNull := fun v => v = 7 && ae51.contains none } "r" av51 = (⟨false, true⟩ : Pair)
+
+-- A52
+def av52 : Pred := (andChain [(Pred.has (Term.col "roles") 1001), (Pred.has (Term.col "roles") 1000)])
+def ac52 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae52 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac52 [] [] [] with arr := fun v => if v = 7 then ae52 else [] } "r" av52 = TV.ff
+#guard Pred.tf SA { Vec.val ac52 [] [] [] with arrHas := fun v l => v = 7 && ae52.contains (some l), arrHasNull := fun v => v = 7 && ae52.contains none } "r" av52 = (⟨false, true⟩ : Pair)
+
+-- A53
+def av53 : Pred := (Pred.has (Term.col "roles") 1001)
+def ac53 : Cols := [("r", "id", some 1), ("r", "roles", none)]
+def ae53 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac53 [] [] [] with arr := fun v => if v = 7 then ae53 else [] } "r" av53 = TV.unk
+#guard Pred.tf SA { Vec.val ac53 [] [] [] with arrHas := fun v l => v = 7 && ae53.contains (some l), arrHasNull := fun v => v = 7 && ae53.contains none } "r" av53 = (⟨false, false⟩ : Pair)
+
+-- A54
+def av54 : Pred := (Pred.not (andChain [(Pred.has (Term.col "roles") 1001), (Pred.has (Term.col "roles") 1000)]))
+def ac54 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae54 : List (Option Int) := [none, some 1000, some 1000]
+#guard Pred.eval SA { Vec.env ac54 [] [] [] with arr := fun v => if v = 7 then ae54 else [] } "r" av54 = TV.unk
+#guard Pred.tf SA { Vec.val ac54 [] [] [] with arrHas := fun v l => v = 7 && ae54.contains (some l), arrHasNull := fun v => v = 7 && ae54.contains none } "r" av54 = (⟨false, false⟩ : Pair)
+
+-- A55
+def av55 : Pred := (orChain [(orChain [(Pred.has (Term.col "roles") 1000), (Pred.has (Term.col "roles") 1001)])])
+def ac55 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae55 : List (Option Int) := [none]
+#guard Pred.eval SA { Vec.env ac55 [] [] [] with arr := fun v => if v = 7 then ae55 else [] } "r" av55 = TV.unk
+#guard Pred.tf SA { Vec.val ac55 [] [] [] with arrHas := fun v l => v = 7 && ae55.contains (some l), arrHasNull := fun v => v = 7 && ae55.contains none } "r" av55 = (⟨false, false⟩ : Pair)
+
+-- A56
+def av56 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac56 : Cols := [("r", "id", some 1), ("r", "roles", none)]
+def ae56 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac56 [] [] [] with arr := fun v => if v = 7 then ae56 else [] } "r" av56 = TV.unk
+#guard Pred.tf SA { Vec.val ac56 [] [] [] with arrHas := fun v l => v = 7 && ae56.contains (some l), arrHasNull := fun v => v = 7 && ae56.contains none } "r" av56 = (⟨false, false⟩ : Pair)
+
+-- A57
+def av57 : Pred := (Pred.has (Term.col "roles") 1000)
+def ac57 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae57 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac57 [] [] [] with arr := fun v => if v = 7 then ae57 else [] } "r" av57 = TV.ff
+#guard Pred.tf SA { Vec.val ac57 [] [] [] with arrHas := fun v l => v = 7 && ae57.contains (some l), arrHasNull := fun v => v = 7 && ae57.contains none } "r" av57 = (⟨false, true⟩ : Pair)
+
+-- A58
+def av58 : Pred := (orChain [(Pred.not (Pred.has (Term.col "roles") 1001))])
+def ac58 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae58 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac58 [] [] [] with arr := fun v => if v = 7 then ae58 else [] } "r" av58 = TV.tt
+#guard Pred.tf SA { Vec.val ac58 [] [] [] with arrHas := fun v l => v = 7 && ae58.contains (some l), arrHasNull := fun v => v = 7 && ae58.contains none } "r" av58 = (⟨true, false⟩ : Pair)
+
+-- A59
+def av59 : Pred := (Pred.not (Pred.has (Term.col "roles") 1001))
+def ac59 : Cols := [("r", "id", some 1), ("r", "roles", some 7)]
+def ae59 : List (Option Int) := []
+#guard Pred.eval SA { Vec.env ac59 [] [] [] with arr := fun v => if v = 7 then ae59 else [] } "r" av59 = TV.tt
+#guard Pred.tf SA { Vec.val ac59 [] [] [] with arrHas := fun v l => v = 7 && ae59.contains (some l), arrHasNull := fun v => v = 7 && ae59.contains none } "r" av59 = (⟨true, false⟩ : Pair)
 
 
 end MLS

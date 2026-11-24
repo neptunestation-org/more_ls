@@ -128,6 +128,7 @@ theorem eval_rowOnly (hcol : e.col row = e'.col row') :
   | .inGroup _ _ _, hp => by simp [Pred.rowOnly] at hp
   | .nowBetween _ _, hp => by simp [Pred.rowOnly] at hp
   | .opaqueRef _, hp => by simp [Pred.rowOnly] at hp
+  | .has _ _, hp => by simp [Pred.rowOnly] at hp
 
 /-! ## The CHECK template -/
 

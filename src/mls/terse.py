@@ -13,7 +13,8 @@ approval artifact (D10, D33).  The grammar:
     roles      := 'roles' NAME (',' NAME)*
     table      := 'table' NAME MODE '{' [column (',' column)* [';']] [option (';' option)*] '}'
     enum       := 'enum' NAME '(' STRING (',' STRING)* ')'        (a Postgres enum type and its labels, in order)
-    column     := NAME TYPE ['not null']                          (a bare column is nullable; TYPE 'enum' NAME for an enum)
+    column     := NAME TYPE ['not null']                          (a bare column is nullable; TYPE 'enum' NAME for an enum,
+                                                                   'text[]' or 'enum[]' NAME for an array)
     option     := 'primary_key' '(' names ')' | 'unique' '(' names ')' | 'tags' '(' names ')'
                 | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)' | 'inlined function f(t) md5 h')
     relation   := 'relation' NAME '=' TABLE '(' KEY ',' VALUE ')' ['where' pred]
@@ -30,6 +31,7 @@ approval artifact (D10, D33).  The grammar:
     property   := ID TEMPLATE [table role command which]: ... ['description' STRING]
     term       := column | old.column | new.column | @context | 'text' | 123 | true | false
     atom       := term op term | term in (const, ...) | term is null | relation(key, value) | relation(value)
+                | 'label' = any(column)                          (a constant label among an array column's elements)
                 | in_group(h, key, value) | now_between(from | -, until | -) | opaque(name) | true | false
     pred       := atom | not pred | pred and pred | pred or pred   (not > and > or; a nested same-
                                                                    connective group keeps its parens)
@@ -47,7 +49,7 @@ from typing import Any
 
 from mls.spec.model import (
     AlwaysOnUpdate, And, AppliesTo, ChangesOnly, CardinalityRule, CheckRule, ColRef, ColumnImmutable, ColumnRule, Cmp, Const, CtxRef, Custom,
-    Hierarchy, Identity, In, InclusionRule, InGroup, InvariantPreserved, IsNull, LeastPrivilege, Lit, Member,
+    Hierarchy, Identity, In, InclusionRule, InGroup, InvariantPreserved, IsNull, Has, LeastPrivilege, Lit, Member,
     MonotoneIn, MustAllow, NewRef, Not, NowBetween, OldRef, Opaque, OpaqueRef, Or, PolicyRule, Pred, Property,
     Relation, ComposedRelation, Hop, RoleSeparation, Rule, RuleBase, Spec, Table, TenantIsolation, TransitionRule, WriteSubsetRead,
     OwnerAssumed, BypassAssumed, RlsAssumed, PathAssumed, InlinedAssumed, ContextVar, Column,
@@ -87,7 +89,7 @@ RENDERED_CLASSES: set[type] = {
     PolicyRule, CheckRule, InclusionRule, TransitionRule, CardinalityRule, ColumnRule,
     TenantIsolation, ColumnImmutable, MonotoneIn, WriteSubsetRead, LeastPrivilege, InvariantPreserved, AlwaysOnUpdate, ChangesOnly,
     Custom, MustAllow, RoleSeparation,
-    Lit, And, Or, Not, IsNull, Cmp, In, Member, InGroup, NowBetween, OpaqueRef,
+    Lit, And, Or, Not, IsNull, Has, Cmp, In, Member, InGroup, NowBetween, OpaqueRef,
     ColRef, OldRef, NewRef, CtxRef, Const,
     OwnerAssumed, BypassAssumed, RlsAssumed, PathAssumed, InlinedAssumed,
 }
@@ -151,6 +153,9 @@ def _pred(p: Pred) -> tuple[str, int]:
         return f"not {_sub(p.not_, NOT)}", NOT
     if isinstance(p, IsNull):
         return f"{term(p.is_null)} is null", ATOM
+    if isinstance(p, Has):  # D88
+        col, label = p.has
+        return f"{term(label)} = any({term(col)})", ATOM
     if isinstance(p, Cmp):
         l, op, r = p.cmp
         return f"{term(l)} {op} {term(r)}", ATOM

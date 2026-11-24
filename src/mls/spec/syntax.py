@@ -324,6 +324,10 @@ class Parser:
             c = self.name("a column name")
             self.mark(f"{self.path}.columns.{c}")
             col = {"type": self.word(*TYPES), "nullable": True}
+            if col["type"] in ("text", "enum") and self.at("["):  # D88: an array of text or of an enum
+                self.advance()
+                self.eat("]")
+                col["type"] += "[]"
             # an enum column's type name (missing, or on another type: the checker's error at its path)
             if self.tok.kind in ("ident", "qident") and not self.at_word("not"):
                 self.mark(f"{self.path}.columns.{c}.enum")
@@ -787,6 +791,14 @@ class Parser:
                 consts.append(self.const())
             self.eat(")")
             return {"in": [left, consts]}
+        if self.at("=") and self.peek().kind == "ident" and self.peek().text == "any" \
+                and self.peek(2).kind == "op" and self.peek(2).text == "(":  # D88: 'label' = any(column)
+            self.advance()
+            self.advance()
+            self.eat("(")
+            col = self.term(path)
+            self.eat(")")
+            return {"has": [col, left]}
         if self.tok.kind == "op" and self.tok.text in CMP_OPS:
             op = self.advance().text
             return {"cmp": [left, op, self.term(path)]}

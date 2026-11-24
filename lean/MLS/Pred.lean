@@ -71,6 +71,9 @@ inductive Pred where
   | inGroup (hierarchy : String) (key value : Term)
   | nowBetween (lo hi : Option Term)
   | opaqueRef (name : String)
+  /-- `'label' = any(col)` (D88): the array column `t` has an element equal to the (interned)
+  label. -/
+  | has (t : Term) (label : Int)
 
 /-- What a hierarchy declares (SEMANTICS §3.1): its members relation and the depth bound. -/
 structure HierSpec where
@@ -100,6 +103,9 @@ structure Env where
   /-- A hop of a composed relation (D56): the key of the row whose value is `x`, if one is stored
   (a function: the hop's value is a key of its table). -/
   hop : String → Int → Option Int
+  /-- An array value's elements (D88): array values are `Int`-valued like every column (equal
+  arrays are one value), and this is what each one holds; `none` is a NULL element. -/
+  arr : Int → List (Option Int) := fun _ => []
 
 def ofBool (b : Bool) : TV := if b then .tt else .ff
 
@@ -148,6 +154,11 @@ def Env.chain (e : Env) (r : String) (k : Int) : List String → Int → Bool
     | none => false
     | some w => e.chain r k hs w
 
+/-- SQL's `l = any(xs)` over a non-NULL array: TRUE when an element is `l`; otherwise UNKNOWN when
+an element is NULL, FALSE when none is (an empty array too). -/
+def anyEq (l : Int) (xs : List (Option Int)) : TV :=
+  if xs.contains (some l) then .tt else if xs.contains none then .unk else .ff
+
 def Pred.eval (s : Schema) (e : Env) (row : String) : Pred → TV
   | .lit b => ofBool b
   | .and p q => TV.and (p.eval s e row) (q.eval s e row)
@@ -160,6 +171,10 @@ def Pred.eval (s : Schema) (e : Env) (row : String) : Pred → TV
   | .inGroup hn k v => liftCmp (e.inGroup s hn) (k.value e row) (v.value e row)
   | .nowBetween lo hi => ofBool (e.lower row lo && e.upper row hi)
   | .opaqueRef n => Pair.decode (e.opaques n row)
+  | .has t l =>
+    match t.value e row with
+    | none => .unk
+    | some v => anyEq l (e.arr v)
 
 /-! ## The encoder -/
 
@@ -185,6 +200,10 @@ structure Valuation where
   hopEx : String → Int → Bool
   /-- `hop.T.v.k`: its key -/
   hopKey : String → Int → Int
+  /-- `arr.has` (D88): the array value has an element equal to the label -/
+  arrHas : Int → Int → Bool := fun _ _ => false
+  /-- `arr.has_null` (D88): the array value has a NULL element -/
+  arrHasNull : Int → Bool := fun _ => false
 
 /-- `Encoder._col`: `(value, is_null)`; the null flag of a non-nullable column is `FALSE`. -/
 def Term.colTF (s : Schema) (σ : Valuation) (img n : String) : Int × Bool :=
@@ -243,6 +262,10 @@ def Pred.tf (s : Schema) (σ : Valuation) (row : String) : Pred → Pair
     let t := Term.lowerTF s σ row lo && Term.upperTF s σ row hi
     ⟨t, !t⟩
   | .opaqueRef n => ⟨σ.opaqueT n row, σ.opaqueF n row⟩
+  | .has t l =>
+    let n := (t.tf s σ row).2
+    let v := (t.tf s σ row).1
+    ⟨!n && σ.arrHas v l, !n && !σ.arrHas v l && !σ.arrHasNull v⟩
 
 /-! ## Soundness -/
 
@@ -260,6 +283,8 @@ structure Agrees (s : Schema) (σ : Valuation) (e : Env) : Prop where
   opaqueF : ∀ n img, σ.opaqueF n img = (e.opaques n img).F
   hopEx : ∀ h x, σ.hopEx h x = (e.hop h x).isSome
   hopKey : ∀ h x w, e.hop h x = some w → σ.hopKey h x = w
+  arrHas : ∀ v l, σ.arrHas v l = (e.arr v).contains (some l)
+  arrHasNull : ∀ v, σ.arrHasNull v = (e.arr v).contains none
 
 /-- The stored data satisfies the hierarchy FKs. -/
 def Env.hierarchiesWellFormed (s : Schema) (e : Env) : Prop :=
@@ -436,6 +461,19 @@ theorem Pred.tf_sound (h : Agrees s σ e) (hop : ∀ n img, (e.opaques n img).co
   | .opaqueRef n => by
     show (⟨σ.opaqueT n row, σ.opaqueF n row⟩ : Pair) = Pair.encode (Pair.decode (e.opaques n row))
     rw [h.opaqueT n row, h.opaqueF n row, Pair.encode_decode _ (hop n row)]
+  | .has t l => by
+    show (⟨!(t.tf s σ row).2 && σ.arrHas (t.tf s σ row).1 l,
+           !(t.tf s σ row).2 && !σ.arrHas (t.tf s σ row).1 l && !σ.arrHasNull (t.tf s σ row).1⟩ : Pair)
+        = Pair.encode (match t.value e row with
+                       | none => .unk
+                       | some v => anyEq l (e.arr v))
+    rw [Term.tf_null h row t]
+    cases ht : t.value e row with
+    | none => rfl
+    | some v =>
+      rw [Term.tf_val h row t v ht, h.arrHas, h.arrHasNull]
+      dsimp only [anyEq]
+      cases (e.arr v).contains (some l) <;> cases (e.arr v).contains none <;> rfl
 
 /-- Admission, stated on the encoder's output: the row is admitted iff the `T` component holds. -/
 theorem Pred.admitted (h : Agrees s σ e) (hop : ∀ n img, (e.opaques n img).consistent = true)

@@ -222,6 +222,11 @@ union member the renderer does not cover.
   (`tests/templates/test_filtered_inclusion.py`).  The diff's integrity part compares committed data
   (`row_constraints(.., at_commit=True)`), so a deferred inclusion shows.  `mls generate --dsn` runs
   `adopt.database_checks` (the database's own keys and triggers) on every spec the loop builds.
+- D88 (#65): array columns `text[]` / `enum[] T` (adopted tables) and the atom `{"has": [col, label]}`,
+  terse `'x' = any(col)`; exact encoding (`tvl.ARRAY_HAS`, `ARRAY_HAS_NULL` over the column's integer
+  value), scenarios list the tested labels (`Encoder.array_labels`); the harness writes lists cast to
+  the column type and reads enum arrays as `text[]`; import reads `= any` / `<> all`, refuses `@>`,
+  `<@`, `&&`; fixture `specs.array_spec`, mutation `HAS_NULL_ELEMENT_FALSE`; Lean `Pred.has`.
 - D83 (#61): a cardinality rule has `max` and/or `min` and an optional `where`; `min` is a deferred
   constraint trigger `<name>_min` (at commit, parent row locked; a parent deleted in the transaction
   is exempt), no invariant (refused in `invariant_preserved`), unused by the proofs; fixture

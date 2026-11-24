@@ -10,7 +10,7 @@ from mls.spec.expand import as_in_list
 from mls.identity.base import SQL_TYPE, Adapter
 from mls.sqltext import q  # noqa: F401  (re-exported: the templates import it from here)
 from mls.spec.model import (
-    And, ColRef, ColType, Const, CtxRef, Cmp, InGroup, IsNull, Lit, Member, NewRef, Not, NowBetween,
+    And, ColRef, ColType, Const, CtxRef, Cmp, Has, InGroup, IsNull, Lit, Member, NewRef, Not, NowBetween,
     OldRef, OpaqueRef, Or, Pred, Spec,
 )
 
@@ -78,6 +78,12 @@ class SqlCompiler:
             return f"(not {self.pred(p.not_, table)})"
         if isinstance(p, IsNull):
             return f"({self.term(p.is_null, table)} is null)"
+        if isinstance(p, Has):  # D88: the label's literal takes the element type (text, or the enum)
+            col, label = p.has
+            c, lab = self.term(col, table), self.term(label, table)
+            if Mutation.HAS_NULL_ELEMENT_FALSE in self.mutations:  # `@>`'s reading of a NULL element
+                return f"(case when {c} is null then null else coalesce({lab} = any ({c}), false) end)"
+            return f"({lab} = any ({c}))"
         if isinstance(p, Cmp):
             l, op, r = p.cmp
             ty = self.term_type(l, table) or self.term_type(r, table)
@@ -134,8 +140,11 @@ class SqlCompiler:
 
 
 def sql_type(col) -> str:
-    """A column's SQL type: an enum column's is its Postgres type, quoted (D59)."""
-    return q(col.enum) if col.type == "enum" else SQL_TYPE[col.type]
+    """A column's SQL type: an enum column's is its Postgres type, quoted (D59); an array's is its
+    element's with `[]` (D88)."""
+    if col.type in ("enum", "enum[]"):
+        return q(col.enum) + ("[]" if col.type == "enum[]" else "")
+    return "text[]" if col.type == "text[]" else SQL_TYPE[col.type]
 
 
 def column_ddl(name: str, col) -> str:

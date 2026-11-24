@@ -84,6 +84,7 @@ theorem eval_twoImage (ho : e.col "old" = e'.col "old") (hn : e.col "new" = e'.c
   | .inGroup _ _ _, hp => by simp [Pred.twoImage] at hp
   | .nowBetween _ _, hp => by simp [Pred.twoImage] at hp
   | .opaqueRef _, hp => by simp [Pred.twoImage] at hp
+  | .has _ _, hp => by simp [Pred.twoImage] at hp
 
 /-! ## The two images of a replacement -/
 

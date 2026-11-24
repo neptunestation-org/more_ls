@@ -13,8 +13,9 @@ def test_vectors_file_is_current():
 
 def test_vectors_cover_every_layer():
     text = vectors.OUT.read_text()
-    assert text.count("#guard Pred.eval") == vectors.N_PRED + vectors.N_GROUP + vectors.N_CHAIN
-    assert text.count("#guard Pred.tf") == vectors.N_PRED + vectors.N_GROUP + vectors.N_CHAIN
+    layers = vectors.N_PRED + vectors.N_GROUP + vectors.N_CHAIN + vectors.N_ARRAY
+    assert text.count("#guard Pred.eval") == layers and text.count("#guard Pred.tf") == layers
+    assert "Pred.has" in text and "ae" in text  # arrays (D88): NULL arrays and elements among them
     assert text.count("#guard Rules.") == vectors.N_OUTCOME
     for layer in ("Rules.visible", "Rules.insert", "Rules.update", "Rules.delete"):
         assert f"#guard {layer}" in text

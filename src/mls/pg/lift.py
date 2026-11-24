@@ -30,7 +30,7 @@ from typing import Any, Callable
 
 from pydantic import TypeAdapter
 
-from mls.spec.model import CONTEXT_NOW, INT_RANGE, MAX_HOPS, ColType, Pred, Spec, pair_unique
+from mls.spec.model import ARRAY_TYPES, CONTEXT_NOW, INT_RANGE, MAX_HOPS, ColType, Pred, Spec, pair_unique
 
 PG_TO_MLS: dict[str, ColType] = {"integer": "int", "bigint": "bigint", "text": "text", "boolean": "bool",
                                  "timestamp with time zone": "timestamp", "uuid": "uuid"}
@@ -45,6 +45,8 @@ SQL_TYPE_OF: dict[ColType, str] = {"int": "integer", "bigint": "bigint", "text":
 def mls_type(pg_type: str) -> ColType | None:
     """The MLS type of a catalog column type (format_type), or None when MLS does not model it.
     `character varying(n)` compares as text (D53); the length limit is the table's, not a rule's."""
+    if pg_type.endswith("[]"):  # D88: an array of text (varchar too); an enum array is read apart
+        return "text[]" if mls_type(pg_type[:-2]) == "text" else None
     if pg_type == "character varying" or pg_type.startswith("character varying("):
         return "text"
     return PG_TO_MLS.get(pg_type)
@@ -71,7 +73,7 @@ _TOKEN = re.compile(r"""
   | (?P<str>'(?:[^']|'')*')
   | (?P<num>\d+(?:\.\d+)?)
   | (?P<ident>[A-Za-z_][A-Za-z0-9_$]*)
-  | (?P<op>->>|->|::|<>|!=|<=|>=|!~~\*|!~~|~~\*|~~|\|\||[=<>()\[\],.+\-*/~])
+  | (?P<op>->>|->|::|@>|<@|&&|<>|!=|<=|>=|!~~\*|!~~|~~\*|~~|\|\||[=<>()\[\],.+\-*/~])
 """, re.VERBOSE)
 
 
@@ -341,7 +343,7 @@ class Parser:
     def cmp_expr(self) -> Node:
         start = self.peek().pos
         l = self.add_expr()
-        if self.is_op("=", "<>", "!=", "<", "<=", ">", ">="):
+        if self.is_op("=", "<>", "!=", "<", "<=", ">", ">=", "@>", "<@", "&&"):
             op = self.take().text
             op = "<>" if op == "!=" else op
             if self.is_kw("any", "all"):
@@ -694,7 +696,7 @@ class Env:
                                                                 for n, (s, t) in self.context.items()}},
                  "roles": self.roles or ["r"], "enums": self.enums,
                  "tables": {t: {"columns": {c: {"type": ty, "nullable": nu,
-                                                **({"enum": self.enum_cols[t][c]} if ty == "enum" else {})}
+                                                **({"enum": self.enum_cols[t][c]} if ty in ("enum", "enum[]") else {})}
                                             for c, (ty, nu) in cols.items()},
                                 "mode": "adopted" if t in self.governed else "observed"}
                             for t, cols in self.tables.items()},
@@ -914,6 +916,10 @@ class Lifter:
         self.env.validate(pred, self.table, self.scope, negated)
 
     def cmp(self, node: Cmp, negated: bool) -> dict:
+        if node.op in ("@>", "<@", "&&"):  # D88
+            raise Unreadable(f"operator {node.op} (containment or overlap) is not in the fragment; over an array it "
+                             f"reads a NULL element as no match (FALSE where `'x' = ANY (col)` is UNKNOWN), so "
+                             f"a label test on an array is read only as `'x' = ANY (col)`")
         (l, lt), (r, rt) = self.term(node.l), self.term(node.r)
         op = node.op
         if not _is_col(l) and _is_col(r):  # the fragment puts the column on the left
@@ -924,6 +930,23 @@ class Lifter:
 
     def any_of(self, node: AnyOf, negated: bool) -> dict:
         arr = node.arr
+        col = arr.x if isinstance(arr, Cast) and isinstance(arr.x, Col) and arr.type == "text[]" else arr
+        if isinstance(col, Col):  # D88: `'x' = ANY (col)`, and `'x' <> ALL (col)` its negation
+            c, ty = self.term(col)
+            if ty in ARRAY_TYPES and (node.quant, node.op) in (("any", "="), ("all", "<>")):
+                try:
+                    label, _ = self.const(node.l)
+                except Unreadable:
+                    label = None
+                if label is None or not isinstance(label["const"], str):
+                    raise Unreadable(f"`{self.src(node)}`: the label tested among an array's elements must be a "
+                                     f"text constant")
+                p = {"has": [c, label]}
+                if node.quant == "all":
+                    self.check(p, not negated)
+                    return {"not": p}
+                self.check(p, negated)
+                return p
         if node.quant == "all":
             if node.op == "<>" and isinstance(arr, ArrayLit):  # NOT IN (c1, ...) deparses as <> ALL (ARRAY[...])
                 l, _ = self.term(node.l)

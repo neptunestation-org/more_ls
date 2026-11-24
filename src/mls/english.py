@@ -10,7 +10,7 @@ from typing import Any
 
 from mls.spec.model import (
     CONTEXT_NOW, And, BypassAssumed, CardinalityRule, CheckRule, ColRef, ComposedRelation, ColumnImmutable, ColumnRule, Cmp, Const,
-    AlwaysOnUpdate, ChangesOnly, CtxRef, Custom, InclusionRule, InGroup, InvariantPreserved, IsNull, LeastPrivilege, Lit, Member, MonotoneIn,
+    AlwaysOnUpdate, ChangesOnly, CtxRef, Custom, InclusionRule, InGroup, InvariantPreserved, IsNull, Has, LeastPrivilege, Lit, Member, MonotoneIn,
     MustAllow, NewRef, Not, NowBetween, OldRef, OpaqueRef, Or, OwnerAssumed, PathAssumed, InlinedAssumed, PolicyRule, Pred, Property,
     RlsAssumed,
     RoleSeparation,
@@ -66,6 +66,9 @@ def pred(spec: Spec, p: Pred, row: str = "the row", top: bool = True) -> str:
         return f"not {pred(spec, p.not_, row, False)}"
     if isinstance(p, IsNull):
         return f"{term(spec, p.is_null, row)} is empty"
+    if isinstance(p, Has):  # D88
+        col, label = p.has
+        return f"{term(spec, col, row)} include {term(spec, label, row)}"
     if isinstance(p, Cmp):
         l, op, r = p.cmp
         return f"{term(spec, l, row)} {OPS[op]} {term(spec, r, row)}"

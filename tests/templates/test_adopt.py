@@ -327,6 +327,7 @@ create table tickets (
   team_id bigint not null,
   status varchar(20) not null,
   title character varying,
+  labels varchar(20)[],
   check (status in ('open', 'closed')),
   foreign key (user_id, team_id) references team_members (user_id, team_id),
   user_id bigint not null
@@ -338,6 +339,7 @@ create policy own_memberships on team_members for select to app using (
 create policy member_read on tickets for select to app using (
   team_id = any (array(select team_id from team_members
                        where user_id = (select nullif(current_setting('app.uid', true), '')::bigint))));
+create policy vip_read on tickets for select to app using ('vip' = any (labels));
 """
 BIG = 2**40 + 7
 
@@ -359,13 +361,18 @@ def typed(pg_dsn):
 def test_bigint_keys_and_varchar_columns_import_deploy_and_drift(typed):
     """D53: `bigint` identity keys import as bigint, `varchar` columns as text on the adopted
     table; the imported spec deploys over the schema, drift is then clean (the CHECK over the
-    varchar column included), and a key above 2³¹ passes through the compiled policy."""
+    varchar column included), and a key above 2³¹ passes through the compiled policy.  #65: a
+    `varchar(n)[]` column is `text[]`, its label test (deparsed over a cast) is read, and drift's
+    stand-in takes the live type."""
     res = import_schema(typed)
     spec = check_spec(Spec.model_validate(res.spec))
     t = spec.tables["tickets"]
     assert t.mode == "adopted"
     assert {c: col.type for c, col in t.columns.items()} == {
-        "id": "bigint", "team_id": "bigint", "status": "text", "title": "text", "user_id": "bigint"}
+        "id": "bigint", "team_id": "bigint", "status": "text", "title": "text", "labels": "text[]",
+        "user_id": "bigint"}
+    vip = next(r for r in spec.rules if r.kind == "policy" and r.name == "vip_read")
+    assert vip.using.model_dump(by_alias=True) == {"has": ({"col": "labels"}, {"const": "vip"})}
     assert spec.identity.context["uid"].type == "bigint"
     assert res.spec["opaques"] == {}, res.notes
     check = next(r for r in spec.rules if r.kind == "check")  # the CHECK over the varchar column is read

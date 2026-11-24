@@ -8,7 +8,8 @@ how to write them, and `docs/design/DECISIONS.md` why each choice was made.
 
 - Column values are integers (`int` or `bigint`: one sort, the type only bounds constants),
   text (compared for equality only in v1), enum labels (text from a fixed list, compared for
-  equality only), booleans, timestamps (modeled as integers), or NULL if the column is nullable.
+  equality only), booleans, timestamps (modeled as integers), arrays of text or enum labels
+  (tested only for a constant label, §2), or NULL if the column is nullable.
   Context values are never NULL.
 - Predicates evaluate to TRUE, FALSE or UNKNOWN with SQL semantics:
   - comparison with a NULL operand → UNKNOWN; `IS NULL` is two-valued;
@@ -28,6 +29,7 @@ how to write them, and `docs/design/DECISIONS.md` why each choice was made.
 | `now_between(from_col, until_col)` | `from <= now < until`, NULL bound = open | indexed bounds or small row set |
 | `in_group(hierarchy, key=ctx, value=col)` | `∃ g: (ctx, g) ∈ members ∧ g = col ∨ g = parent(col) ∨ … ∨ g = parentᵈ(col)` (the row's group is one of the user's groups or lies below one, within depth d) | array InitPlan from a recursive CTE descending from the user's groups |
 | `is_null(col)` | two-valued | — |
+| `has(col, 'label')`, `col` an array | SQL `'label' = any(col)`: TRUE when an element is the label; UNKNOWN when `col` is NULL, or has a NULL element and none is the label; FALSE otherwise. Encoded exactly: the array's value `v` is an integer read through uninterpreted `arr.has(v, label)` and `arr.has_null(v)`, T = ¬null ∧ has, F = ¬null ∧ ¬has ∧ ¬has_null, so equal arrays agree on every label and every model is an array that exists | — (a GIN index serves `@>`, not `= any`) |
 | `opaque(name)` | uninterpreted predicate over declared inputs | never (excluded from perf guarantees) |
 
 A relation is the `(key, value)` projection of one table whose pair is unique there: the pair, or

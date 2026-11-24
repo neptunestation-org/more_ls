@@ -25,6 +25,9 @@ triggers, grants).  You never write SQL.
 - R(@c, v)                   (@c, v) is a pair of relation R (the user @c is a member of v)
 - in_group(H, @c, v)         v is one of the user's groups in hierarchy H or lies below one (policies only)
 - now_between(from, until)   from <= now < until; `-` for an open bound
+- 'x' = any(arr)              the array column arr (text[] or enum[]) has an element 'x' (UNKNOWN when
+                             arr is NULL, or has a NULL element and no 'x'); an array column is tested
+                             only this way
 - a is null, p and q, p or q, not p, true, false, opaque(name); parentheses group; not binds
   tighter than and, and tighter than or
 - Negated R(...) / in_group is not allowed in policies.  Context values are not allowed in checks.

@@ -691,3 +691,56 @@ def test_a_set_relation_names_a_key_of_its_table_and_its_memberships_no_key():
     d["properties"].append({"id": "PX", "template": "tenant_isolation", "table": "tasks", "column": "project_id",
                             "relation": "public_projects", "key": {"ctx": "uid"}, "commands": ["select"]})
     assert has(errors(d), f"$.properties[{len(d['properties']) - 1}].relation", "has no key; tenant isolation")
+
+
+def test_array_columns_are_tested_by_a_constant_label():
+    """#65: `has` takes an array column (text[], or enum[] of a declared type) and a text label, one
+    of the enum's for an enum array; an array column compares with nothing, and needs an adopted
+    table."""
+    from tests.templates.specs import array_dict
+
+    assert errors(array_dict()) == []
+
+    def rule(d, rid):
+        return next(i for i, r in enumerate(d["rules"]) if r["id"] == rid)
+
+    for pred, sub, text in [
+        ({"has": [{"col": "team_id"}, {"const": "lead"}]}, ".has[0]", "has tests an array column"),
+        ({"has": [{"ctx": "uid"}, {"const": "lead"}]}, ".has[0]", "has tests an array column"),
+        ({"has": [{"col": "roles"}, {"const": 1}]}, ".has[1]", "the label is a text constant"),
+        ({"has": [{"col": "perms"}, {"const": "own"}]}, ".has[1]", "'own' is not a label of the column's enum type"),
+        ({"cmp": [{"col": "roles"}, "=", {"const": "lead"}]}, ".cmp", "an array column is tested only by"),
+    ]:
+        d = array_dict()
+        i = rule(d, "R6")
+        d["rules"][i]["using"] = pred
+        assert has(errors(d), f"$.rules[{i}].using{sub}", text), (pred, [str(e) for e in errors(d)])
+
+    d = array_dict()
+    d["tables"]["team_members"]["mode"] = "owned"
+    d["rules"] = [r for r in d["rules"] if r["kind"] != "check" or r["table"] != "team_members"]
+    assert has(errors(d), "$.tables.team_members.columns.roles.type", "MLS creates its tables without array")
+    d = array_dict()
+    del d["tables"]["team_members"]["columns"]["perms"]["enum"]
+    assert has(errors(d), "$.tables.team_members.columns.perms.enum", "needs a declared enum type")
+
+
+def test_an_unknown_array_column_is_one_error_and_an_owned_enum_array_says_adopt():
+    """#65: `has` on a column the table lacks reports that alone; an `enum[]` column on an owned
+    table is told to adopt the table, not to become a scalar column."""
+    from tests.templates.specs import array_dict
+
+    d = array_dict()
+    i = next(i for i, r in enumerate(d["rules"]) if r["id"] == "R6")
+    d["rules"][i]["using"] = {"has": [{"col": "rolez"}, {"const": "x"}]}
+    errs = [e for e in errors(d) if e.path.startswith(f"$.rules[{i}].using")]
+    assert len(errs) == 1 and "rolez" in errs[0].message, [str(e) for e in errs]
+
+    d = array_dict()
+    d["tables"]["team_members"]["mode"] = "owned"
+    d["tables"]["team_members"]["columns"]["roles"]["type"] = "text"
+    d["rules"] = [r for r in d["rules"] if r["table"] != "team_members"]
+    d["relations"].pop("lead_of")
+    d["rules"] = [r for r in d["rules"] if r["id"] != "R5"]
+    e = next(e for e in errors(d) if e.path == "$.tables.team_members.columns.perms.type")
+    assert "without array columns" in e.message and "adopt" in e.fix and " in (" not in e.fix, str(e)

@@ -17,7 +17,8 @@ Predicates are single-key objects:  {"and": [...]}, {"or": [...]}, {"not": p}, {
   {"cmp": [term, op, term]}, {"in": [term, [const, ...]]} (sugar: expanded by the checker into
   an "or" of "=" comparisons, spec/expand.py), {"member": {"relation", "key": term, "value": term}},
   {"in_group": {"hierarchy", "key": term, "value": term}},
-  {"now_between": {"from": term|null, "until": term|null}}, {"is_null": term}, {"opaque": name}.
+  {"now_between": {"from": term|null, "until": term|null}}, {"is_null": term}, {"opaque": name},
+  {"has": [term, const]} (a constant label among an array column's elements, D88).
 Terms are single-key objects: {"col": c}, {"ctx": name}, {"const": v}, {"old": c}, {"new": c}.
 """
 from __future__ import annotations
@@ -30,7 +31,8 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
 
-ColType = Literal["int", "bigint", "text", "bool", "timestamp", "uuid", "enum"]
+ColType = Literal["int", "bigint", "text", "bool", "timestamp", "uuid", "enum", "text[]", "enum[]"]
+ARRAY_TYPES = ("text[]", "enum[]")  # D88: tested only by `has` with a constant label, compared with nothing
 # D53: the integer types differ only in range (the fragment has no arithmetic), so they compare
 # with each other and share the SMT sort; the range bounds constants
 INT_RANGE: dict[str, tuple[int, int]] = {"int": (-2**31, 2**31 - 1), "bigint": (-2**63, 2**63 - 1)}
@@ -40,7 +42,7 @@ def comparable(a: str, b: str) -> bool:
     """Whether values of the two column types compare (equal types, or both integer types).  An
     enum is never comparable here: a comparison checks it apart (`check._cmp`: its own labels, or
     another reference of the same enum type, #39), and a relation's key or value never matches one."""
-    if a == "enum" or b == "enum":
+    if a == "enum" or b == "enum" or a in ARRAY_TYPES or b in ARRAY_TYPES:
         return False
     return a == b or (a in INT_RANGE and b in INT_RANGE)
 
@@ -87,7 +89,7 @@ def _single_key(v: Any) -> str:
             return "?"
         return next(iter(v))
     for tag in ("col", "ctx", "const", "old", "new", "cmp", "in", "member", "in_group", "now_between",
-                "is_null", "opaque", "and", "or", "not", "lit", "owner", "bypassrls", "rls", "bypass", "inlined"):
+                "is_null", "has", "opaque", "and", "or", "not", "lit", "owner", "bypassrls", "rls", "bypass", "inlined"):
         if hasattr(v, tag) or hasattr(v, tag + "_"):
             return tag
     return "?"
@@ -155,6 +157,13 @@ class IsNull(Strict):
     is_null: Term
 
 
+class Has(Strict):
+    """D88: the constant label is among the array column's elements, SQL `'label' = any(col)`: TRUE
+    when an element equals it, UNKNOWN when the array is NULL or has a NULL element and none
+    equals it, FALSE otherwise (an empty array too)."""
+    has: tuple[Term, Term]  # (array column, label): the checker requires a text constant label
+
+
 class OpaqueRef(Strict):
     opaque: str
 
@@ -183,6 +192,7 @@ Pred = Annotated[
         Annotated[InGroup, Tag("in_group")],
         Annotated[NowBetween, Tag("now_between")],
         Annotated[IsNull, Tag("is_null")],
+        Annotated[Has, Tag("has")],
         Annotated[OpaqueRef, Tag("opaque")],
         Annotated[And, Tag("and")],
         Annotated[Or, Tag("or")],
@@ -191,7 +201,7 @@ Pred = Annotated[
     ],
     Discriminator(_single_key, custom_error_type="invalid_predicate",
                   custom_error_message="a predicate is one of {cmp}, {in}, {member}, {in_group}, "
-                                       "{now_between}, {is_null}, {opaque}, {and}, {or}, {not}, {lit}"),
+                                       "{now_between}, {is_null}, {has}, {opaque}, {and}, {or}, {not}, {lit}"),
 ]
 
 And.model_rebuild()
@@ -203,7 +213,7 @@ Not.model_rebuild()
 class Column(Strict):
     type: ColType
     nullable: bool
-    enum: str | None = None  # the declared enum type of an `enum` column (D59)
+    enum: str | None = None  # the declared enum type of an `enum` or `enum[]` column (D59, D88)
 
 
 TableMode = Literal["owned", "adopted", "observed"]

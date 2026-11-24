@@ -21,7 +21,7 @@ from mls.identity import Adapter, get_adapter
 from mls.pg.model import SET_KEY, Database, Oracle, Row, eval_pred, holds
 from mls.props.effective import simple_fks
 from mls.spec.chain import levels
-from mls.spec.model import CONTEXT_NOW, INT_RANGE, Spec
+from mls.spec.model import ARRAY_TYPES, CONTEXT_NOW, INT_RANGE, Spec
 
 Outcome = str  # "filtered" | "ok" | "error"
 EXPECTED_SQLSTATES = ("23", "42501", "22")  # integrity, RLS/privilege, data exceptions
@@ -114,6 +114,7 @@ class ValueGen:
         self.user_cols = user_columns(spec, adapter)
         self.user_ctx = adapter.user_context_name()
         self.chained = chained_columns(spec)
+        self.array_labels = sorted(array_labels(spec))
 
     def value(self, type_: str, nullable: bool, null_p: float | None = None, enum: str | None = None) -> Any:
         if nullable and self.rnd.random() < (self.null_p if null_p is None else null_p):
@@ -132,6 +133,9 @@ class ValueGen:
             return self.now + dt.timedelta(days=self.rnd.choice([-3, -2, -1, 1, 2, 3]))
         if type_ == "enum":  # D59: the type's labels, every one of them
             return self.rnd.choice(self.spec.enums[enum])
+        if type_ in ("text[]", "enum[]"):  # D88: up to three elements, the tested labels, NULL among them
+            pool = self.spec.enums[enum] if type_ == "enum[]" else [*self.array_labels, *self.texts[:1]]
+            return [self.rnd.choice([*pool, None]) for _ in range(self.rnd.choice([0, 1, 1, 2, 2, 3]))]
         raise ValueError(type_)
 
     def row(self, table: str) -> Row:
@@ -185,6 +189,30 @@ class ValueGen:
             else:
                 ctx[name] = self.value(cv.type, False)
         return ctx
+
+
+def array_labels(spec: Spec) -> set[str]:
+    """The labels the spec tests array columns for (D88): what generated arrays hold."""
+    from pydantic import BaseModel
+
+    from mls.spec.model import Const, Has
+
+    found: set[str] = set()
+
+    def walk(x: Any) -> None:
+        if isinstance(x, Has) and isinstance(x.has[1], Const) and isinstance(x.has[1].const, str):
+            found.add(x.has[1].const)
+        elif isinstance(x, BaseModel):
+            for f in type(x).model_fields:
+                walk(getattr(x, f))
+        elif isinstance(x, (list, tuple)):
+            for v in x:
+                walk(v)
+        elif isinstance(x, dict):
+            for v in x.values():
+                walk(v)
+    walk(spec)
+    return found
 
 
 def user_columns(spec: Spec, adapter: Adapter) -> set[tuple[str, str]]:
@@ -458,11 +486,21 @@ class Harness:
                     except psycopg.Error as e:
                         raise LoadError(f"owner could not load a row the model accepts: {t} {r}: {e}") from e
 
+    def _ph(self, table: str, col: str):
+        """A value's placeholder: an array's is cast to its column's type (D88), a list being sent as
+        text[], which an enum array does not take."""
+        from mls.compile.sql import sql_type
+
+        c = self.spec.tables[table].columns[col]
+        if c.type in ARRAY_TYPES:
+            return psql.SQL("{}::" + sql_type(c)).format(psql.Placeholder())
+        return psql.Placeholder()
+
     def _insert(self, cur, table: str, row: Row) -> None:
         cols = list(row)
         cur.execute(psql.SQL("insert into {} ({}) values ({})").format(
             _ident(table), psql.SQL(", ").join(map(_ident, cols)),
-            psql.SQL(", ").join(psql.Placeholder() for _ in cols)), [row[c] for c in cols])
+            psql.SQL(", ").join(self._ph(table, c) for c in cols)), [row[c] for c in cols])
 
     # --- one statement under a context, state restored afterwards
     def _begin_ctx(self, cur, role: str, ctx: dict) -> None:
@@ -491,7 +529,9 @@ class Harness:
         cols = cols or self._granted_cols(role, table, "select")
         self._begin_ctx(cur, role, ctx)
         try:
-            cur.execute(psql.SQL("select {} from {}").format(psql.SQL(", ").join(map(_ident, cols)), _ident(table)))
+            cur.execute(psql.SQL("select {} from {}").format(psql.SQL(", ").join(
+                psql.SQL("{}::text[]").format(_ident(c)) if self.spec.tables[table].columns[c].type in ARRAY_TYPES
+                else _ident(c) for c in cols), _ident(table)))  # an enum array is read as text[] (D88)
             pg = sorted((tuple(_norm(v) for v in r) for r in cur.fetchall()), key=_row_key)
             got = "ok"
         except psycopg.Error as e:
@@ -541,8 +581,8 @@ class Harness:
         try:
             cur.execute(psql.SQL("update {} set {} where {}").format(
                 _ident(table),
-                psql.SQL(", ").join(psql.SQL("{} = {}").format(_ident(c), psql.Placeholder()) for c in set_cols),
-                psql.SQL(" and ").join(psql.SQL("{} = {}").format(_ident(c), psql.Placeholder()) for c in pk)),
+                psql.SQL(", ").join(psql.SQL("{} = {}").format(_ident(c), self._ph(table, c)) for c in set_cols),
+                psql.SQL(" and ").join(psql.SQL("{} = {}").format(_ident(c), self._ph(table, c)) for c in pk)),
                 [new[c] for c in set_cols] + [old[c] for c in pk])
             got = "ok" if cur.rowcount == 1 else "filtered"
             cur.execute("set constraints all immediate")
@@ -561,7 +601,7 @@ class Harness:
         try:
             cur.execute(psql.SQL("delete from {} where {}").format(
                 _ident(table),
-                psql.SQL(" and ").join(psql.SQL("{} = {}").format(_ident(c), psql.Placeholder()) for c in pk)),
+                psql.SQL(" and ").join(psql.SQL("{} = {}").format(_ident(c), self._ph(table, c)) for c in pk)),
                 [old[c] for c in pk])
             got = "ok" if cur.rowcount == 1 else "filtered"
             cur.execute("set constraints all immediate")  # #61: a minimum count is checked at commit
@@ -638,13 +678,15 @@ def _norm(v: Any) -> Any:
         return v.astimezone(dt.timezone.utc).replace(microsecond=0)
     if hasattr(v, "hex") and not isinstance(v, (bytes, str)):  # uuid.UUID
         return str(v)
+    if isinstance(v, list):  # an array (D88): hashable, as the model's
+        return tuple(v)
     return v
 
 
 def _row_key(row: tuple) -> tuple:
     """Sorts rows whatever their NULLs (a NULL first in its column), which a granted column list
     that does not start with a key can meet (D61: a relation condition's nullable column)."""
-    return tuple((v is not None, v) for v in row)
+    return tuple((v is not None, _row_key(v) if isinstance(v, tuple) else v) for v in row)
 
 
 def _diff(a, b) -> list:

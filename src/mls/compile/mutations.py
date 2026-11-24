@@ -22,6 +22,7 @@ class Mutation(str, Enum):
     CARDINALITY_OFF_BY_ONE = "cardinality_off_by_one"  # n > max instead of n + 1 > max
     CARDINALITY_NO_LOCK = "cardinality_no_lock"      # skip the parent-row lock (concurrency)
     IN_DROP_LAST = "in_drop_last"                    # IN list without its last constant
+    HAS_NULL_ELEMENT_FALSE = "has_null_element_false"  # a label test reads a NULL element as no match (FALSE)
     REPLACE_KEEPS_FOREIGN = "replace_keeps_foreign"  # drop only the declared names on an adopted table
     ADOPTED_KEEPS_CONSTRAINT = "adopted_keeps_constraint"  # keep an adopted table's same-named constraint unseen
     HOP_VISIBILITY_DROPPED = "hop_visibility_dropped"  # omit a composed relation's hop visibility policies

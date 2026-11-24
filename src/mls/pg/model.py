@@ -13,7 +13,7 @@ from mls.props.effective import (
     effective, inclusion_pred, row_constraints, simple_fks, transition_constraints,
 )
 from mls.spec.model import (
-    CONTEXT_NOW, And, ColRef, ColumnRule, Const, CtxRef, Cmp, InclusionRule, InGroup, IsNull, Lit,
+    CONTEXT_NOW, And, ColRef, ColumnRule, Const, CtxRef, Cmp, Has, InclusionRule, InGroup, IsNull, Lit,
     Member, NewRef, Not, NowBetween, OldRef, OpaqueRef, Or, Pred, Spec,
 )
 
@@ -83,6 +83,13 @@ def eval_pred(p: Pred, row: Row, ctx: dict[str, Any], db: Database,
         return None if v is None else (not v)
     if isinstance(p, IsNull):
         return term(p.is_null) is None
+    if isinstance(p, Has):  # D88: SQL `label = any(arr)`
+        arr, label = term(p.has[0]), term(p.has[1])
+        if arr is None:
+            return None
+        if label in arr:
+            return True
+        return None if None in arr else False
     if isinstance(p, Cmp):
         l, op, r = p.cmp
         lv, rv = term(l), term(r)

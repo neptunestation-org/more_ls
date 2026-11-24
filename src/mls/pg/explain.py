@@ -143,6 +143,12 @@ def scale_load_sql(spec: Spec, adapter: Adapter, n_rows: int, n_users: int = 100
             labels = spec.enums[col.enum]
             arr = ", ".join("'" + x.replace("'", "''") + "'" for x in labels)
             return f"((array[{arr}])[({i} % {len(labels)}) + 1]::{q(col.enum)})"
+        if col.type == "enum[]":  # D88: one label per row
+            labels = spec.enums[col.enum]
+            arr = ", ".join("'" + x.replace("'", "''") + "'" for x in labels)
+            return f"(array[(array[{arr}])[({i} % {len(labels)}) + 1]]::{q(col.enum)}[])"
+        if col.type == "text[]":
+            return f"(array['t' || ({i} % 50)])"
         if col.type != "timestamp":
             raise ValueError(f"no scale values for type {col.type}")
         return f"(now() + (({i} % 100) - 50) * interval '1 day')"

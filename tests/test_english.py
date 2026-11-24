@@ -94,3 +94,16 @@ def test_a_set_relation_reads_as_the_rows_its_condition_keeps():
     assert relation_line(spec, "public_tasks").endswith("whose project_id is among the public_projects.")
     r5 = next(r for r in spec.rules if r.id == "R5")
     assert "the row's project_id is among the public_projects" in rule(spec, r5)
+
+
+def test_a_label_test_reads_as_the_array_including_it():
+    """#65: `'lead' = any(roles)` reads "the row's roles include 'lead'", in a relation's condition,
+    a policy, and on a transition's images."""
+    from mls.english import relation_line, rule
+    from tests.templates import specs
+
+    spec = specs.array_spec()
+    assert relation_line(spec, "lead_of").endswith("where the team_members row's roles include 'lead'.")
+    r6, t1 = (next(r for r in spec.rules if r.id == i) for i in ("R6", "T1"))
+    assert "not the row's roles include 'private'" in rule(spec, r6)
+    assert "the previous roles include 'lead' or not the new roles include 'lead'" in rule(spec, t1)

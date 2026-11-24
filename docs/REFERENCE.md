@@ -71,6 +71,8 @@ table out of the spec.  MLS's own names (relation, hierarchy, opaque and context
 | `timestamp` | `timestamptz` | via `now_between` only | no timestamp constants in v1 |
 | `uuid` | `uuid` | `= <>` | constants are canonical UUID strings |
 | `enum` | the declared enum type | `= <>`, `in` | adopted tables only; constants are the type's labels |
+| `text[]` | `text[]` | `has` only | adopted tables only; an adopted `varchar[]` column is `text[]` |
+| `enum[]` | an array of the declared enum type | `has` only | adopted tables only; labels are the type's |
 
 `int` and `bigint` compare with each other, in a comparison, a membership, an inclusion and a
 cardinality group: the fragment has no arithmetic, so they differ only in range.  A
@@ -98,6 +100,14 @@ membership, inclusion, cardinality or hierarchy column, and a context value cann
 MLS creates no types, so an owned table has no enum column: declare it `text` with a check rule
 `col in ('A', 'B', ...)`.  `mls import` reads the schema's enum types and their columns;
 `check --dsn` and `drift` compare the labels with the catalog's.
+
+**Array columns.**  A column of an adopted table that holds a list of labels, such as a member's
+roles in a group, is `text[]`, or `enum[]` with the enum type named as for an enum column
+(`{"type": "enum[]", "enum": "app_role", "nullable": true}`; terse `roles text[]`,
+`roles enum[] app_role`).  It is tested only by `has` (below): whether a constant label is among
+its elements.  It compares with nothing else, it cannot be a membership, inclusion, cardinality or
+hierarchy column, and a context value cannot be an array; otherwise it is a column like any other
+(privileges, column rules).  MLS creates no array columns, so an owned table has none.
 
 **Constants** (`{"const": v}`): a JSON integer, string or boolean.  An integer constant must be
 within the range of the type it is compared with (`constant 2147483648 is out of range for int`,
@@ -466,6 +476,15 @@ bounds are timestamp columns; a missing bound is open; a NULL bound is open.  Tw
 least one bound must be given.
 
 **`{"is_null": term}`**: two-valued; applies to a column.
+
+**`{"has": [array column, {"const": label}]}`**, terse `'owner' = any(roles)`: the array has an
+element equal to the label, SQL `'owner' = any(roles)`.  TRUE when an element is the label;
+UNKNOWN when the array is NULL, or has a NULL element and none is the label; FALSE otherwise (an
+empty array too).  The column may be `col`, `old.col` or `new.col`, so it works in policies,
+checks, a relation's `where` (`relation owner_of = members(user_id, group_id) where 'owner' =
+any(roles)`) and transitions.  The label is a text constant, one of the type's labels for an
+`enum[]` column.  `not ('owner' = any(roles))` is SQL's `'owner' <> all(roles)`, UNKNOWN in the
+same cases.
 
 **`{"and": [p, ...]}`, `{"or": [p, ...]}`, `{"not": p}`**: SQL three-valued connectives.  Lists
 are non-empty.
@@ -896,7 +915,8 @@ grammar:
     roles      := 'roles' NAME (',' NAME)*
     table      := 'table' NAME MODE '{' [column (',' column)* [';']] [option (';' option)*] '}'
     enum       := 'enum' NAME '(' STRING (',' STRING)* ')'        (a Postgres enum type and its labels, in order)
-    column     := NAME TYPE ['not null']                          (a bare column is nullable; TYPE 'enum' NAME for an enum)
+    column     := NAME TYPE ['not null']                          (a bare column is nullable; TYPE 'enum' NAME for an enum,
+                                                                   'text[]' or 'enum[]' NAME for an array)
     option     := 'primary_key' '(' names ')' | 'unique' '(' names ')' | 'tags' '(' names ')'
                 | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)' | 'inlined function f(t) md5 h')
     relation   := 'relation' NAME '=' TABLE '(' KEY ',' VALUE ')' ['where' pred]
@@ -909,6 +929,7 @@ grammar:
     property   := ID TEMPLATE [table role command which]: ... ['description' STRING]
     term       := column | old.column | new.column | @context | 'text' | 123 | true | false
     atom       := term op term | term in (const, ...) | term is null | relation(key, value) | relation(value)
+                | 'label' = any(column)
                 | in_group(h, key, value) | now_between(from | -, until | -) | opaque(name) | true | false
     pred       := atom | not pred | pred and pred | pred or pred   (not > and > or; a nested same-
                                                                    connective group keeps its parens)
@@ -1199,7 +1220,8 @@ has an unassumed path.  `--json` prints `{"ok", "tables": [{"table", "status", "
 Writes a spec from a live schema: a starting point the human or the loop edits; from then
 on the spec is the source of truth and `mls drift` says whether the database still agrees.
 Every table with row-level security enabled is `adopted` (columns of MLS types, columns of the
-schema's enum types with the types' labels, primary key and unique constraints read from the
+schema's enum types with the types' labels, arrays of text or of those types, primary key and
+unique constraints read from the
 catalog; other columns are left out and noted), every other
 table `observed`.  The hardening state is recorded as assumptions (an app-role owner, RLS not
 forced, an app role with `BYPASSRLS`).  The app roles are the roles the policies and grants
@@ -1270,6 +1292,7 @@ reports each as `hardening` until it is fixed or the spec assumes it.
 | `col = any ((select mls_lookup_<r>(<ctx>))::t[])`, a lookup helper the compiler created | `member`, read from the helper's body as the subquery it holds; the relation keeps the helper's name (a helper without an argument is a relation without a key) |
 | `col in (select id from t where <condition>)`, its `= any (array(...))` and correlated `exists` twins, with `id` a key of `t` on its own and no key filter | a relation without a key, `t(id) where <condition>`, and a membership naming the value only |
 | `col = any (array(select v from T where k = any (array(select ... from rel where key = <ctx>))))`, or the same nesting of `in (select ...)`, up to three levels | `member` over a composed relation: an identical chain in the spec is reused, else one is proposed (named `<base>_<last table>`) with a note; when a hop's pair is not unique or a hop column is nullable the policy stays opaque |
+| `'x' = any (col)` and `'x' <> all (col)` over an array column (`'x'::text`, `'x'::"T"` for an enum array) | `has` (negated: `not` of `has`); `col @> array['x']`, `<@` and `&&` stay opaque: they read a NULL element as no match, FALSE where `= any` is UNKNOWN |
 | `col is [not] null`, `and`, `or`, `not`, `true`, `false` | the same |
 | `(f is null or f <= (select now())) and (u is null or (select now()) < u)` | `now_between` |
 | a bare boolean column `b` | `b = true` |

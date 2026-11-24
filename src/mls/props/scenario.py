@@ -6,9 +6,9 @@ from typing import Any
 
 from mls.logic.solve import Model
 from mls.logic.term import Sort
-from mls.logic.tvl import has_parent_fun, hop_exists_fun, hop_key_fun, parent_fun, rel_fun
+from mls.logic.tvl import ARRAY_HAS, ARRAY_HAS_NULL, has_parent_fun, hop_exists_fun, hop_key_fun, parent_fun, rel_fun
 from mls.props.obligations import Obligation
-from mls.spec.model import CONTEXT_NOW, MAX_HOPS, ComposedRelation, Spec
+from mls.spec.model import ARRAY_TYPES, CONTEXT_NOW, MAX_HOPS, ComposedRelation, Spec
 
 
 @dataclass
@@ -80,6 +80,11 @@ def render_scenario(spec: Spec, ob: Obligation, model: Model) -> Scenario:
             ty = spec.context_type(name)
             universe.setdefault(ty, set()).add(v)
             sc.context[name] = _render(spec, ty, v, consts, now)
+    tested: dict[tuple[str, str], set[str]] = {}  # D88: per array column, the labels the obligation tested
+    for e in ob.encoders:
+        for k, xs in e.array_labels.items():
+            tested.setdefault(k, set()).update(xs)
+    ids = {x: i for e in ob.encoders for x, i in e.consts.items()}
     for row, table in ob.rows.items():
         values = {}
         for col, c in spec.tables[table].columns.items():
@@ -88,6 +93,17 @@ def render_scenario(spec: Spec, ob: Obligation, model: Model) -> Scenario:
                 continue  # column not mentioned by the obligation
             if c.nullable and model.var(f"{row}.{col}.null", Sort.BOOL):
                 values[col] = None
+            elif c.type in ARRAY_TYPES:
+                # D88: the labels tested on this column that it holds, and NULL for a NULL element
+                # (any other label changes no verdict); an array no label was tested on is a value
+                labels = sorted(tested.get((table, col), ()))
+                if not labels:
+                    values[col] = f"array#{v}"
+                    continue
+                elems = [repr(x) for x in labels if model.app(ARRAY_HAS, v, ids[x])]
+                if model.app(ARRAY_HAS_NULL, v):
+                    elems.append("NULL")
+                values[col] = "{" + ", ".join(elems) + "}"
             else:
                 universe.setdefault(c.type, set()).add(v)
                 values[col] = _render(spec, c.type, v, consts, now)

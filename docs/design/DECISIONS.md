@@ -1819,3 +1819,22 @@ issue: taking Supabase's `authenticator` and `supabase_auth_admin` as trusted ro
 `service_role`.  Neither has BYPASSRLS in the image, so they reach rows only through policies; a
 trusted role's policies are not imported, and a deploy replaces the whole policy set (D51), so GoTrue
 would lose its read of the claims table.  They stay app roles, and requirements cover them.
+
+**D88. A constant label in an array column (#65).**  supabase-tenant-rbac keeps a member's roles as
+`members.roles text[]`, so "an owner of the group" was not expressible.  Column types `text[]` and
+`enum[] <type>` (adopted tables, like enums, D59) and one atom, `{"has": [<column>, <label>]}`, terse
+`'owner' = any(roles)`, SQL `'owner' = any(roles)`.  It may appear wherever a column test may
+(policies, checks, a relation's `where`, transitions on `old`/`new`); an array column compares with
+nothing else, and is otherwise an ordinary column (privileges, column rules).
+- *Encoding, exact:* the column's value stays an integer (equal arrays are one value) with two
+  uninterpreted functions, `arr.has(v, label)` and `arr.has_null(v)`.  T = not null and has; F = not
+  null and not has and not has_null.  So a NULL array, or a NULL element without the label, is
+  UNKNOWN (SQL's `= any`), an empty array FALSE, and only states a real array can be in are
+  modelled: a counterexample is always realizable.  Only constant labels are tested, so it stays
+  quantifier-free.  Rejected: an independent (T, F) pair per label (sound, but it admits states no
+  array has, e.g. one label FALSE and another UNKNOWN).
+- *Import* reads `'x' = any(col)` and `'x' <> all(col)` (its negation in three values too).
+  `col @> array['x']` and `&&` stay opaque with a note: with a NULL element `@>` is FALSE where
+  `= any` is UNKNOWN, so they differ under `not` and in a CHECK.
+- *Out of scope:* comparing arrays, a label taken from a column or the context, array length, and
+  that every element is a known label.  Lean transcribes the atom's truth table.

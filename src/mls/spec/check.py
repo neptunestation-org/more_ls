@@ -26,7 +26,7 @@ from mls.spec.model import (
     MAX_HOPS, ComposedRelation, Relation,
     CONTEXT_NOW, And, BypassAssumed, CardinalityRule, CheckRule, ColRef, ColType, ColumnRule, Cmp, Const, CtxRef,
     INT_RANGE, In, AlwaysOnUpdate, ChangesOnly, Custom, InclusionRule, InGroup, InvariantPreserved, IsNull, Lit, Member, MonotoneIn, MustAllow, NewRef, Not,
-    RoleSeparation,
+    RoleSeparation, ARRAY_TYPES, Has,
     NowBetween, OldRef, OpaqueRef, Or, OwnerAssumed, PathAssumed, InlinedAssumed, PolicyRule, RlsAssumed, Spec, TenantIsolation,
     ColumnImmutable, WriteSubsetRead, LeastPrivilege, TransitionRule, comparable, pair_unique,
 )
@@ -222,7 +222,7 @@ class Checker:
             term.new if isinstance(term, NewRef) else None
         t = self.spec.tables.get(scope.table) if col is not None and scope.table else None
         c = t.columns.get(col) if t else None
-        return c.enum if c is not None and c.type == "enum" and c.enum else None
+        return c.enum if c is not None and c.type in ("enum", "enum[]") and c.enum else None
 
     def enum_labels(self, term, scope: Scope) -> list[str] | None:
         """The labels of the enum column `term` names (D59), or None when it names no enum column."""
@@ -277,6 +277,10 @@ class Checker:
                 self.err(path, "comparing two constants is meaningless", "")
         if lt is None or rt is None:
             return
+        if lt in ARRAY_TYPES or rt in ARRAY_TYPES:  # D88
+            self.err(path, f"an array column is tested only by has: type mismatch {lt} {op} {rt}",
+                     "test a constant label among its elements: {\"has\": [{\"col\": name}, {\"const\": label}]}")
+            return
         if lt == "enum" and rt == "enum":  # two references of one enum type compare (#39)
             ln, rn = self.enum_name(l, scope), self.enum_name(r, scope)
             if ln != rn:
@@ -321,6 +325,30 @@ class Checker:
         self.const_ok_for(l, ty, lpath)
         self.const_ok_for(r, ty, rpath)
 
+    def _has(self, p: Has, scope: Scope, path: str) -> None:
+        """D88: a constant label among an array column's elements (an enum array's: one of its labels)."""
+        t, label = p.has
+        ty = self.term_type(t, scope, f"{path}[0]")
+        if ty is None and isinstance(t, (ColRef, OldRef, NewRef)):
+            return  # term_type said what is wrong with the column
+        if not isinstance(t, (ColRef, OldRef, NewRef)) or ty not in ARRAY_TYPES:
+            arrays = [c for c, col in (self.spec.tables[scope.table].columns.items() if scope.table in
+                                       self.spec.tables else []) if col.type in ARRAY_TYPES]
+            self.err(f"{path}[0]", f"has tests an array column (text[] or enum[]), not {ty or 'this term'}",
+                     f"use one of the table's array columns: {', '.join(arrays) or '(none)'}; compare other "
+                     f"columns with cmp or in")
+            return
+        if not isinstance(label, Const) or not isinstance(label.const, str):
+            self.err(f"{path}[1]", "the label is a text constant"
+                     + (f", not {label.const!r}" if isinstance(label, Const) else ", not a column or context value"),
+                     "write the label as a string; a label taken from a column or the context is not supported")
+            return
+        if ty == "enum[]":
+            labels = self.enum_labels(t, scope) or []
+            if label.const not in labels:
+                self.err(f"{path}[1]", f"'{label.const}' is not a label of the column's enum type",
+                         f"one of: {', '.join(map(repr, labels))}")
+
     def pred(self, p, scope: Scope, path: str, negated: bool = False) -> None:
         if isinstance(p, Lit):
             return
@@ -340,6 +368,9 @@ class Checker:
             if isinstance(p.is_null, (Const, CtxRef)):
                 self.err(f"{path}.is_null", "is_null applies to a column (constants and context "
                                             "values are never NULL)", "use {\"col\": name}")
+            return
+        if isinstance(p, Has):
+            self._has(p, scope, f"{path}.has")
             return
         if isinstance(p, Cmp):
             l, op, r = p.cmp
@@ -547,6 +578,9 @@ class Checker:
             if cv.type == "enum":
                 self.err(path + ".type", "a context value cannot be an enum",
                          "declare it text and compare an enum column with constant labels")
+            if cv.type in ARRAY_TYPES:
+                self.err(path + ".type", "a context value cannot be an array",
+                         "test an array column with a constant label instead")
             if name == CONTEXT_NOW:
                 self.err(path, "'now' is a built-in context value", "remove it")
             if not IDENT.match(name):
@@ -619,7 +653,10 @@ class Checker:
                     self.err(f"{path}[{i}]", f"duplicate label '{label}'", "list each label once")
 
     def check_enum_column(self, tname: str, t, cname: str, col, path: str) -> None:
-        if col.type != "enum":
+        if col.type == "text[]" and t.mode == "owned":
+            self.err(path + ".type", f"table '{tname}' is owned, and MLS creates its tables without array columns",
+                     "adopt the table if the database already has it")
+        if col.type not in ("enum", "enum[]"):
             if col.enum is not None:
                 self.err(path + ".enum", f"column '{cname}' is {col.type}, not enum", "remove 'enum'")
             return
@@ -627,7 +664,10 @@ class Checker:
             self.err(path + ".enum", f"column '{cname}' needs a declared enum type"
                      + (f" ('{col.enum}' is not declared)" if col.enum else ""),
                      f"declare it under enums, or use one of: {', '.join(self.spec.enums) or '(none declared)'}")
-        if t.mode == "owned":
+        if t.mode == "owned" and col.type == "enum[]":
+            self.err(path + ".type", f"table '{tname}' is owned, and MLS creates its tables without array columns",
+                     "adopt the table if the database already has it")
+        elif t.mode == "owned":
             self.err(path + ".type", f"table '{tname}' is owned, and MLS creates its tables without enum types",
                      f"declare '{cname}' text with a check rule  {cname} in ('A', 'B', ...);  "
                      f"or adopt the table if the database already has it")

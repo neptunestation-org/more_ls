@@ -31,6 +31,8 @@ triggers, grants).  You never write SQL.
 - {"in_group": {"hierarchy": H, "key": {"ctx": c}, "value": {"col": v}}}  col is one of the user's groups in
   hierarchy H or lies below one (policies only)
 - {"now_between": {"from": term|null, "until": term|null}}   from <= now < until, NULL bound = open
+- {"has": [{"col": arr}, {"const": "x"}]}   the array column arr (text[] or enum[]) has an element 'x'
+  (UNKNOWN when arr is NULL, or has a NULL element and no 'x'); an array column is tested only this way
 - {"is_null": term}, {"and": [...]}, {"or": [...]}, {"not": p}, {"lit": true|false}, {"opaque": name}
 - Negated member / in_group is not allowed in policies.  Context values are not allowed in checks.
 

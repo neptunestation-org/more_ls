@@ -49,6 +49,7 @@ ROUND_TRIP = {
     "nullable_relation": specs.nullable_relation_spec,  # #49: a relation over a nullable key
     "storefront": specs.storefront_spec,  # D70: a constant-keyed helper call reads back as its relation
     "filtered_inclusion": specs.filtered_inclusion_spec,  # #54: the inclusion's triggers read back as the rule
+    "array": specs.array_spec,  # #65: array columns, label tests in policies, a relation, a check and a transition
 }
 
 

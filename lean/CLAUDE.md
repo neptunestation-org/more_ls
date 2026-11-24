@@ -91,3 +91,8 @@ writers) is in `docs/design/archive/ROADMAP.md`, "Parallel track — Lean 4".
   filtered relations whose conditions imply each other, and `∀k: rel(k, x.value) → k = x.key` for a
   unique value, are not transcribed.  Both follow from `Relational.lean`'s derivation of a relation
   from the stored rows (plus the key constraint), which is where they would be proved.
+- **Array columns in CHECK and transition theorems (#65, D88).**  `Pred.has` is transcribed in
+  `Pred.lean` (eval, encoder, `tf_sound`; vectors in `Vectors.lean`), but `Pred.rowOnly` and
+  `Pred.twoImage` leave it out, so `Relational.lean` and `Transition.lean` do not cover a CHECK or
+  transition that tests an array.  Including it needs `Env.arr` equal across the two environments
+  those theorems compare (`Env.ofRow` / `Env.ofImages` would carry it from `Extra`).

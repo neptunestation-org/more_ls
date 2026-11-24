@@ -733,3 +733,32 @@ def test_a_helper_body_with_its_own_alias_defaults_and_qualified_parameters_inli
     assert "from members mls_definer" in out and "mls_definer.team_id = (\"tickets\".\"team_id\")" in out
     assert "(NULL::text) is null" in out and " m." not in out
     assert split_args("NULL::text, 'a, b'::text, ARRAY[1, 2]") == ["NULL::text", "'a, b'::text", "ARRAY[1, 2]"]
+
+
+ROLES = {"has": [{"col": "roles"}, {"const": "lead"}]}
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("('lead'::text = ANY (roles))", ROLES),
+    ("('lead'::text <> ALL (roles))", {"not": ROLES}),
+    ("('lead'::text = ANY ((roles)::text[]))", ROLES),  # a varchar[] column
+    ("(('lead'::text = ANY (roles)) AND (level = 1))", {"and": [ROLES, {"cmp": [{"col": "level"}, "=", {"const": 1}]}]}),
+])
+def test_a_label_among_an_array_columns_elements(text, expected):
+    """#65: `'x' = ANY (col)` over an array column is `has`, and `'x' <> ALL (col)` its negation (in
+    three values too: both are UNKNOWN on a NULL array, or on a NULL element without a match)."""
+    r, _ = do(text, env=env_of(roles=("text[]", True)))
+    assert r.kind == "lifted", r.reasons
+    assert r.pred == expected
+
+
+@pytest.mark.parametrize("text, reason", [
+    ("(roles @> ARRAY['lead'::text])", "a NULL element"),
+    ("(roles && ARRAY['lead'::text, 'admin'::text])", "a NULL element"),
+    ("(level = ANY (roles))", "a text constant"),
+])
+def test_other_array_tests_stay_opaque(text, reason):
+    """#65: `@>` and `&&` read a NULL element as no match (FALSE where `= ANY` is UNKNOWN), so they
+    are not `has`; nor is a label taken from a column."""
+    r, _ = do(text, env=env_of(roles=("text[]", True)))
+    assert r.kind == "opaque" and reason in " ".join(r.reasons), r.reasons

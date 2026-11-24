@@ -744,3 +744,48 @@ def enum_dict(labels: list[str] | None = None) -> dict:
                                {"cmp": [{"col": "archived"}, "<>", {"const": 1}]}]},
          "description": "a member reads every unarchived document of their tenant that is not in review"})
     return d
+
+
+def array_dict() -> dict:
+    """#65: team_tasks with `team_members` adopted, a member's roles as `roles text[]` and their
+    permissions as `perms "Perm"[]` (an enum array), both nullable.  `lead_of` is the members whose
+    roles include 'lead' (a relation with a condition): a lead edits their team's projects (R5).
+    A member reads their own row, and anyone's whose roles do not include 'private' (R6: a NULL
+    array, or a NULL element, makes that UNKNOWN, so the row is hidden; the mutation reads a NULL
+    element as no match).  A member edits their own row while their perms include 'edit' (R7), a
+    banned member's row is refused (C1), and an edit never makes someone a lead (T1)."""
+    d = json.loads((EXAMPLE.parent / "team_tasks.mls.json").read_text())
+    d["enums"] = {"Perm": ["edit", "view"]}
+    tm = d["tables"]["team_members"]
+    tm["mode"] = "adopted"
+    tm["columns"]["roles"] = {"type": "text[]", "nullable": True}
+    tm["columns"]["perms"] = {"type": "enum[]", "enum": "Perm", "nullable": True}
+    d["relations"]["lead_of"] = {"table": "team_members", "key": "user_id", "value": "team_id",
+                                 "where": {"has": [{"col": "roles"}, {"const": "lead"}]}}
+    own = {"cmp": [{"col": "user_id"}, "=", {"ctx": "uid"}]}
+    lead = {"member": {"relation": "lead_of", "key": {"ctx": "uid"}, "value": {"col": "team_id"}}}
+    not_private = {"not": {"has": [{"col": "roles"}, {"const": "private"}]}}
+    d["rules"] += [
+        {"id": "R5", "kind": "policy", "name": "lead_edits_projects", "table": "projects", "role": "authenticated",
+         "command": "update", "mode": "permissive", "using": lead, "check": lead},
+        {"id": "R6", "kind": "policy", "name": "members_read_public_rows", "table": "team_members",
+         "role": "authenticated", "command": "select", "mode": "permissive", "using": {"or": [own, not_private]}},
+        {"id": "R7", "kind": "policy", "name": "editor_edits_own_row", "table": "team_members",
+         "role": "authenticated", "command": "update", "mode": "permissive",
+         "using": {"and": [own, {"has": [{"col": "perms"}, {"const": "edit"}]}]}, "check": own},
+        {"id": "C1", "kind": "check", "name": "no_banned_members", "table": "team_members",
+         "predicate": {"not": {"has": [{"col": "roles"}, {"const": "banned"}]}}},
+        {"id": "T1", "kind": "transition", "name": "nobody_made_lead", "table": "team_members",
+         "predicate": {"or": [{"has": [{"old": "roles"}, {"const": "lead"}]},
+                              {"not": {"has": [{"new": "roles"}, {"const": "lead"}]}}]}},
+    ]
+    d["properties"] += [
+        {"id": "P6", "template": "must_allow", "table": "team_members", "role": "authenticated",
+         "command": "select", "when": not_private,
+         "description": "a member reads every membership row whose roles do not include private"},
+    ]
+    return d
+
+
+def array_spec() -> Spec:
+    return make(array_dict())
