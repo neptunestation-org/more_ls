@@ -333,13 +333,20 @@ class Parser:
                 self.eat("]")
                 col["type"] += "[]"
             # an enum column's type name (missing, or on another type: the checker's error at its path)
-            if self.tok.kind in ("ident", "qident") and not self.at_word("not"):
+            if self.tok.kind in ("ident", "qident") and not self.at_word("not", "default"):
                 self.mark(f"{self.path}.columns.{c}.enum")
                 col["enum"] = self.name("the enum type's name")
             if self.at_word("not"):
                 self.advance()
                 self.word("null")
                 col["nullable"] = False
+            if self.at_word("default"):  # #76
+                self.advance()
+                if self.at_word("fresh"):
+                    self.advance()
+                    col["default"] = "fresh"
+                else:
+                    col["default"] = self.term(f"{self.path}.columns.{c}.default")
             t["columns"][c] = col
             if self.at(","):
                 self.advance()

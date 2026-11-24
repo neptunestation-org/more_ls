@@ -780,3 +780,35 @@ rules {
     assert any("constant" in e for e in errors("slug = @uid"))
     assert any("ASCII" in e for e in errors("slug = 'Café'"))
     assert any("is owned" in e and "citext" in e for e in errors("slug = 'acme'", mode="owned"))
+
+
+def test_a_default_is_declared_on_an_adopted_table_with_a_value_of_the_columns_type():
+    """#76: a column default is a constant of its type, a context value of its type (`@now` for a
+    timestamp), or `fresh` (a value the database generates); only on adopted tables."""
+    from mls.spec.syntax import parse
+    from mls.terse import render
+
+    base = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated
+table t %s {
+  id uuid not null default %s,
+  n int;
+  primary_key (id)
+}
+"""
+
+    def errors(default: str, mode: str = "adopted") -> list[str]:
+        try:
+            check_spec(parse(base % (mode, default)))
+        except SpecError as e:
+            return [f"{x.path}: {x.message}" for x in e.errors]
+        return []
+
+    for ok in ("fresh", "@uid"):
+        assert errors(ok) == [], ok
+        spec = check_spec(parse(base % ("adopted", ok)))
+        assert check_spec(parse(render(spec))) == spec
+    assert any("$.tables.t.columns.id.default" in e for e in errors("1"))
+    assert any("$.tables.t.columns.id.default" in e for e in errors("@now"))
+    assert any("owned" in e for e in errors("fresh", mode="owned"))

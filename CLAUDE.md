@@ -224,6 +224,10 @@ union member the renderer does not cover.
   the encoder interns those constants lower-cased (`tvl._fold_citext`), the oracle holds values as
   `model.CIText`, the harness draws the constants in three cases (`harness.string_constants`) and
   creates the extension; fixture `specs.citext_spec`, mutation `CITEXT_AS_TEXT`.
+- D96 (#76): `Column.default` (adopted only: const, ctx, `fresh`); `obligations.insert_written` (the
+  left-out columns' defaults; one with none is unconstrained, and FALSE only in a lower bound) in
+  access_terms, net_terms, insert_assumptions and the must_allow antecedent; import `lift.read_default`, drift `drift.live_defaults`, harness
+  `default_sql`/`default_value`; fixture `specs.defaults_spec`, `tests/templates/test_defaults.py`.
 - D86 (#54): an inclusion into a relation with a condition (`restrict deferred` required) compiles to two
   deferred constraint triggers (`compile/fk.py`: `<name>` reads the target row `FOR SHARE`, `<name>_target`
   refuses a demotion), owned by `mls_internal`; never assumed by the proofs; preflight counts existing

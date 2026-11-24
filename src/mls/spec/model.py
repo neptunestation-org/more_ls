@@ -214,6 +214,9 @@ class Column(Strict):
     type: ColType
     nullable: bool
     enum: str | None = None  # the declared enum type of an `enum` or `enum[]` column (D59, D88)
+    # #76: what the database writes when an insert leaves the column out (adopted tables): a
+    # constant, a context value (`now` included), or "fresh" (a value it generates)
+    default: Const | CtxRef | Literal["fresh"] | None = None
 
 
 TableMode = Literal["owned", "adopted", "observed"]

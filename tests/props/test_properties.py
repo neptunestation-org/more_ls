@@ -845,3 +845,49 @@ def test_citext_compares_with_constants_ignoring_case():
 
     v = verdicts(check_spec(parse(CITEXT)))
     assert v == {"P1": "PROVED", "P2": "PROVED", "P3": "PROVED"}, v
+
+
+DEFAULTS = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated
+
+table user_emails adopted {
+  id uuid not null default fresh,
+  user_id uuid not null%s,
+  email text not null,
+  is_verified bool not null default false,
+  is_primary bool not null default false,
+  created_at timestamp not null default @now;
+  primary_key (id)
+}
+
+rules {
+  R1 policy add_own on user_emails: authenticated insert permissive check user_id = @uid and is_verified = false
+  R2 column_rule address_only on user_emails: authenticated write email
+}
+
+properties {
+  P1 must_allow user_emails authenticated insert: user_id = @uid and is_verified = false and is_primary = false
+  P2 custom user_emails authenticated insert new: is_primary = false
+}
+"""
+
+
+def test_an_insert_lower_bound_counts_on_the_defaults_of_the_columns_the_role_cannot_write():
+    """#76 (graphile/starter): the role writes only `email`; the database fills in the owner from
+    the current user, the flags with false, the id fresh and the time now.  "A user adds an
+    address" is then proved over the rows those defaults give.  With no default for `user_id`
+    the insert is admitted for no row (D89), and a default the policy refuses (is_verified true)
+    refutes it.  An upper bound gains the defaults too (P2: a new address is never primary)."""
+    from mls.spec.syntax import parse
+
+    v = verdicts(check_spec(parse(DEFAULTS % " default @uid")))
+    assert v == {"P1": "PROVED", "P2": "PROVED"}, v
+    v = verdicts(check_spec(parse(DEFAULTS % "")))
+    assert v["P1"] == "REFUTED", v
+    assert v["P2"] == "PROVED", v  # the defaults still declared bound is_primary
+    # a column with no declared default is unconstrained for an upper bound, never assumed away
+    unknown = (DEFAULTS % "").replace("is_primary bool not null default false", "is_primary bool not null")
+    assert verdicts(check_spec(parse(unknown)))["P2"] == "REFUTED"
+    refused = DEFAULTS.replace("is_verified bool not null default false", "is_verified bool not null default true")
+    assert verdicts(check_spec(parse(refused % " default @uid")))["P1"] == "REFUTED"

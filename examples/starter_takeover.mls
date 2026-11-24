@@ -16,21 +16,21 @@ table profiles adopted {
 }
 
 table projects adopted {
-  id bigint not null,
+  id bigint not null default fresh,
   team_id bigint not null,
   name text not null,
-  archived bool not null;
+  archived bool not null default false;
   primary_key (id);
   assume ('rls not_forced')
 }
 
 table tasks adopted {
-  id bigint not null,
+  id bigint not null default fresh,
   project_id bigint not null,
   title text not null,
-  status text not null,
+  status text not null default 'todo',
   assignee_id uuid,
-  created_at timestamp not null;
+  created_at timestamp not null default @now;
   primary_key (id);
   assume ('rls not_forced')
 }
@@ -38,15 +38,15 @@ table tasks adopted {
 table team_members adopted {
   team_id bigint not null,
   user_id uuid not null,
-  role text not null;
+  role text not null default 'member';
   primary_key (team_id, user_id);
   assume ('rls not_forced')
 }
 
 table teams adopted {
-  id bigint not null,
+  id bigint not null default fresh,
   name text not null,
-  created_at timestamp not null;
+  created_at timestamp not null default @now;
   primary_key (id);
   assume ('rls not_forced')
 }

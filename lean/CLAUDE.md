@@ -96,3 +96,7 @@ writers) is in `docs/design/archive/ROADMAP.md`, "Parallel track — Lean 4".
   `Pred.twoImage` leave it out, so `Relational.lean` and `Transition.lean` do not cover a CHECK or
   transition that tests an array.  Including it needs `Env.arr` equal across the two environments
   those theorems compare (`Env.ofRow` / `Env.ofImages` would carry it from `Extra`).
+- **Column defaults in inserts (#76, D96).**  `obligations.insert_written` (an insert by a role that
+  may not name a column writes that column's declared default) and the oracle's filled row are not
+  transcribed: `Policy.lean`'s insert outcome takes the whole row as written.  The default is an
+  extra equation on the new image, as the column privileges are for an update.

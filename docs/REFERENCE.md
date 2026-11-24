@@ -119,6 +119,14 @@ another column, a context value or by an ordering operator, and it cannot be a m
 inclusion, cardinality or hierarchy column; its keys, privileges and column rules are as for any
 column.  MLS creates no `citext` column, so an owned table has none: declare it `text`.
 
+**Defaults.**  A column of an adopted table may declare the default the database writes when an
+insert leaves it out: `"default": {"const": false}`, `{"ctx": "uid"}` (a context value of the
+column's type, `{"ctx": "now"}` for `now()`), or `"fresh"` for a value the database generates
+(a uuid generator or a sequence).  Terse: `is_verified bool not null default false`,
+`user_id uuid not null default @uid`, `id uuid not null default fresh`.  The insert proofs count on
+them (§12.8); `mls import` reads them from the catalog, and `drift` reports a declared default the
+database no longer has.  An owned table declares none.
+
 **Constants** (`{"const": v}`): a JSON integer, string or boolean.  An integer constant must be
 within the range of the type it is compared with (`constant 2147483648 is out of range for int`,
 fix: declare the column bigint).  A string compared with a
@@ -869,9 +877,10 @@ a witness (`some row meets the condition`, reported with an example; a condition
 meets refutes the property) and the bound (`every row meeting the condition is admitted`).  For
 update, `when` ranges over `old` and `new` and should state the whole change.  The written row
 is assumed valid, so `when` states what the user can do, not the integrity rules.  For insert,
-a write column rule that leaves out a column of the table refutes the bound: Postgres refuses an
-insert that names that column, so the row is written with its default and not every row meeting
-the condition can be inserted.  A guard (a column rule with `when`) applies to updates only and
+a write column rule that leaves out a column of the table means the row takes that column's
+default: the condition then ranges over the rows the declared defaults give (`user_id uuid not
+null default @uid`: a user who writes only `email` still adds their own address), and a column
+left out with no declared default refutes the bound, since what Postgres writes there is not known.  A guard (a column rule with `when`) applies to updates only and
 leaves inserts alone.
 
 ### 12.9 `role_separation`

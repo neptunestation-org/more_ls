@@ -196,6 +196,40 @@ class ValueGen:
         return ctx
 
 
+def default_sql(spec: Spec, col) -> str:
+    """#76: a declared default as the harness's stand-in table has it."""
+    from mls.compile.sql import const_sql
+    from mls.identity import get_adapter
+    from mls.spec.model import CONTEXT_NOW
+
+    d = col.default
+    if d == "fresh":
+        return {"uuid": "gen_random_uuid()", "text": "md5(random()::text)"}.get(
+            col.type, f"(floor(random() * 1000000000))::{'bigint' if col.type == 'bigint' else 'integer'}")
+    if hasattr(d, "ctx"):
+        if d.ctx == CONTEXT_NOW:
+            return "now()"
+        sql = get_adapter(spec).ctx_sql(d.ctx)  # `(select <expr>)`; a default takes no subquery
+        assert sql.startswith("(select ") and sql.endswith(")"), sql
+        return f"({sql[len('(select '):-1]})"
+    return const_sql(d.const, col.type)
+
+
+def default_value(spec: Spec, col, ctx: dict) -> Any:
+    """#76: the value the oracle takes for a column an insert leaves out: its default, or NULL."""
+    import uuid as _uuid
+
+    d = col.default
+    if d is None:
+        return None
+    if d == "fresh":
+        return str(_uuid.uuid4()) if col.type == "uuid" else (_uuid.uuid4().hex if col.type == "text"
+                                                             else _uuid.uuid4().int % 1_000_000_000)
+    if hasattr(d, "ctx"):
+        return ctx.get(d.ctx)
+    return d.const
+
+
 def string_constants(spec: Spec) -> set[str]:
     """Every text constant a rule or property compares with (#73: what citext values are drawn from)."""
     from pydantic import BaseModel
@@ -465,6 +499,8 @@ class Harness:
             if t.mode != "adopted":
                 continue
             out += table_ddl(name, t)
+            out += [f"alter table {q(name)} alter column {q(c)} set default {default_sql(self.spec, col)}"
+                    for c, col in t.columns.items() if col.default is not None]  # #76
             out.append(f'create policy "Enable access for all users" on {q(name)} as permissive for all '
                        f"to public using (true) with check (true)")
             out.append(f"create policy legacy_no_inserts on {q(name)} as restrictive for insert to public "
@@ -598,7 +634,8 @@ class Harness:
             got = self._classify(e)
         finally:
             cur.execute("rollback")
-        full = {c: row.get(c) for c in self.spec.tables[table].columns}
+        full = {c: row[c] if c in row else default_value(self.spec, col, ctx)
+                for c, col in self.spec.tables[table].columns.items()}  # #76: what Postgres writes
         want = self.oracle.insert(role, table, full, ctx, self.db(ds), cols)
         self._record(res, "insert", table, role, ctx, {"row": row}, got, want)
 

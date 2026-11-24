@@ -32,6 +32,7 @@ CASES = {
     "session_setting": (specs.session_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),
     "trusted_function": (specs.function_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),  # #72
     "citext": (specs.citext_spec, Mutation.CITEXT_AS_TEXT, None),  # #73
+    "defaults": (specs.defaults_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),  # #76
     "bigint": (specs.bigint_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),  # D53
     "adopted": (specs.adopted_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),
     "adopted_replace": (specs.adopted_spec, Mutation.REPLACE_KEEPS_FOREIGN, None),  # D51

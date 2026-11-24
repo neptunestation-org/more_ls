@@ -650,6 +650,7 @@ class Checker:
                     self.err(f"{path}.columns.{cname}", f"'{cname}' is not a valid column identifier",
                              CATALOG_IDENT_FIX)
                 self.check_enum_column(tname, t, cname, col, f"{path}.columns.{cname}")
+                self.check_default(tname, t, cname, col, f"{path}.columns.{cname}")
             if t.primary_key is not None:
                 for i, c in enumerate(t.primary_key):
                     if c not in t.columns:
@@ -680,6 +681,37 @@ class Checker:
                     self.err(f"{path}[{i}]", "empty label", "list the type's labels as the database has them")
                 elif labels.index(label) != i:
                     self.err(f"{path}[{i}]", f"duplicate label '{label}'", "list each label once")
+
+    def check_default(self, tname: str, t, cname: str, col, path: str) -> None:
+        """#76: a default the insert lower bounds count on: of the column's type, on an adopted table."""
+        d, path = col.default, path + ".default"
+        if d is None:
+            return
+        if t.mode != "adopted":
+            self.err(path, f"table '{tname}' is {t.mode}: only an adopted table's columns declare defaults "
+                           f"(the database's own, which the proofs count on)", "remove the default")
+            return
+        if d == "fresh":
+            if col.type not in ("uuid", "int", "bigint", "text"):
+                self.err(path, f"a {col.type} column has no generated value", "declare the constant or context "
+                         "value the database writes, or no default")
+            return
+        if isinstance(d, CtxRef):
+            ty = self.spec.context_type(d.ctx)
+            if ty is None:
+                self.err(path, f"unknown context value '{d.ctx}'", f"one of: {', '.join(self.spec.identity.context)}")
+            elif not comparable(ty, col.type) and ty != col.type:
+                self.err(path, f"context value '{d.ctx}' is {ty}, the column {col.type}",
+                         "use a default of the column's type")
+            return
+        v = d.const
+        want = {"bool": bool, "int": int, "bigint": int}.get(col.type, str)
+        if not isinstance(v, want) or (want is int and isinstance(v, bool)):
+            self.err(path, f"default {v!r} is not a {col.type} value", "use a constant of the column's type")
+        elif col.type == "enum" and v not in self.spec.enums.get(col.enum or "", []):
+            self.err(path, f"'{v}' is not a label of the column's enum type", "use one of its labels")
+        else:
+            self.const_ok_for(d, col.type, path)
 
     def check_enum_column(self, tname: str, t, cname: str, col, path: str) -> None:
         if col.type == "citext" and t.mode == "owned":

@@ -244,7 +244,8 @@ def select_assumptions(enc: Encoder, spec: Spec, table: str, role: str, row: str
 
 def insert_assumptions(enc: Encoder, spec: Spec, table: str, role: str, row: str = "new") -> list[Term]:
     return [*relation_axioms(spec, enc), _T(enc, effective(spec, table, role, "insert", "check"), row, table),
-            _T(enc, row_constraints(spec, table), row, table)]
+            _T(enc, row_constraints(spec, table), row, table),
+            _T(enc, insert_written(spec, table, role), row, table)]
 
 
 def update_assumptions(enc: Encoder, spec: Spec, table: str, role: str) -> list[Term]:
@@ -280,6 +281,25 @@ def unwritable_on_insert(spec: Spec, table: str, role: str) -> list[str]:
     if allowed is None or allowed == "*":
         return []
     return [c for c in spec.tables[table].columns if c not in allowed]
+
+
+def insert_written(spec: Spec, table: str, role: str, lower: bool = False) -> Pred:
+    """#76: what an INSERT by `role` writes in the columns it may not name: their defaults (a
+    constant, a context value, or a fresh value: not NULL).  A column with none is unconstrained
+    (the proofs do not know what Postgres writes): any value for an upper bound or the diff, and
+    for a lower bound (`lower`) FALSE, the insert admitted for no row (#67)."""
+    parts: list[Pred] = []
+    for c in unwritable_on_insert(spec, table, role):
+        d = spec.tables[table].columns[c].default
+        if d is None:
+            if lower:
+                return Lit(lit=False)
+            continue
+        if d == "fresh":
+            parts.append(Not.model_validate({"not": {"is_null": {"col": c}}}))
+        else:
+            parts.append(Cmp.model_validate({"cmp": [{"col": c}, "=", d.model_dump(by_alias=True)]}))
+    return And.model_validate({"and": [p.model_dump(by_alias=True) for p in parts]}) if parts else Lit(lit=True)
 
 
 def guard_columns(spec: Spec, table: str) -> set[str]:
@@ -327,7 +347,8 @@ def net_terms(spec: Spec, table: str, role: str, cmd: str, enc: Encoder) -> tupl
     elif cmd == "delete":
         parts = [(effective(spec, table, role, "delete", "using"), "old")]
     elif cmd == "insert":
-        parts = [(effective(spec, table, role, "insert", "check"), "new"), (row_constraints(spec, table), "new")]
+        parts = [(effective(spec, table, role, "insert", "check"), "new"), (row_constraints(spec, table), "new"),
+                 (insert_written(spec, table, role), "new")]
     else:
         parts = [(effective(spec, table, role, "update", "using"), "old"),
                  (effective(spec, table, role, "update", "check"), "new"),
@@ -562,10 +583,9 @@ def access_terms(spec: Spec, table: str, role: str, cmd: str, enc: Encoder) -> T
         parts = [(effective(spec, table, role, "select", "using"), "r")]
     elif cmd == "delete":
         parts = [(effective(spec, table, role, "delete", "using"), "old")]
-    elif cmd == "insert":
-        if unwritable_on_insert(spec, table, role):
-            return FALSE  # #67: such a row is written only with defaults the proofs do not model
-        parts = [(effective(spec, table, role, "insert", "check"), "new")]
+    elif cmd == "insert":  # #67, #76: the columns the role may not name take their defaults
+        parts = [(effective(spec, table, role, "insert", "check"), "new"),
+                 (insert_written(spec, table, role, lower=True), "new")]
     else:
         parts = [(effective(spec, table, role, "update", "using"), "old"),
                  (effective(spec, table, role, "update", "check"), "new"),
@@ -588,13 +608,18 @@ def must_allow(spec: Spec, p: MustAllow) -> list[Obligation]:
     for row in rows:
         assumptions.append(_T(enc, row_constraints(spec, p.table), row, p.table))
     assumptions.append(_T(enc, p.when, _image(p.command, "new"), p.table))
+    written = insert_written(spec, p.table, p.role, lower=True) if p.command == "insert" else Lit(lit=True)
+    if not (isinstance(written, Lit) and written.lit is False):  # #76: the rows the defaults give
+        assumptions.append(_T(enc, written, "new", p.table))
     rels = _all_relations(spec, p.table, p.role, p.command) + _relations_of(spec, p.when)
     witness = Obligation(p.id, f"{p.command} as {p.role}: some row meets the condition",
                          list(assumptions), FALSE, dict(rows), rels, [enc], witness=True).finish()
     label = f"{p.command} as {p.role}: every row meeting the condition is admitted"
     if p.command == "insert" and (cols := unwritable_on_insert(spec, p.table, p.role)):
-        label += (f" (the role may not write {', '.join(cols)} in an insert: a row is inserted with "
-                  f"their defaults, so not every row meeting the condition can be written)")
+        none = [c for c in cols if spec.tables[p.table].columns[c].default is None]
+        label += (f" (the role may not write {', '.join(none)} in an insert, and the spec declares no default "
+                  f"for {'it' if len(none) == 1 else 'them'}: no row can be written)" if none else
+                  f" (with the defaults of {', '.join(cols)}, which the role may not write in an insert)")
     main = Obligation(p.id, label,
                       assumptions, admitted, dict(rows), rels, [enc]).finish()
     return [witness, main]

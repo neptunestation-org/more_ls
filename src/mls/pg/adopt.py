@@ -45,7 +45,7 @@ from mls.compile.internal import INTERNAL_ROLE
 from mls.errors import MlsError, SpecError
 from mls.pg.catalog import _strip_schema, bypass_paths
 from mls.pg.lift import (
-    CAST_TO_MLS, Env, Unreadable, function_body, inline_functions, split_args, inline_lookups, restore_calls, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr, guard_parts, inclusion_parts,
+    CAST_TO_MLS, Env, Unreadable, read_default, function_body, inline_functions, split_args, inline_lookups, restore_calls, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr, guard_parts, inclusion_parts,
     mls_type,
 )
 from mls.pg.lift import IsTrue as _IsTrue
@@ -217,15 +217,18 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
             t: dict[str, Any] = {"oid": oid, "rls": rls, "force": force, "owner": owner}
             # the enum type of an enum column, or of an enum array's elements (D88)
             cur.execute("""select a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), a.attnotnull,
-                                  case when et.typtype = 'e' and tn.nspname = %s then et.typname end
+                                  case when et.typtype = 'e' and tn.nspname = %s then et.typname end,
+                                  case when a.attidentity <> '' then 'fresh'
+                                       when a.attgenerated = '' then pg_get_expr(ad.adbin, ad.adrelid) end
                            from pg_attribute a join pg_type ty on ty.oid = a.atttypid
+                                left join pg_attrdef ad on ad.adrelid = a.attrelid and ad.adnum = a.attnum
                                 join pg_type et on et.oid = case when ty.typelem <> 0 and ty.typlen = -1
                                                                  then ty.typelem else ty.oid end
                                 join pg_namespace tn on tn.oid = et.typnamespace
                            where a.attrelid = %s and a.attnum > 0 and not a.attisdropped
                            order by a.attnum""", (schema, oid))
-            t["columns"] = [{"num": r[0], "name": r[1], "type": r[2], "notnull": r[3], "enum": r[4]}
-                            for r in cur.fetchall()]
+            t["columns"] = [{"num": r[0], "name": r[1], "type": r[2], "notnull": r[3], "enum": r[4],
+                             "default": r[5]} for r in cur.fetchall()]
             cur.execute("""select conname, contype, pg_get_constraintdef(oid), conkey, confrelid, confkey,
                                   confupdtype, confdeltype, confmatchtype, convalidated,
                                   case when confrelid <> 0 then confrelid::regclass::text end,
@@ -455,6 +458,23 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                                       for t, tb in spec_tables.items()},
               governed=set(governed), roles=list(roles), builtins=cat.get("builtins", frozenset()),
               keys={t: [frozenset(k) for k in key_sets(t)] for t in spec_tables})
+
+    # --- #76: the defaults an insert writes in the columns a role may not name
+    for name, t in tables.items():
+        tb = spec_tables.get(name)
+        if tb is None or tb.get("mode") != "adopted":
+            continue
+        for c in t["columns"]:
+            if c["default"] is None or c["name"] not in tb["columns"]:
+                continue
+            # an identity column generates its value (`fresh`); a generated column is never inserted
+            d = "fresh" if c["default"] == "fresh" else read_default(c["default"], name, c["name"], env)
+            if d is None:
+                notes.append(f"column {name}.{c['name']}: its default {c['default']} is not read (a constant, now(), "
+                             f"a context value or a generated value is): an insert that leaves it out is "
+                             f"admitted for no row in the proofs")
+            else:
+                tb["columns"][c["name"]]["default"] = d
 
     # --- relations: inclusion-shaped foreign keys, what the lifter reads as a membership, and (for
     # the opaque blocks) two-column keys their SQL reads.  The compiler's relation-visibility

@@ -37,6 +37,7 @@ ROUND_TRIP = {
     "session_setting": specs.session_spec,
     "trusted_function": specs.function_spec,  # #72: the calls read back as the context values, the md5 pins
     "citext": specs.citext_spec,  # #73: citext columns and their constants (`'x'::citext`) read back
+    "defaults": specs.defaults_spec,  # #76: the defaults read back (auth.uid(), false, now(), gen_random_uuid())
     "bigint": specs.bigint_spec,
     "pg_roles": specs.pg_roles_spec,
     "composed": specs.composed_spec,  # D56: the nested array shape reads back as composed relations

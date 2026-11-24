@@ -352,7 +352,42 @@ def compare(spec: Spec, expected: Snapshot, actual: Snapshot) -> tuple[list[Drif
                                            + f" since the import, which read its calls in the policies on {t} "
                                              f"as its old body (fix: import again, or restore the function)"))
     items += _identity_function_items(spec, actual.get("identity_functions", {}))
+    for (t, c), (declared, live) in sorted(actual.get("defaults", {}).items()):  # #76
+        if live != declared:
+            items.append(DriftItem("differs", f"column {t}.{c}: the spec declares default {declared}, the database "
+                                              f"has {live or 'none'}; the insert proofs count on the spec's "
+                                              f"(fix: import again, or restore the default)"))
     return items, notes
+
+
+def live_defaults(conn: psycopg.Connection, spec: Spec, schema: str) -> dict[tuple[str, str], tuple[str, str | None]]:
+    """#76: each declared default of an adopted table, with the live one read as the import does."""
+    from mls.pg.lift import Env, read_default
+
+    env = Env.of_spec(spec)
+    out = {}
+    for t, tb in spec.tables.items():
+        for c, col in tb.columns.items():
+            if col.default is None or tb.mode != "adopted":
+                continue
+            row = conn.execute("""select case when a.attidentity <> '' then 'fresh'
+                                              when a.attgenerated = '' then pg_get_expr(d.adbin, d.adrelid) end
+                                  from pg_attribute a left join pg_attrdef d
+                                       on d.adrelid = a.attrelid and d.adnum = a.attnum
+                                  where a.attrelid = to_regclass(%s) and a.attname = %s""",
+                               (f'"{schema}"."{t}"', c)).fetchone()
+            live = ("fresh" if row[0] == "fresh" else read_default(row[0], t, c, env)) if row and row[0] else None
+            declared = col.default if col.default == "fresh" else col.default.model_dump(by_alias=True)
+            out[(t, c)] = (_show_default(declared), _show_default(live))
+    return out
+
+
+def _show_default(d) -> str | None:
+    if d is None or d == "fresh":
+        return d
+    if "ctx" in d:
+        return f"@{d['ctx']}"
+    return repr(d["const"])
 
 
 def identity_functions(conn: psycopg.Connection, spec: Spec) -> dict[str, dict]:
@@ -403,6 +438,7 @@ def drift(conn: psycopg.Connection, spec: Spec, script: Script, schema: str = "p
         present = [t for t in spec.governed() if actual["tables"].get(t) is not None]
         actual["bypass"] = bypass_paths(conn, schema, present, list(spec.roles))
         actual["identity_functions"] = identity_functions(conn, spec)
+        actual["defaults"] = live_defaults(conn, spec, schema)
         gone = [f"{cv.source}()" for cv in spec.identity.context.values()
                 if spec.identity.adapter == "trusted_function" and cv.source not in actual["identity_functions"]]
         if gone:

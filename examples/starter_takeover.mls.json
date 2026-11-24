@@ -14,6 +14,7 @@
   "anon",
   "authenticated"
  ],
+ "enums": {},
  "tables": {
   "profiles": {
    "columns": {
@@ -58,7 +59,8 @@
    "columns": {
     "id": {
      "type": "bigint",
-     "nullable": false
+     "nullable": false,
+     "default": "fresh"
     },
     "team_id": {
      "type": "bigint",
@@ -70,7 +72,10 @@
     },
     "archived": {
      "type": "bool",
-     "nullable": false
+     "nullable": false,
+     "default": {
+      "const": false
+     }
     }
    },
    "primary_key": [
@@ -89,7 +94,8 @@
    "columns": {
     "id": {
      "type": "bigint",
-     "nullable": false
+     "nullable": false,
+     "default": "fresh"
     },
     "project_id": {
      "type": "bigint",
@@ -101,7 +107,10 @@
     },
     "status": {
      "type": "text",
-     "nullable": false
+     "nullable": false,
+     "default": {
+      "const": "todo"
+     }
     },
     "assignee_id": {
      "type": "uuid",
@@ -109,7 +118,10 @@
     },
     "created_at": {
      "type": "timestamp",
-     "nullable": false
+     "nullable": false,
+     "default": {
+      "ctx": "now"
+     }
     }
    },
    "primary_key": [
@@ -136,7 +148,10 @@
     },
     "role": {
      "type": "text",
-     "nullable": false
+     "nullable": false,
+     "default": {
+      "const": "member"
+     }
     }
    },
    "primary_key": [
@@ -156,7 +171,8 @@
    "columns": {
     "id": {
      "type": "bigint",
-     "nullable": false
+     "nullable": false,
+     "default": "fresh"
     },
     "name": {
      "type": "text",
@@ -164,7 +180,10 @@
     },
     "created_at": {
      "type": "timestamp",
-     "nullable": false
+     "nullable": false,
+     "default": {
+      "ctx": "now"
+     }
     }
    },
    "primary_key": [

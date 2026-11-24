@@ -1947,3 +1947,21 @@ relations are refused for now: each needs collation-aware reasoning or folding o
 proofs only name.  Mutation `CITEXT_AS_TEXT` (the column compared as `text`) shows the
 differential sees case.  Lean: no change; columns are already `Int`-valued with interned
 constants, and the fold happens before interning.
+
+
+**D96. Insert lower bounds count on column defaults (#76; amends D89).**  graphile/starter grants
+`insert (email) on user_emails` and lets the database fill the rest: `user_id` from
+`current_user_id()`, the flags `false`, the id from `gen_random_uuid()`, the times `now()`.  Under
+D89 no insert by such a role was admitted, so the requirement "a user adds an address" could only
+be proved by dropping the column limit (run 1 did), widening the insert.  A column of an adopted
+table now declares its default (a constant, a context value, or `fresh`, a generated value), and
+`obligations.insert_written` says what an insert writes in the columns the role may not name: the
+defaults, conjoined into the access layers, into the upper bounds' insert assumptions and into the
+lower bound's antecedent (it ranges over the rows the defaults give).  A left-out column with no
+declared default is unconstrained: any value for an upper bound and the diff, and for a lower bound
+D89's "no row".  We do not assume NULL, since an import may have left an unreadable default out.  `fresh` is "some non-NULL value", so a lower bound speaks for every value
+the generator may pick; nothing in a policy should depend on one.  The import reads a default as
+the right side of `col = <default>` through the lifter (constants, `now()`, the adapter's context
+SQL), the generators by name; drift reports a declared default the database no longer has; the
+harness's stand-in tables carry them and the oracle fills a left-out column with its default.
+Lean: the insert outcome with defaults is a known gap.

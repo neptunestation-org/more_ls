@@ -13,7 +13,7 @@ approval artifact (D10, D33).  The grammar:
     roles      := 'roles' NAME (',' NAME)*
     table      := 'table' NAME MODE '{' [column (',' column)* [';']] [option (';' option)*] '}'
     enum       := 'enum' NAME '(' STRING (',' STRING)* ')'        (a Postgres enum type and its labels, in order)
-    column     := NAME TYPE ['not null']                          (a bare column is nullable; TYPE 'enum' NAME for an enum,
+    column     := NAME TYPE ['not null'] ['default' (term | 'fresh')]                          (a bare column is nullable; TYPE 'enum' NAME for an enum,
                                                                    'text[]' or 'enum[]' NAME for an array)
     option     := 'primary_key' '(' names ')' | 'unique' '(' names ')' | 'tags' '(' names ')'
                 | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)' | 'inlined function f(t) md5 h')
@@ -77,7 +77,7 @@ RENDERED_FIELDS: dict[type, set[str]] = {
     Spec: {"comment", "mls_version", "identity", "roles", "enums", "tables", "relations", "hierarchies", "opaques",
            "rules", "properties"},
     Identity: {"adapter", "context"}, ContextVar: {"source", "type", "md5"},
-    Table: {"columns", "primary_key", "unique", "mode", "assume", "tags"}, Column: {"type", "nullable", "enum"},
+    Table: {"columns", "primary_key", "unique", "mode", "assume", "tags"}, Column: {"type", "nullable", "enum", "default"},
     Relation: {"table", "key", "value", "where"}, ComposedRelation: {"of", "through"},
     Hop: {"table", "key", "value"},
     Hierarchy: {"table", "id", "parent", "depth", "max_depth", "members"},
@@ -332,7 +332,9 @@ def assumption(a) -> str:
 
 def table(name: str, t: Table) -> list[str]:
     cols = [f"{ident(c)} {col.type}" + (f" {ident(col.enum)}" if col.enum is not None else "")
-            + ("" if col.nullable else " not null") for c, col in t.columns.items()]
+            + ("" if col.nullable else " not null")
+            + ("" if col.default is None else " default " + ("fresh" if col.default == "fresh" else term(col.default)))
+            for c, col in t.columns.items()]
     options = []
     if t.primary_key is not None:
         options.append(f"primary_key ({', '.join(ident(c) for c in t.primary_key)})")

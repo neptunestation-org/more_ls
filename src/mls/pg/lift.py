@@ -1986,3 +1986,25 @@ def _half(p: dict | None) -> tuple[dict | None, dict | None]:
     if op == ">":
         return None, c
     return None, None
+
+
+_FRESH = re.compile(r"^\s*(?:(?:public\.|extensions\.)?(?:gen_random_uuid|uuid_generate_v1|uuid_generate_v1mc|"
+                    r"uuid_generate_v4)\(\)|nextval\(.*\))\s*$", re.IGNORECASE)
+
+
+def read_default(expr: str, table: str, column: str, env: Env) -> dict | str | None:
+    """#76: a column default as the spec declares it: "fresh" for a generated value (a uuid
+    generator, a sequence), else the term the lifter reads on the right of `column = <default>`
+    (a constant, `now()`, a context value's SQL), or None."""
+    if _FRESH.match(expr):
+        return "fresh"
+    try:
+        r = lift(f'("{column}" = ({expr}))', table, env, "policy", lambda *a: "mls_default", lambda *a, **k: None)
+    except Exception:  # an unreadable default is left out, never guessed
+        return None
+    p = r.pred if r.kind == "lifted" else None
+    if p and "cmp" in p and p["cmp"][0] == {"col": column} and p["cmp"][1] == "=" \
+            and isinstance(p["cmp"][2], dict) and set(p["cmp"][2]) <= {"ctx", "const"}:
+        return p["cmp"][2]
+    return None
+

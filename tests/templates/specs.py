@@ -318,6 +318,43 @@ def citext_spec() -> Spec:
     return make(parse(CITEXT).model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
+DEFAULTS = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated
+
+table user_emails adopted {
+  id uuid not null default fresh,
+  user_id uuid not null default @uid,
+  email text not null,
+  is_verified bool not null default false,
+  is_primary bool not null default false,
+  created_at timestamp not null default @now;
+  primary_key (id);
+  assume ('rls not_forced')
+}
+
+rules {
+  R1 policy add_own on user_emails: authenticated insert permissive check user_id = @uid and is_verified = false
+  R2 policy read_own on user_emails: authenticated select permissive using user_id = @uid
+  R3 column_rule address_only on user_emails: authenticated write email
+  R4 policy delete_own on user_emails: authenticated delete permissive using user_id = @uid
+}
+
+properties {
+  P1 must_allow user_emails authenticated insert: user_id = @uid and is_verified = false and is_primary = false
+}
+"""
+
+
+def defaults_spec() -> Spec:
+    """#76: an adopted table whose role writes only `email` on insert; the harness's stand-in has
+    the declared defaults (the owner from auth.uid(), the flags false, a generated id, now()), and
+    the oracle fills the columns the insert leaves out with them."""
+    from mls.spec.syntax import parse
+
+    return make(parse(DEFAULTS).model_dump(mode="json", by_alias=True, exclude_none=True))
+
+
 def bigint_spec() -> Spec:
     """The session example with every key `bigint` (D53): the user id, the tenant ids and the
     document id, and the clearance a bigint context value compared with an int column.  The

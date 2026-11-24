@@ -267,9 +267,11 @@ All are "assumptions ∧ ¬goal is UNSAT"; SAT yields a counterexample rendered 
   does a policy.  Trusted roles are not guarded, so `always_on_update` does not assume it.
 - **must_allow (the lower bound):** `constraints(every image) ∧ when → admitted`, where
   `admitted` is the command's access layers — the effective policies and, for an update, the
-  transition rules and the column privileges.  For an insert, a role whose insert privilege does
-  not cover every column admits nothing: an unlisted column takes its default, which the model
-  does not know, so not every row meeting `when` can be written.  The written image is assumed *valid* (it satisfies
+  transition rules and the column privileges.  For an insert, a column the role's insert
+  privilege does not cover takes its declared default (a constant, a context value, or a fresh
+  value: not NULL), and `when` ranges over the rows those defaults give; when such a column
+  declares no default the role admits nothing, since the model does not know what Postgres writes.
+  The upper bounds on an insert assume the same defaults.  The written image is assumed *valid* (it satisfies
   the table's CHECKs and FKs), so `when` states what the role can do, not the integrity rules; the
   net effect the behaviour diff compares includes the constraints, the lower bound does not.  For
   update `when` ranges over `old`/`new`.  A second, *witness* obligation asks that
