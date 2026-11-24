@@ -270,3 +270,22 @@ def foreign_keys(conn: psycopg.Connection, schema: str, tables: list[str], owned
         out.append({"name": name, "table": table, "column": col,
                     "parent": parent if pschema == schema else f"{pschema}.{parent}", "parent_column": pcol})
     return out
+
+
+def schema_mismatch(conn: psycopg.Connection, schema: str, tables: dict[str, str]) -> str | None:
+    """#70: the spec's tables that must exist (adopted and observed; `tables` maps name -> mode)
+    and none of them is in `schema`: the command would report every one missing.  Returns the
+    message, naming the schema they are in, or None."""
+    must = [t for t, mode in tables.items() if mode in ("adopted", "observed")]
+    if not must:
+        return None
+    rows = conn.execute("""select n.nspname, count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
+                           where c.relkind in ('r', 'p') and c.relname = any(%s)
+                           group by 1 order by 2 desc, 1""", (must,)).fetchall()
+    if any(nsp == schema for nsp, _ in rows):
+        return None
+    names = ", ".join(must[:3]) + (", ..." if len(must) > 3 else "")
+    where = (f"they are in schema '{rows[0][0]}': pass --schema {rows[0][0]}" if rows
+             else "they are in no schema of this database: check the connection string")
+    return f"none of the spec's tables ({names}) is in schema '{schema}'; {where}"
+

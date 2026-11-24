@@ -1117,10 +1117,12 @@ UNKNOWN.  JSON shape: `{"assumptions": [str], "summary": {"PROVED", "REFUTED", "
 "obligations": [{"name", "verdict", "message", "scenario", "opaque_deps"}]}]}`.  Exit 2 if
 any property is REFUTED or UNKNOWN, else 0.
 
-### `mls compile SPEC [--out FILE]`
+### `mls compile SPEC [--out FILE] [--schema NAME]`
 
 The deployment script (§14), with the assumptions as a header comment and the originating rule
-as a trailing comment on every statement.  Exit 1 on a check or compile error.
+as a trailing comment on every statement.  The script names tables unqualified; `--schema`
+(default `public`) makes it begin with `set search_path to <schema>, public`, so it runs in that
+schema, and MLS's functions keep that search path.  Exit 1 on a check or compile error.
 
 ### `mls test SPEC [--dsn DSN | --versions V,V] [--dbname NAME] [--seed N] [--rows N] [--contexts N] [--ops N] [--explain] [--scale N]`
 
@@ -1174,14 +1176,19 @@ row by row): <id>: <sentence>`, and counted in the summary.  JSON keys: `notes`,
 the count of undecided questions), `access`, `integrity`, `grants`, `counts`.  Exit 2 if anything
 changed, else 0.
 
-### `mls migrate OLD NEW [--format sql|json] [--out FILE] [--allow-destructive]`
+### `mls migrate OLD NEW [--format sql|json] [--out FILE] [--allow-destructive] [--schema NAME]`
 
 Phased migration script: 1 schema, 2 constraints as NOT VALID and
 triggers, 3 indexes concurrently, 4 validate, 5 swap, 6 cleanup, 7 destructive (only with
 `--allow-destructive`).  Every statement is annotated with its lock mode (`LOCKS` in `compile/migrate.py`, observed in
 `pg_locks` on Postgres 15–18 by `tests/templates/test_locks.py`).  Refuses column type
 changes, primary key changes and identity adapter changes, with the JSON path.  `--format
-json` gives the phases as data.  Exit 1 if refused.
+json` gives the phases as data.  `--schema` sets the search path as for `mls compile`.  Exit 1
+if refused.
+
+Every command that reads a database (`check --dsn`, `preflight`, `drift`, `status --dsn`,
+`generate --dsn`) stops with exit 1 when none of the spec's adopted or observed tables is in its
+`--schema` (default `public`): the error names the schema they are in.
 
 ### `mls preflight NEW --dsn DSN [--old OLD] [--schema NAME] [--samples N] [--json]`
 

@@ -159,6 +159,12 @@ differential test against the deployed database.
 `$DATABASE_URL` is a connection string for the role that owns the tables, `postgres` on
 Supabase.  Nothing here needs a superuser.
 
+The starter's tables are in `public`, the default.  If yours are in another schema, give every
+command that reads the database the same `--schema` (`mls import`, `generate --dsn`, `check
+--dsn`, `drift`, `preflight`, `status`), and give it to `mls compile` and `mls migrate` too: the
+script then begins by putting that schema first on the search path, so it runs there.  A command
+that finds none of the spec's tables in its schema stops and names the schema they are in.
+
 The steps:
 
 1. [Back up](#step-1-back-up)

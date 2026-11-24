@@ -815,3 +815,44 @@ def test_a_set_null_key_imports_as_a_set_null_inclusion_and_a_clash_is_refused(b
         errs = [e for e in verify_adopted(brownfield, Spec.model_validate(d)) if "courier_in_shop" in e.message]
         assert len(errs) == 1 and "is ON DELETE SET NULL" in errs[0].message, errs
         assert "use on_delete set_null" in errs[0].fix
+
+
+SCHEMA_SQL = """
+do $$ begin if not exists (select from pg_roles where rolname = 'app') then create role app; end if; end $$;
+create schema app;
+create table app.notes (id bigint primary key, owner_id bigint not null, body text);
+alter table app.notes enable row level security;
+create policy own_notes on app.notes for select to app using (
+  owner_id = (select nullif(current_setting('app.uid', true), '')::bigint));
+"""
+
+
+def test_a_takeover_outside_public(pg_dsn, tmp_path, capsys):
+    """#70: tables in another schema.  Every command with --dsn that finds none of the spec's
+    tables in its schema says where they are and names --schema; with it, compile --schema writes
+    a script that runs there, and drift is clean after it."""
+    dbname = "mls_other_schema"
+    with psycopg.connect(pg_dsn, autocommit=True) as admin:
+        admin.execute(f'drop database if exists "{dbname}"')
+        admin.execute(f'create database "{dbname}"')
+    dsn = psycopg.conninfo.make_conninfo(pg_dsn, dbname=dbname)
+    try:
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute(SCHEMA_SQL)
+        spec = tmp_path / "spec.mls"
+        assert main(["import", "--dsn", dsn, "--schema", "app", "--out", str(spec)]) == 0
+        capsys.readouterr()
+        for cmd in (["check", str(spec)], ["drift", str(spec)], ["preflight", str(spec)], ["status", str(spec)]):
+            assert main([*cmd, "--dsn", dsn]) != 0, cmd
+            out = capsys.readouterr()
+            assert "schema 'public'" in out.err + out.out and "--schema app" in out.err + out.out, (cmd, out)
+        script = tmp_path / "deploy.sql"
+        assert main(["compile", str(spec), "--schema", "app", "--out", str(script)]) == 0
+        with psycopg.connect(dsn) as conn:  # as psql would run it: one transaction, the default search path
+            conn.execute(script.read_text())
+        capsys.readouterr()
+        assert main(["drift", str(spec), "--dsn", dsn, "--schema", "app"]) == 0, capsys.readouterr()
+        assert main(["check", str(spec), "--dsn", dsn, "--schema", "app"]) == 0
+    finally:
+        with psycopg.connect(pg_dsn, autocommit=True) as admin:
+            admin.execute(f'drop database if exists "{dbname}"')
