@@ -480,6 +480,49 @@ properties {
     assert verdicts(spec) == {"P1": "PROVED", "P2": "REFUTED"}
 
 
+
+INSERT_COLS = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated
+
+table members adopted {
+  id int not null,
+  group_id int not null,
+  user_id uuid not null,
+  "roles" text[] not null;
+  primary_key (id);
+  unique (group_id, user_id)
+}
+
+relation owner_of = members(user_id, group_id) where 'owner' = any("roles")
+
+rules {
+  R1 policy add on members: authenticated insert permissive check owner_of(@uid, group_id)
+  R2 policy edit on members: authenticated update permissive using owner_of(@uid, group_id) check owner_of(@uid, group_id)
+%s}
+
+properties {
+  P1 must_allow members authenticated insert: owner_of(@uid, group_id)
+}
+"""
+
+
+def test_an_insert_needs_every_column_the_row_is_written_with():
+    """#67: a write column rule grants INSERT on its columns only, so a row the role would have to
+    write in another column cannot be inserted (its value would be the column's default, which the
+    proofs do not model).  The lower bound over every such row is refuted; a rule that lists every
+    column, or a guard (`when`, updates only), leaves inserts alone (rbac takeover, run 4)."""
+    from mls.spec.syntax import parse
+
+    def verdict(extra: str) -> str:
+        return verdicts(check_spec(parse(INSERT_COLS % extra)))["P1"]
+
+    assert verdict('  R3 column_rule roles_only on members: authenticated write "roles"\n') == "REFUTED"
+    assert verdict('  R3 column_rule all on members: authenticated write id, group_id, user_id, "roles"\n') == "PROVED"
+    assert verdict('  R3 column_rule guard on members: authenticated write "roles" when owner_of(@uid, group_id)\n') == "PROVED"
+    assert verdict("") == "PROVED"
+
+
 ALWAYS = """mls 0.1
 identity supabase { uid: auth.uid uuid }
 roles authenticated

@@ -271,6 +271,16 @@ def unwritable_unchanged(spec: Spec, table: str, role: str) -> Pred:
     return unchanged_except(spec, table, set(allowed))
 
 
+def unwritable_on_insert(spec: Spec, table: str, role: str) -> list[str]:
+    """The columns `role` may not name in an INSERT (#67): a write column rule grants INSERT on its
+    columns only.  A row can then be inserted only with those columns' defaults, which the proofs
+    do not model, so a lower bound over every row meeting a condition does not hold."""
+    allowed = privileges(spec).get((role, table), {}).get("insert")
+    if allowed is None or allowed == "*":
+        return []
+    return [c for c in spec.tables[table].columns if c not in allowed]
+
+
 def guard_columns(spec: Spec, table: str) -> set[str]:
     """The columns a column guard never compares: a hierarchy's depth, which its own trigger
     recomputes from the parent before the guard runs (#50)."""
@@ -549,6 +559,8 @@ def access_terms(spec: Spec, table: str, role: str, cmd: str, enc: Encoder) -> T
     elif cmd == "delete":
         parts = [(effective(spec, table, role, "delete", "using"), "old")]
     elif cmd == "insert":
+        if unwritable_on_insert(spec, table, role):
+            return FALSE  # #67: such a row is written only with defaults the proofs do not model
         parts = [(effective(spec, table, role, "insert", "check"), "new")]
     else:
         parts = [(effective(spec, table, role, "update", "using"), "old"),
@@ -575,7 +587,11 @@ def must_allow(spec: Spec, p: MustAllow) -> list[Obligation]:
     rels = _all_relations(spec, p.table, p.role, p.command) + _relations_of(spec, p.when)
     witness = Obligation(p.id, f"{p.command} as {p.role}: some row meets the condition",
                          list(assumptions), FALSE, dict(rows), rels, [enc], witness=True).finish()
-    main = Obligation(p.id, f"{p.command} as {p.role}: every row meeting the condition is admitted",
+    label = f"{p.command} as {p.role}: every row meeting the condition is admitted"
+    if p.command == "insert" and (cols := unwritable_on_insert(spec, p.table, p.role)):
+        label += (f" (the role may not write {', '.join(cols)} in an insert: a row is inserted with "
+                  f"their defaults, so not every row meeting the condition can be written)")
+    main = Obligation(p.id, label,
                       assumptions, admitted, dict(rows), rels, [enc]).finish()
     return [witness, main]
 

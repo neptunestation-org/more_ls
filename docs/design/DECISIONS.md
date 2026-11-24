@@ -1838,3 +1838,18 @@ nothing else, and is otherwise an ordinary column (privileges, column rules).
   `= any` is UNKNOWN, so they differ under `not` and in a CHECK.
 - *Out of scope:* comparing arrays, a label taken from a column or the context, array length, and
   that every element is a known label.  Lean transcribes the atom's truth table.
+
+**D89. An insert lower bound needs every column writable (#67).**  `access_terms` put the column
+privileges into the update case (`unwritable_unchanged`) but not the insert case, so a
+`must_allow ... insert` proved under a write column rule that left out `user_id` and `group_id`,
+while Postgres refuses every such insert (supabase-tenant-rbac, run 4: owners could not add
+members).  The oracle already refused it; only the proof was unsound.
+- *Rule:* if the role's insert privilege is a column list that misses a column of the table, the
+  insert is admitted for no row (`obligations.unwritable_on_insert`), and the obligation's label
+  names the columns.  An unlisted column takes its default; the proofs do not model defaults, and
+  "every row meeting the condition" includes rows with other values there, so the bound is false.
+- *Rejected:* modelling defaults (catalog defaults of adopted tables, `gen_random_uuid()`,
+  identity columns): a new term layer for one property template; refusing write column rules
+  that omit a column: they are right for update-only roles.
+- A guard (`when`) is a trigger on updates and never limits an insert; the loop's repair uses it
+  when the requirement speaks of edits only.

@@ -838,7 +838,11 @@ policies and, for update, the transition rules and the column privileges too.  T
 a witness (`some row meets the condition`, reported with an example; a condition no valid row
 meets refutes the property) and the bound (`every row meeting the condition is admitted`).  For
 update, `when` ranges over `old` and `new` and should state the whole change.  The written row
-is assumed valid, so `when` states what the user can do, not the integrity rules.
+is assumed valid, so `when` states what the user can do, not the integrity rules.  For insert,
+a write column rule that leaves out a column of the table refutes the bound: Postgres refuses an
+insert that names that column, so the row is written with its default and not every row meeting
+the condition can be inserted.  A guard (a column rule with `when`) applies to updates only and
+leaves inserts alone.
 
 ### 12.9 `role_separation`
 
