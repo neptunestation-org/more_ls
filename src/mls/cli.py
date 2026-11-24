@@ -474,10 +474,18 @@ def cmd_generate(a) -> int:
             if is_terse(a.skeleton) else json.loads(Path(a.skeleton).read_text()))
     skeleton = skeleton_of(data)
     client = client_from_env(a.model, a.effort)
+    database_errors = None
+    if a.dsn:  # the database's own keys and triggers, read once, check every spec the loop builds
+        import psycopg
+
+        from mls.pg.adopt import database_checks
+
+        with psycopg.connect(a.dsn) as conn:
+            database_errors = database_checks(conn, a.schema)
     # the skeleton's own rules (an import's CHECKs and inclusions) are kept as they are (#26);
     # the relations the model adds to the skeleton are written after its own (#28)
     result = generate(requirements, skeleton, client, a.max_repairs, syntax=a.syntax,
-                      fixed_rules=data.get("rules") or [])
+                      fixed_rules=data.get("rules") or [], database_errors=database_errors)
     if a.transcript:
         Path(a.transcript).write_text(json.dumps(
             {"result": result.to_dict(), "spec_terse": _terse_lines(result.spec),
@@ -662,6 +670,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--syntax", choices=["json", "terse"], default="terse",
                    help="what the passes answer in (terse: the prompt carries the grammar, json: the JSON Schema)")
     p.add_argument("--transcript", help="write the full prompt/answer transcript here")
+    p.add_argument("--dsn", help="also check every spec against this database's own foreign keys and triggers "
+                                 "(a key cycle an inclusion closes, a clashing delete action, a trigger a column "
+                                 "guard must fire before), and repair what that finds")
+    p.add_argument("--schema", default="public")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_generate)
 

@@ -1122,7 +1122,8 @@ loop quotes the findings as hints in its repair prompt (GUIDE §12).
 ### `mls diff OLD NEW [--format md|json] [--out FILE] [--timeout SECONDS]`
 
 Semantic diff (SEMANTICS §7): per table, role and command, new grants and new denials with a
-scenario each; per table, rows and changes newly rejected or newly accepted; privilege changes;
+scenario each; per table, rows and changes newly rejected or newly accepted (as committed data:
+a deferred inclusion counts, though no access question assumes it); privilege changes;
 notes (new and removed tables and roles; a table observed in either version, which is not
 compared: what roles can do on it is not modelled); undecided questions (solver timeout).  `before` and
 `after` are the effective predicates in terse notation.  The proofs do not compare counts, so a
@@ -1325,7 +1326,7 @@ check` is).
 
 The JSON Schema of the spec language (draft 2020-12, from the pydantic model).
 
-### `mls generate REQUIREMENTS --skeleton SKELETON [--out FILE] [--syntax json|terse] [--model M] [--effort E] [--max-repairs N] [--transcript FILE] [--json]`
+### `mls generate REQUIREMENTS --skeleton SKELETON [--dsn DSN [--schema S]] [--out FILE] [--syntax json|terse] [--model M] [--effort E] [--max-repairs N] [--transcript FILE] [--json]`
 
 The LLM loop (GUIDE §12).  `REQUIREMENTS` is a text file or `-` for stdin; `SKELETON` is a
 spec or a spec without rules and properties (either syntax, by extension: the `.mls` that
@@ -1342,7 +1343,12 @@ with the first free id `R<n>`; the result is the model's rules followed by the f
 verbatim restatement is not duplicated); a model rule that takes a fixed rule's id, or its name
 on the same table, is an error at the answer's path (`rule id 'R1' is taken by a rule the spec
 already has`, fix: number from `R<n>`), repaired like any other.  `--out` writes the spec as
-written (an `in` list stays one), not as the checker expands it.  Defaults: model
+written (an `in` list stays one), not as the checker expands it.  With `--dsn`, every spec that
+passes the checker is also checked against the database's own foreign keys and triggers, as
+`mls check --dsn` checks them: an inclusion that closes a cycle with the database's keys, a delete
+action that clashes with one of them, a column guard that would fire after a trigger of the table.
+What that finds goes back to the rules pass within the repair budget.  The database is read once,
+at the start.  Defaults: model
 `claude-opus-5-5`, effort `high`, 3 repairs, syntax `terse`.  With `terse`
 the passes answer with `relations { ... }` / `properties { ... }` / `rules { ... }` sections: the prompt carries the
 grammar and three examples instead of the JSON Schema, the skeleton is shown in terse, and

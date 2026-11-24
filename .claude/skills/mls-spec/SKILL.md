@@ -89,8 +89,10 @@ user, then write `requirements.txt` and get it approved before running the loop.
 
 ## 3. Run the loop
 
-    uv run mls generate requirements.txt --skeleton skeleton.mls --out spec.mls --transcript transcript.json
+    uv run mls generate requirements.txt --skeleton skeleton.mls --dsn "$DATABASE_URL" --out spec.mls --transcript transcript.json
 
+`--dsn` (an existing database) has the loop check its rules against the database's own foreign
+keys and triggers too, which the skeleton does not carry; leave it out for a new schema.
 Every rerun uses the same command: `--skeleton` is always the import's skeleton, never the
 `spec.mls` of an earlier run. It calls the model several times, so it is not instant. It exits 0 when the status is `proved` and 1 otherwise. The output ends
 with the sections the user approves: `# Relations added to the schema (for approval)` (paths the

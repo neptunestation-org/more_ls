@@ -163,3 +163,32 @@ def test_relation_errors_left_after_the_budget_are_invalid(tmp_path, monkeypatch
     out = capsys.readouterr().out
     assert code == 1 and "status: invalid after 3 repair round(s)" in out and "$.relations.in_project" in out
     assert got is None and [x["name"] for x in exchanges] == ["relations"] + ["repair:relations"] * 3
+
+
+def test_what_the_database_checks_find_is_repaired_by_the_rules_pass():
+    """`mls generate --dsn`: a spec the checker accepts is also checked against the database's own
+    keys and triggers (here a stand-in for `adopt.database_checks` that refuses a rule named
+    `cycle`), and the rules pass repairs what it finds, as it repairs a checker error."""
+    from mls.llm.client import ScriptedClient
+    from mls.llm.loop import generate
+    from mls.llm.schemas import skeleton_of
+    from mls.spec.check import MlsError
+
+    spec, skeleton, written = _parts()
+    bad = written[:-1] + [written[-1].model_copy(update={"name": "cycle"})]
+    seen: list[list[str]] = []
+
+    def database_errors(s: Spec) -> list[MlsError]:
+        seen.append([r.name for r in s.rules])
+        i = next((i for i, r in enumerate(s.rules) if r.name == "cycle"), None)
+        return [] if i is None else [MlsError(f"$.rules[{i}]", "rule cycle closes a cycle of foreign keys",
+                                              "mark it deferred")]
+
+    data = skeleton.model_dump(mode="json", by_alias=True, exclude_none=True)
+    answers = _answers("terse", spec.properties, bad) + [section("rules", written)]
+    client = ScriptedClient(answers)
+    res = generate("A member reads, creates and edits the tasks of their team's projects.", skeleton_of(data),
+                   client, fixed_rules=data["rules"], database_errors=database_errors)
+    assert res.status == "proved" and res.repair_rounds == 1, res.errors
+    assert "rule cycle closes a cycle of foreign keys" in client.exchanges[-1].request.user
+    assert "cycle" in seen[0] and "cycle" not in seen[-1]

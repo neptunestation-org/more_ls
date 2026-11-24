@@ -1800,3 +1800,12 @@ same rule.  Refused: an observed target (no trigger may go on it), cascade and s
 tests).  Considered: a foreign key onto the unfiltered pair plus a CHECK-like trigger (two objects
 for one rule, and the FK's RESTRICT would still be immediate while the condition's is deferred); a
 generated column `is_owner` with a partial key (changes the schema of an adopted table).
+
+*Amended 2026-11-23 (the aural-oss rerun):* (8) `mls generate --dsn` checks every spec the loop builds
+against the database's own foreign keys and BEFORE UPDATE triggers (`adopt.database_checks`, shared
+with `mls check --dsn`), read once; what it finds is repaired like a checker error.  The first rerun
+wrote, beside the deferred owner inclusion, a redundant immediate one into the unfiltered
+membership relation that closes a cycle with `organization_members.workspaceId -> organizations.id`, a
+key the skeleton does not carry, so only `check --dsn` saw it and creating an organization would have
+failed.  (9) The diff's integrity part compares committed data (`row_constraints(.., at_commit=True)`):
+it had left every deferred inclusion out, so adding the owner rule showed as no integrity change.

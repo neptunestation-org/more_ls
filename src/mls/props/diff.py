@@ -289,10 +289,16 @@ def access_diff(old: Spec, new: Spec, timeout_ms: int = 20000) -> list[AccessCha
 
 # ----------------------------------------------------------------------------- integrity
 def integrity_diff(old: Spec, new: Spec, timeout_ms: int = 20000) -> list[IntegrityChange]:
+    """What each version accepts as committed data: a deferred inclusion counts too (#54), though
+    the access obligations leave it out (a policy runs while it may still be unmet)."""
     view = merged_spec(old, new)
     out = []
+
+    def committed(s: Spec, table: str):
+        return row_constraints(s, table, at_commit=True)
+
     for table in sorted((set(old.tables) & set(new.tables)) - observed_in_either(old, new)):
-        for kind, rows, get in (("stored rows", {"r": table}, row_constraints),
+        for kind, rows, get in (("stored rows", {"r": table}, committed),
                                 ("changes", {"old": table, "new": table}, transition_constraints)):
             c_old, c_new = get(old, table), get(new, table)
             if _same(old, new, c_old, c_new):
@@ -300,8 +306,8 @@ def integrity_diff(old: Spec, new: Spec, timeout_ms: int = 20000) -> list[Integr
             e_old, e_new = encoders(old, new)
             axioms = both_axioms(old, new, e_old, e_new)
             if kind == "changes":  # the existing row is a legitimate stored row
-                axioms += [e_old.T(row_constraints(old, table), "old", table),
-                           e_new.T(row_constraints(new, table), "old", table)]
+                axioms += [e_old.T(committed(old, table), "old", table),
+                           e_new.T(committed(new, table), "old", table)]
             img = "r" if kind == "stored rows" else "new"
             t_old, t_new = e_old.T(c_old, img, table), e_new.T(c_new, img, table)
             rels = _rels(old, new, c_old, c_new)
@@ -509,7 +515,8 @@ def _integrity_terse(old: Spec, new: Spec, i: IntegrityChange) -> tuple[str, str
     def cons(spec: Spec) -> str:
         if i.table not in spec.tables:
             return "-"
-        p = row_constraints(spec, i.table) if i.kind == "stored rows" else transition_constraints(spec, i.table)
+        p = (row_constraints(spec, i.table, at_commit=True) if i.kind == "stored rows"
+             else transition_constraints(spec, i.table))
         return terse.pred(p)
     return cons(old), cons(new)
 

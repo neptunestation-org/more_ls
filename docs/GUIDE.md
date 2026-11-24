@@ -287,7 +287,7 @@ saying who, which rows and what they may do, in `requirements.txt`:
 
 With `ANTHROPIC_API_KEY` set (section 12):
 
-    $ uv run mls generate requirements.txt --skeleton skeleton.mls --out spec.mls
+    $ uv run mls generate requirements.txt --skeleton skeleton.mls --dsn "$DATABASE_URL" --out spec.mls
     status: proved after 0 repair round(s)
     ...
     # Relations added to the schema (for approval)
@@ -313,7 +313,10 @@ property itself, not from the model's own description of it, so it says exactly 
 against the requirements: an upper bound per table (what a user can never see), a lower bound per
 grant (what a member must be able to do).  If a sentence is wrong or missing, the requirement was
 ambiguous: fix the sentence in `requirements.txt` and run the same `mls generate` again, rather
-than editing the spec.  It starts from `skeleton.mls` again: a skeleton holding the previous
+than editing the spec.  `--dsn` checks every rule the model writes against the database's own
+foreign keys and triggers as well, which the skeleton does not list (an inclusion that would close
+a cycle with one of them, so that neither row could be inserted first), and has the model repair
+what it finds.  It starts from `skeleton.mls` again: a skeleton holding the previous
 run's rules would hand them to the model as rules the spec already has, which it must keep, so a
 sharper requirement could not take a wrong grant back.  The two imported CHECKs are kept as they are: the model numbers its own rules
 from R3, and `spec.mls` ends with R1 and R2 after them.

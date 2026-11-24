@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -227,16 +228,20 @@ def _normal(rule, adapter: TypeAdapter = _RULE) -> dict | None:
 
 class Loop:
     def __init__(self, requirements: str, skeleton: dict, client: Client, max_repairs: int = 3,
-                 timeout_ms: int = 20000, syntax: str = DEFAULT_SYNTAX, fixed_rules: list[dict] = ()):
+                 timeout_ms: int = 20000, syntax: str = DEFAULT_SYNTAX, fixed_rules: list[dict] = (),
+                 database_errors: Callable[[Spec], list[MlsError]] | None = None):
         """`fixed_rules` are the rules the skeleton already has (#26: what `mls import` read from
         the database, its CHECKs and FK-shaped inclusions): both passes are shown them, and they
         are added, as they are, after the rules the model writes.  The relations pass's relations
-        (#28) are added to the skeleton the other two passes see."""
+        (#28) are added to the skeleton the other two passes see.  `database_errors` (`mls
+        generate --dsn`, `adopt.database_checks`) checks a spec that passes the checker against the
+        database's own keys and triggers; what it finds is repaired like a checker error."""
         if syntax not in ("json", "terse"):
             raise ValueError(f"syntax is json or terse, not {syntax!r}")
         self.requirements = requirements
         self.skeleton = skeleton
         self.fixed = [_normal(r) or r for r in fixed_rules]
+        self.database_errors = database_errors
         self.client = client
         self.max_repairs = max_repairs
         self.timeout_ms = timeout_ms
@@ -399,6 +404,8 @@ class Loop:
             errs = soundness_errors(spec)
         except CompileError as e:
             errs = e.errors
+        if not errs and self.database_errors is not None:
+            errs = self.database_errors(spec)
         return spec, errs
 
     def run(self, start_rules: list[dict] | None = None, start_properties: list[dict] | None = None) -> LoopResult:
@@ -520,9 +527,11 @@ class Loop:
 
 def generate(requirements: str, skeleton: dict, client: Client, max_repairs: int = 3, timeout_ms: int = 20000,
              start_rules: list[dict] | None = None, start_properties: list[dict] | None = None,
-             syntax: str = DEFAULT_SYNTAX, fixed_rules: list[dict] = ()) -> LoopResult:
+             syntax: str = DEFAULT_SYNTAX, fixed_rules: list[dict] = (),
+             database_errors: Callable[[Spec], list[MlsError]] | None = None) -> LoopResult:
     """Run the loop.  `start_rules` / `start_properties` skip the corresponding pass (used to
     evaluate repair from a given rule set).  `syntax` is what the passes answer in (D50).
-    `fixed_rules` are the skeleton's own rules, kept as they are (#26)."""
+    `fixed_rules` are the skeleton's own rules, kept as they are (#26); `database_errors` checks a
+    spec against the database's own keys and triggers (`mls generate --dsn`)."""
     return Loop(requirements, skeleton, client, max_repairs, timeout_ms, syntax,
-                fixed_rules).run(start_rules, start_properties)
+                fixed_rules, database_errors).run(start_rules, start_properties)

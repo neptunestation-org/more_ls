@@ -219,7 +219,9 @@ union member the renderer does not cover.
   refuses a demotion), owned by `mls_internal`; never assumed by the proofs; preflight counts existing
   violators; import reads it back (`lift.inclusion_parts`); fixture `specs.filtered_inclusion_spec`,
   mutations `INCLUSION_CONDITION_DROPPED`, `INCLUSION_TARGET_UNCHECKED`, `INCLUSION_NO_LOCK`
-  (`tests/templates/test_filtered_inclusion.py`).
+  (`tests/templates/test_filtered_inclusion.py`).  The diff's integrity part compares committed data
+  (`row_constraints(.., at_commit=True)`), so a deferred inclusion shows.  `mls generate --dsn` runs
+  `adopt.database_checks` (the database's own keys and triggers) on every spec the loop builds.
 - D83 (#61): a cardinality rule has `max` and/or `min` and an optional `where`; `min` is a deferred
   constraint trigger `<name>_min` (at commit, parent row locked; a parent deleted in the transaction
   is exempt), no invariant (refused in `invariant_preserved`), unused by the proofs; fixture

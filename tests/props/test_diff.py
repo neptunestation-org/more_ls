@@ -186,3 +186,16 @@ def test_a_count_rule_that_comes_or_goes_is_listed():
     assert ("- a count on files is added (stated, not compared row by row): M1: No transaction leaves a tenants "
             "row with fewer than 2 rows of files where the row's size is at least 3") in md
     assert diff(new, new).counts == []
+
+
+def test_a_deferred_inclusion_is_an_integrity_change():
+    """#54: an inclusion checked at commit is left out of what a policy may assume, but it changes
+    the data a database accepts, and the diff says so: a project whose lead is no lead (a member
+    with another role) is rejected by the new version."""
+    from mls.props.diff import integrity_diff
+    from tests.templates import specs
+
+    got = {(c.table, c.kind, c.direction, c.verdict)
+           for c in integrity_diff(specs.filtered_inclusion_base_spec(), specs.filtered_inclusion_spec())}
+    assert ("projects", "stored rows", "rejected", "REFUTED") in got, got
+    assert ("projects", "stored rows", "accepted", "PROVED") in got, got

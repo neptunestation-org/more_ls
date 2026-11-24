@@ -997,21 +997,31 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
 
 
 # ----------------------------------------------------------------------------- check --dsn
-def verify_adopted(conn: psycopg.Connection, spec: Spec, schema: str = "public") -> list[MlsError]:
-    """`mls check --dsn`: every adopted table exists with the columns and types the spec declares,
-    every observed table exists, and no owned table is owned by an app role (D45)."""
-    errors: list[MlsError] = []
-    from mls.pg.catalog import all_foreign_keys
-    from mls.pg.catalog import before_update_triggers
+def database_checks(conn: psycopg.Connection, schema: str = "public"):
+    """The checks of a spec's rules against the database's own objects, read once: its foreign keys
+    (a cycle an inclusion closes, #35; a delete action that clashes, #60) and its BEFORE UPDATE
+    triggers (a column guard that would fire after one, #58).  Returns spec -> errors; `mls
+    generate --dsn` gives it to the loop, so that the rules pass repairs what they find."""
+    from mls.pg.catalog import all_foreign_keys, before_update_triggers
     from mls.spec.check import fk_action_errors, fk_cycle_errors, guard_order_errors
     from mls.spec.fkcycle import database_fks
 
     with conn.transaction():
-        cat = _read(conn, schema)
         fks = all_foreign_keys(conn, schema)
-        errors += guard_order_errors(spec, before_update_triggers(conn, schema))  # #58
-    errors += fk_cycle_errors(spec, database_fks(fks, spec))  # #35: with the database's own keys
-    errors += fk_action_errors(spec, fks)  # #60
+        triggers = before_update_triggers(conn, schema)
+
+    def errors(spec: Spec) -> list[MlsError]:
+        return (guard_order_errors(spec, triggers) + fk_cycle_errors(spec, database_fks(fks, spec))
+                + fk_action_errors(spec, fks))
+    return errors
+
+
+def verify_adopted(conn: psycopg.Connection, spec: Spec, schema: str = "public") -> list[MlsError]:
+    """`mls check --dsn`: every adopted table exists with the columns and types the spec declares,
+    every observed table exists, and no owned table is owned by an app role (D45)."""
+    errors: list[MlsError] = database_checks(conn, schema)(spec)
+    with conn.transaction():
+        cat = _read(conn, schema)
     for name, labels in spec.enums.items():
         live_labels = cat["enums"].get(name)
         if live_labels is None:
