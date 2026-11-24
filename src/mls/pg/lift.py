@@ -870,6 +870,11 @@ class Lifter:
             p = {"is_null": self.term(node.x)[0]}
             self.check(p, negated)
             return {"not": p} if node.negated else p
+        if isinstance(node, IsTrue) and isinstance(node.x, Col) and node.x.qual in (None, self.table) \
+                and self.env.tables.get(self.table, {}).get(node.x.name) == ("bool", False):
+            # #71: a NOT NULL boolean is never UNKNOWN, so `b IS FALSE` is `b = false`
+            p = self.part(Cmp(node.x, "=", Bool(node.value)), negated)
+            return {"not": p} if node.negated else p
         if isinstance(node, IsTrue):
             raise Unreadable("IS TRUE / IS FALSE inside an expression (the fragment is three-valued; only a CHECK's "
                              "outer `(p) IS TRUE` is read)")
@@ -1891,7 +1896,21 @@ def nullable_columns(text: str, cols: dict[str, tuple[ColType, bool]]) -> set[st
         tree = parse(text)
     except Unreadable:
         return None
-    return {c for c in columns_of(tree, set()) if c in cols and cols[c][1]}
+    return {c for c in _unknown_columns(tree, set()) if c in cols and cols[c][1]}
+
+
+def _unknown_columns(node: Node, out: set[str]) -> set[str]:
+    """`columns_of` without the columns only tested by IS [NOT] NULL, which is never UNKNOWN (#71)."""
+    if isinstance(node, IsNull) and isinstance(node.x, Col):
+        return out
+    if isinstance(node, Col):
+        out.add(node.name)
+    for f in getattr(node, "__dataclass_fields__", {}):
+        v = getattr(node, f)
+        for x in (v if isinstance(v, list) else [v]):
+            if isinstance(x, Node):
+                _unknown_columns(x, out)
+    return out
 
 
 def now_between_shape(p: dict) -> dict:

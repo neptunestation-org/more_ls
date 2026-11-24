@@ -856,3 +856,49 @@ def test_a_takeover_outside_public(pg_dsn, tmp_path, capsys):
     finally:
         with psycopg.connect(pg_dsn, autocommit=True) as admin:
             admin.execute(f'drop database if exists "{dbname}"')
+
+
+CLASH_SQL = """
+do $$ begin if not exists (select from pg_roles where rolname = 'app') then create role app; end if; end $$;
+create function whoami() returns bigint language sql stable as $f$ select 1::bigint $f$;
+create table emails (id bigint primary key, user_id bigint not null, extra jsonb, label text);
+create table logins (id bigint primary key, user_id bigint not null);
+alter table emails enable row level security;
+alter table logins enable row level security;
+create policy select_own on emails for select to app using (user_id = whoami());
+create policy select_own on logins for select to app using (user_id = whoami());
+grant select on emails, logins to app;
+grant update (extra, label) on emails to app;
+create policy update_own on emails for update to app using (user_id = whoami());
+grant insert (extra) on emails to app;
+create policy insert_own on emails for insert to app with check (user_id = whoami());
+"""
+
+
+def test_an_import_names_each_tables_opaque_blocks_apart_and_drops_left_out_columns(pg_dsn, tmp_path, capsys):
+    """#71 (graphile/starter): two tables with a policy of the same name get two opaque blocks, and
+    a column grant over a column the import leaves out (jsonb) names only the modelled ones."""
+    dbname = "mls_import_clash"
+    with psycopg.connect(pg_dsn, autocommit=True) as admin:
+        admin.execute(f'drop database if exists "{dbname}"')
+        admin.execute(f'create database "{dbname}"')
+    dsn = psycopg.conninfo.make_conninfo(pg_dsn, dbname=dbname)
+    try:
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute(CLASH_SQL)
+        out = tmp_path / "before.json"
+        assert main(["import", "--dsn", dsn, "--out", str(out)]) == 0, capsys.readouterr()
+        err = capsys.readouterr().err
+        d = json.loads(out.read_text())
+        tables = {o["table"] for o in d["opaques"].values()}
+        assert tables == {"emails", "logins"} and {"select_own_using", "logins_select_own_using"} <= set(d["opaques"]), d["opaques"]
+        rule = next(r for r in d["rules"] if r["kind"] == "column_rule" and r["table"] == "emails")
+        assert rule["columns"] == ["label"], rule
+        assert "extra" in err and "not modelled" in err, err
+        # insert only on the left-out column: no column rule could say so, so the policy goes (stricter)
+        assert not any(r["kind"] == "policy" and r["command"] == "insert" for r in d["rules"]), d["rules"]
+        assert "insert_own is not imported and the spec denies the insert" in err, err
+        assert main(["check", str(out), "--dsn", dsn]) == 0, capsys.readouterr()
+    finally:
+        with psycopg.connect(pg_dsn, autocommit=True) as admin:
+            admin.execute(f'drop database if exists "{dbname}"')

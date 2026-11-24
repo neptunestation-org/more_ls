@@ -1264,7 +1264,9 @@ relations on the tables it names.  A foreign key of the inclusion shape (two col
 pair, `MATCH SIMPLE`, `ON UPDATE RESTRICT`, `ON DELETE RESTRICT`, `CASCADE` or `SET NULL` of its first, nullable column (an inclusion with that `on_delete`), not deferrable or `DEFERRABLE INITIALLY
 DEFERRED`, the latter a deferred inclusion) becomes an inclusion rule, except one per cycle of
 such keys checked after each statement, which is listed as foreign with a note; column-level
-grants become column rules; a CHECK the lifter reads becomes a check rule; a trigger of the
+grants become column rules, without the columns the import left out (a deploy revokes those;
+when a grant names no other column, the role's policies for that command are left out too, so
+the spec denies the command rather than grant every column); a CHECK the lifter reads becomes a check rule; a trigger of the
 transition template MLS itself emits becomes a transition rule, and one of its column guard
 template (`0_mls_cg_<name>`) a column rule with its role, its columns and its condition; the
 triggers of an inclusion into a relation with a condition become that inclusion, with the
@@ -1272,7 +1274,9 @@ relation its condition names.  The compiler's own relation
 policies (`mls_rel_<relation>_<role>_<n>`, which give the relation its name back) and relation
 grants are recognized and not imported as rules.  Listed in the notes and not imported: other
 triggers, other foreign keys, a CHECK the lifter cannot read or that is `NOT VALID`, a CHECK
-over nullable columns written without `IS TRUE` (it passes on NULL where a check rule rejects),
+over nullable columns written without `IS TRUE` (it passes on NULL where a check rule rejects;
+a column tested only by `IS [NOT] NULL` does not count, and on a `NOT NULL` boolean column
+`b IS TRUE` / `b IS FALSE` is read as `b = true` / `b = false`),
 grants with no permissive policy, policies for no app role, policies whose names are not
 identifiers (the rule gets the identifier; a deploy renames the policy).  Notes prefixed
 `lint:` name hand-written shapes a deploy improves on (a bare `auth.uid()` evaluated per row,

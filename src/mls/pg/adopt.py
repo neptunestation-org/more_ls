@@ -612,6 +612,8 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
             parts += 1
             whole = sql.strip() == text.strip()
             oname = ident(base) if whole else suffixed(base, str(parts))
+            if oname in opaques and opaques[oname]["table"] != table:  # #71: policy names repeat across tables
+                oname = suffixed(f"{table}_{base}", "" if whole else str(parts)).rstrip("_")
             if whole:
                 cols = sorted(set(cols) | {c for c in depcols if c in modelled[table]})
             opaques[oname] = {"table": table, "columns": cols, "context": ctx, "relations": rels, "sql": sql}
@@ -717,6 +719,26 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 continue
             if cols is None:
                 continue
+            if cols - modelled[name]:  # #71: a column the import left out (its type) has no rule
+                left = ", ".join(sorted(cols - modelled[name]))
+                cols = cols & modelled[name]
+                if not cols:
+                    # no modelled column: without a column rule the spec would grant every column, so the
+                    # role's policies for the command go instead (stricter, never weaker)
+                    gone = [r for r in rules if r["kind"] == "policy" and r["table"] == name and r["role"] == role
+                            and r["mode"] == "permissive" and r["command"] in (priv, "all")]
+                    for r in gone:
+                        rules.remove(r)
+                    names = {r["name"] for r in gone}
+                    for x in lifted_exprs:
+                        if x["table"] == name:
+                            x["rules"] = [(n, ro) for n, ro in x["rules"] if n not in names]
+                    notes.append(f"{role}'s {priv} grant on {name} names only {left}, not modelled: the spec cannot "
+                                 f"limit {priv} to it, so {', '.join(sorted(names))} "
+                                 f"{'is' if len(names) == 1 else 'are'} not imported and the spec denies the {priv}")
+                    continue
+                notes.append(f"{role}'s {priv} grant on {name} names {left}, not modelled: the column rule leaves "
+                             f"it out, so a deploy revokes it (drift reports it as unexpected until then)")
             access = "read" if priv == "select" else "write"
             existing = next((r for r in rules if r["kind"] == "column_rule" and r["table"] == name
                              and r["role"] == role and r["access"] == access), None)

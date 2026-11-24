@@ -1885,3 +1885,19 @@ On an adopted table the keys are the database's: the deploy creates none of them
 matches a declared unique or primary key, and its index, against a live one with the same
 definition, whatever the name (`drift._own_key_names`); the import's note is gone.  Owned tables
 keep the name comparison: there MLS created the key.
+
+
+**D92. Import fixes from graphile/starter (#71).**  Importing graphile/starter's `app_public` wrote
+a spec that did not check.  Opaque blocks are named after the policy (`select_own_using`), and
+graphile names policies alike on several tables, so the second table's rule referred to the first
+table's block: a clash now prefixes the table (`user_authentications_select_own_using`).  A
+column grant naming a column the import leaves out (`citext`, `jsonb`) became a column rule naming
+an unknown column: the rule now drops it, and a deploy revokes it (the compiler's `revoke all`
+removes column privileges too).  When the grant names no modelled column at all
+(`grant insert (email)`), no column rule can say "only that column" (`columns` is non-empty),
+and having no rule would grant every column, `is_verified` included: the role's permissive
+policies for that command are left out instead, so the spec denies the command.  Stricter, never
+weaker; modelling the column (citext) is the real fix.  Two reading fixes came with it: a
+nullable column tested only by `IS [NOT] NULL` no longer makes a bare CHECK "pass on NULL" (that
+note was wrong for `(user_id IS NULL) <> (email IS NULL)`), and on a `NOT NULL` boolean column
+`b IS TRUE` / `b IS FALSE` is `b = true` / `b = false`, which is never UNKNOWN either.

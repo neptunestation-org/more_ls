@@ -762,3 +762,26 @@ def test_other_array_tests_stay_opaque(text, reason):
     are not `has`; nor is a label taken from a column."""
     r, _ = do(text, env=env_of(roles=("text[]", True)))
     assert r.kind == "opaque" and reason in " ".join(r.reasons), r.reasons
+
+
+def test_is_true_or_false_on_a_not_null_boolean_is_a_comparison():
+    """#71: on a NOT NULL boolean column `b IS FALSE` is `b = false` (never UNKNOWN), as in
+    graphile/starter's `CHECK ((is_primary IS FALSE) OR is_verified)`."""
+    env = env_of(primary=("bool", False), maybe=("bool", True))
+    r, _ = do("((\"primary\" IS FALSE) OR (level >= 0))", scope="check", env=env)
+    assert r.kind == "lifted", r.reasons
+    assert r.pred == {"or": [{"cmp": [{"col": "primary"}, "=", {"const": False}]},
+                             {"cmp": [{"col": "level"}, ">=", {"const": 0}]}]}
+    r, _ = do("(\"primary\" IS NOT TRUE)", scope="check", env=env)
+    assert r.pred == {"not": {"cmp": [{"col": "primary"}, "=", {"const": True}]}}
+    # a nullable boolean can be NULL, where IS FALSE is FALSE and `= false` UNKNOWN: not read
+    r, _ = do("(maybe IS FALSE)", scope="check", env=env)
+    assert r.kind != "lifted"
+
+
+def test_a_column_tested_only_for_null_does_not_make_a_check_unknown():
+    """#71: `(user_id IS NULL) <> (email IS NULL)` is never UNKNOWN, so the import's note must not
+    say it passes when user_id is NULL."""
+    env = env_of(owner=("int", True))
+    assert nullable_columns("((owner IS NULL) <> (level IS NULL))", env.tables["docs"]) == set()
+    assert nullable_columns("((owner IS NULL) OR (owner > 0))", env.tables["docs"]) == {"owner"}
