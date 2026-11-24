@@ -1918,3 +1918,16 @@ called in a policy (bool is left to helper inlining, D73) and, for relation prop
 user table the table the function's result refers to when its body is `select col from t ...` and
 `t.col` has a foreign key.  The harness creates a stand-in of the same name reading
 `mls_harness.<name>`.  Set-returning helpers (`id in (select f())`) are a separate issue (#74).
+
+
+**D94. Set-returning helpers are read inline too (#74; extends D73).**  graphile/starter's
+organization policies are `id in (select current_user_member_organization_ids())`, a SECURITY
+DEFINER `language sql` helper returning `setof uuid` whose body is the membership
+`select organization_id from organization_memberships where user_id = current_user_id()`.  The
+import read only boolean helpers, so these stayed opaque.  A one-statement SQL helper returning a
+set of uuid, integer, bigint or text is now read where a policy selects from it: `select f(..)
+[as x]` inside parentheses (an `in` subquery or `array(...)`) is replaced by the helper's own
+`select`, with the same rules as a boolean helper (the definer alias when its owner bypasses the
+tables' policies, the `inlined` md5 assumption, `restore_calls` putting the call back in an
+opaque part).  A call anywhere else stays a call.  On graphile/starter the import then has no
+opaque block left.

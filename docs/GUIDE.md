@@ -1778,7 +1778,9 @@ These are decisions, not gaps; `docs/design/DECISIONS.md` has the reasoning.
   repeated in every report, or it is drift.  A hand-written policy is lifted into the fragment
   when the lifter reads it and adopted as an opaque block otherwise.  A function of yours in a
   policy is read as its body only when it is a one-statement SQL helper returning a boolean
-  (`is_member(team_id)`, its arguments' defaults filled in when the call leaves them out); the spec then states that the helper keeps that body, and drift checks
+  (`is_member(team_id)`, its arguments' defaults filled in when the call leaves them out), or
+  one returning a set of values that a policy selects from (`id in (select my_team_ids())`); the
+  spec then states that the helper keeps that body, and drift checks
   it.  Any other function stays an opaque call.
 - **The fragment.**  No joins, subqueries, arithmetic or functions in predicates (a chain of
   lookups through keys is a composed relation, section 7).  Comparison

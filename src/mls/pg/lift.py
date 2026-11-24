@@ -1704,15 +1704,27 @@ def inline_functions(text: str, table: str, columns: set[str], functions: dict[s
                 out.append(text[i:j])
                 i = j
                 continue
+            start_at = m.start()
+            if f.get("set"):  # #74: `select f(..) [as x]` is the body's select; a call elsewhere stays
+                before = re.search(r"\bselect\s+$", text[:m.start()], re.IGNORECASE)
+                after = re.match(r"\s+as\s+\w+", text[j:], re.IGNORECASE)
+                if before is None or not re.match(r"\s*(?:as\s+\w+\s*)?\)", text[j:], re.IGNORECASE):
+                    out.append(text[i:j])
+                    i = j
+                    continue
+                start_at = before.start()
+                j += after.end() if after else 0
             alias = DEFINER_ALIAS if f.get("definer") else "mls_inline"
             body = _FUNC_FROM.sub(lambda t: f"{t.group(1)} {t.group(2)} {alias}", _unalias(f["expr"], alias))
             for n, (param, arg) in enumerate(zip(f["params"], subst), start=1):
                 body = re.sub(r'(?<![\w."$])(?:"' + re.escape(param) + '"|' + re.escape(param) + r')(?![\w"])|\$'
                               + str(n) + r'(?!\d)', lambda _: f"({arg})", body) if param else re.sub(
                                   r'\$' + str(n) + r'(?!\d)', lambda _: f"({arg})", body)
-            out.append(text[i:m.start()] + "(" + body + ")")
+            if f.get("set"):
+                body = "SELECT " + body
+            out.append(text[i:start_at] + (body if f.get("set") else "(" + body + ")"))
             if calls is not None:
-                calls.append((body, text[m.start():j]))
+                calls.append((body, text[start_at:j]))
             i, changed = j, True
         text = "".join(out) + text[i:]
         if not changed:

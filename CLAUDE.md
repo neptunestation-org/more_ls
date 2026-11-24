@@ -167,7 +167,8 @@ union member the renderer does not cover.
   `RELATION_NULL_KEY_MATCHES`.
 - D72: `subset_axioms` also relates nested filters (`_implies_on_rows`, a cached solver call), and a
   relation's unique value names one row (`relation_row_axioms`); tests in `tests/props/test_properties.py`.
-- D73/D85 (#64): import inlines a one-statement boolean SQL helper (volatile too, with a note; a short
+- D73/D85 (#64): import inlines a one-statement boolean SQL helper (D94, #74: or a `setof` scalar one
+  where a policy selects from it, `select f() as x` replaced by its select; volatile too, with a note; a short
   call takes the defaults; `lift.fold` folds `const is null` and constant `and`/`or` parts; `p = true` is p) (`lift.inline_functions`; a definer one only
   when its owner bypasses the tables' policies); an opaque part keeps the call (`restore_calls`); the table
   assumes `{"inlined": "function f(t) md5 h"}` and drift reports a changed body.

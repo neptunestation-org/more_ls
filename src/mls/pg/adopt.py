@@ -153,10 +153,13 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
         # a function that declares none), with its parameters' defaults for a shorter call
         cur.execute("""select p.proname, coalesce(p.proargnames, '{}'), p.pronargs, p.prosrc,
                               oidvectortypes(p.proargtypes), md5(p.prosrc), p.prosecdef,
-                              p.provolatile = 'v', p.pronargdefaults, pg_get_expr(p.proargdefaults, 0)
+                              p.provolatile = 'v', p.pronargdefaults, pg_get_expr(p.proargdefaults, 0), p.proretset
                        from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_language l on l.oid = p.prolang
                          join pg_roles o on o.oid = p.proowner
-                       where n.nspname = %s and l.lanname = 'sql' and not p.proretset and p.prorettype = 'bool'::regtype
+                       where n.nspname = %s and l.lanname = 'sql'
+                         and (not p.proretset and p.prorettype = 'bool'::regtype
+                              or p.proretset and p.prorettype in ('uuid'::regtype, 'integer'::regtype,
+                                                                  'bigint'::regtype, 'text'::regtype))
                          and p.proname not like 'mls\\_%%'
                          and (not p.prosecdef or o.rolsuper or o.rolbypassrls or not exists (
                            select 1 from pg_class t join pg_namespace tn on tn.oid = t.relnamespace
@@ -166,14 +169,14 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
                          and (select count(*) from pg_proc q where q.proname = p.proname and q.pronamespace = p.pronamespace) = 1""",
                     (schema,))
         cat["functions"] = {}
-        for fname, argnames, nargs, src, types, digest, definer, volatile, ndefaults, defaults in cur.fetchall():
+        for fname, argnames, nargs, src, types, digest, definer, volatile, ndefaults, defaults, retset in cur.fetchall():
             expr = function_body(_strip_schema(src, schema))  # #64: `basejump.account_user` is the table
             if expr is not None:
                 expr = _qualified_params(expr, fname, (list(argnames) + [""] * nargs)[:nargs])
                 given = split_args(_strip_schema(defaults, schema)) if defaults else []
                 cat["functions"][fname] = {"params": (list(argnames) + [""] * nargs)[:nargs], "expr": expr,
                                            "assume": f"function {fname}({types}) md5 {digest}", "definer": definer,
-                                           "volatile": volatile,
+                                           "volatile": volatile, "set": retset,
                                            "defaults": [None] * (nargs - ndefaults) + given if len(given) == ndefaults
                                            else [None] * nargs}
         cur.execute("select distinct proname from pg_proc where pronamespace = 'pg_catalog'::regnamespace")
@@ -671,7 +674,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
             try:
                 r = lift(inline_lookups(inlined, cat["lookups"]), table, env, scope, make_opaque, make_relation,
                          top_is_true=top_is_true)
-                used = {re.match(r"\w+", call).group(0) for _, call in calls}
+                used = {re.search(r"(\w+)\s*\(", call).group(1) for _, call in calls}  # #74: `select f() as x`
                 inlined_by.setdefault(table, set()).update(cat["functions"][n]["assume"] for n in used)
                 volatile_by.setdefault(table, set()).update(n for n in used if cat["functions"][n]["volatile"])
                 return r

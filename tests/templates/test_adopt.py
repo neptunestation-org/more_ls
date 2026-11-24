@@ -967,3 +967,50 @@ def test_an_identity_read_from_a_trusted_function(pg_dsn, tmp_path, capsys):
     finally:
         with psycopg.connect(pg_dsn, autocommit=True) as admin:
             admin.execute(f'drop database if exists "{dbname}"')
+
+
+SET_HELPER_SQL = """
+create function app_public.current_user_org_ids() returns setof uuid as $f$
+  select org_id from app_public.org_members
+    where user_id = app_public.current_user_id();
+$f$ language sql stable security definer set search_path to pg_catalog, public, pg_temp;
+alter table app_public.orgs enable row level security;
+create policy select_member on app_public.orgs for select to visitor
+  using (id in (select app_public.current_user_org_ids()));
+create policy select_member_any on app_public.org_members for select to visitor
+  using (org_id = any(array(select app_public.current_user_org_ids())));
+grant select on app_public.orgs to visitor;
+"""
+
+
+def test_a_set_returning_helper_is_read_as_the_membership_its_body_is(pg_dsn, tmp_path, capsys):
+    """#74 (graphile/starter): `id in (select current_user_org_ids())`, a one-statement SQL helper
+    returning setof uuid, reads as the membership subquery its body is (the definer's owner
+    bypasses the policies, so it reads every row, as a relation does), with its body pinned."""
+    dbname = "mls_set_helper_import"
+    with psycopg.connect(pg_dsn, autocommit=True) as admin:
+        admin.execute(f'drop database if exists "{dbname}"')
+        admin.execute(f'create database "{dbname}"')
+    dsn = psycopg.conninfo.make_conninfo(pg_dsn, dbname=dbname)
+    try:
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute(GRAPHILE_SQL + SET_HELPER_SQL)
+        out = tmp_path / "before.json"
+        assert main(["import", "--dsn", dsn, "--schema", "app_public", "--out", str(out)]) == 0, capsys.readouterr()
+        err = capsys.readouterr().err
+        d = json.loads(out.read_text())
+        assert not d.get("opaques"), (d.get("opaques"), err)
+        member = {"member": {"relation": next(iter(d["relations"])), "key": {"ctx": "current_user_id"},
+                             "value": {"col": "id"}}}
+        orgs = next(r for r in d["rules"] if r["table"] == "orgs")
+        assert orgs["using"] == member, orgs
+        rel = d["relations"][member["member"]["relation"]]
+        assert (rel["table"], rel["key"], rel["value"]) == ("org_members", "user_id", "org_id"), rel
+        assert any(a.get("inlined", "").startswith("function current_user_org_ids() md5 ")
+                   for a in d["tables"]["orgs"]["assume"]), d["tables"]["orgs"]["assume"]
+        any_rule = next(r for r in d["rules"] if r["table"] == "org_members" and r["name"] == "select_member_any")
+        assert any_rule["using"]["member"]["value"] == {"col": "org_id"}, any_rule
+        assert main(["check", str(out), "--dsn", dsn, "--schema", "app_public"]) == 0, capsys.readouterr()
+    finally:
+        with psycopg.connect(pg_dsn, autocommit=True) as admin:
+            admin.execute(f'drop database if exists "{dbname}"')

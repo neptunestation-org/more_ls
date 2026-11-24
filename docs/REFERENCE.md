@@ -1354,7 +1354,11 @@ SQL-standard forms `TRIM(BOTH FROM x)`, `POSITION(a IN b)`, `SUBSTRING(x FROM i 
 `EXTRACT(f FROM x)`) is outside the fragment, and its note names it as a built-in.  A call to a SQL helper of the schema is read as the helper's body when the
 helper is one `select` statement returning a boolean and its
 arguments are the row's columns or constants (`has_org_role(org_id, array['owner', 'admin'])`
-reads as the membership its `exists` holds).  A call that leaves out arguments takes their
+reads as the membership its `exists` holds).  A helper that is one `select` statement returning a
+set of uuid, integer, bigint or text values is read the same way where a policy selects from it,
+`x in (select f(..))` or `x = any(array(select f(..)))`: the subquery becomes the helper's
+`select`, so `id in (select current_user_member_organization_ids())` reads as the membership its
+body selects.  A call that leaves out arguments takes their
 declared defaults.  Once the arguments are in place, what they leave constant is folded:
 `'owner' is null` is false and `null is null` true, and an `and` or `or` drops or is decided by its
 constant parts.  So is a test of a context value: the identity adapter takes it as always set, so
