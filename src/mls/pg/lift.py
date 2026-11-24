@@ -33,13 +33,13 @@ from pydantic import TypeAdapter
 from mls.spec.model import ARRAY_TYPES, CONTEXT_NOW, INT_RANGE, MAX_HOPS, ColType, Pred, Spec, pair_unique
 
 PG_TO_MLS: dict[str, ColType] = {"integer": "int", "bigint": "bigint", "text": "text", "boolean": "bool",
-                                 "timestamp with time zone": "timestamp", "uuid": "uuid"}
+                                 "timestamp with time zone": "timestamp", "uuid": "uuid", "citext": "citext"}
 CAST_TO_MLS: dict[str, ColType] = {"uuid": "uuid", "integer": "int", "int": "int", "int4": "int", "bigint": "bigint",
                                    "int8": "bigint", "text": "text", "character varying": "text", "varchar": "text",
                                    "boolean": "bool", "bool": "bool", "timestamptz": "timestamp",
-                                   "timestamp with time zone": "timestamp"}
+                                   "timestamp with time zone": "timestamp", "citext": "citext"}
 SQL_TYPE_OF: dict[ColType, str] = {"int": "integer", "bigint": "bigint", "text": "text", "bool": "boolean",
-                                   "timestamp": "timestamptz", "uuid": "uuid"}
+                                   "timestamp": "timestamptz", "uuid": "uuid", "citext": "citext"}
 
 
 def mls_type(pg_type: str) -> ColType | None:
@@ -49,6 +49,8 @@ def mls_type(pg_type: str) -> ColType | None:
         return "text[]" if mls_type(pg_type[:-2]) == "text" else None
     if pg_type == "character varying" or pg_type.startswith("character varying("):
         return "text"
+    if pg_type.endswith(".citext"):  # #73: the extension's type, qualified when its schema is not on the path
+        return "citext"
     return PG_TO_MLS.get(pg_type)
 FLIP = {"=": "=", "<>": "<>", "<": ">", "<=": ">=", ">": "<", ">=": "<="}
 REACH_FN = re.compile(r"^mls_reach_([a-z_][a-z0-9_]*)$")

@@ -31,7 +31,7 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag, model_validator
 
-ColType = Literal["int", "bigint", "text", "bool", "timestamp", "uuid", "enum", "text[]", "enum[]"]
+ColType = Literal["int", "bigint", "text", "bool", "timestamp", "uuid", "enum", "text[]", "enum[]", "citext"]
 ARRAY_TYPES = ("text[]", "enum[]")  # D88: tested only by `has` with a constant label, compared with nothing
 # D53: the integer types differ only in range (the fragment has no arithmetic), so they compare
 # with each other and share the SMT sort; the range bounds constants
@@ -42,7 +42,7 @@ def comparable(a: str, b: str) -> bool:
     """Whether values of the two column types compare (equal types, or both integer types).  An
     enum is never comparable here: a comparison checks it apart (`check._cmp`: its own labels, or
     another reference of the same enum type, #39), and a relation's key or value never matches one."""
-    if a == "enum" or b == "enum" or a in ARRAY_TYPES or b in ARRAY_TYPES:
+    if a in ("enum", "citext") or b in ("enum", "citext") or a in ARRAY_TYPES or b in ARRAY_TYPES:
         return False
     return a == b or (a in INT_RANGE and b in INT_RANGE)
 

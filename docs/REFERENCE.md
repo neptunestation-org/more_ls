@@ -73,6 +73,7 @@ table out of the spec.  MLS's own names (relation, hierarchy, opaque and context
 | `enum` | the declared enum type | `= <>`, `in` | adopted tables only; constants are the type's labels |
 | `text[]` | `text[]` | `has` only | adopted tables only; an adopted `varchar[]` column is `text[]` |
 | `enum[]` | an array of the declared enum type | `has` only | adopted tables only; labels are the type's |
+| `citext` | `citext` (the extension's) | `= <>`, `in` with constants | adopted tables only; case-insensitive; ASCII constants |
 
 `int` and `bigint` compare with each other, in a comparison, a membership, an inclusion and a
 cardinality group: the fragment has no arithmetic, so they differ only in range.  A
@@ -108,6 +109,15 @@ roles in a group, is `text[]`, or `enum[]` with the enum type named as for an en
 its elements.  It compares with nothing else, it cannot be a membership, inclusion, cardinality or
 hierarchy column, and a context value cannot be an array; otherwise it is a column like any other
 (privileges, column rules).  MLS creates no array columns, so an owned table has none.
+
+**Case-insensitive text.**  A `citext` column of an adopted table (the `citext` extension's type)
+compares by `=`, `<>` and `in` with string constants, ignoring case as Postgres does:
+`slug = 'Public'` holds for `'PUBLIC'` and `'public'`, and the proofs treat the constants of one
+spelling up to case as one value.  The constants must be ASCII (Postgres folds other letters
+under the database's collation, which the proofs cannot follow).  It does not compare with
+another column, a context value or by an ordering operator, and it cannot be a membership,
+inclusion, cardinality or hierarchy column; its keys, privileges and column rules are as for any
+column.  MLS creates no `citext` column, so an owned table has none: declare it `text`.
 
 **Constants** (`{"const": v}`): a JSON integer, string or boolean.  An integer constant must be
 within the range of the type it is compared with (`constant 2147483648 is out of range for int`,

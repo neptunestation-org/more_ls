@@ -1931,3 +1931,19 @@ set of uuid, integer, bigint or text is now read where a policy selects from it:
 tables' policies, the `inlined` md5 assumption, `restore_calls` putting the call back in an
 opaque part).  A call anywhere else stays a call.  On graphile/starter the import then has no
 opaque block left.
+
+
+**D95. citext columns (#73).**  graphile/starter keeps `username`, `email` and `slug` as `citext`;
+the import left them out, with their unique keys and column grants (D92's stricter fallback).
+`citext` is now a column type on adopted tables, compared by `=`, `<>` and `in` with string
+constants only.  The folding is where the meaning is: the encoder interns a constant compared
+with a citext column lower-cased (`tvl._fold_citext`), so `'Public'` and `'PUBLIC'` are one value
+there; the compiler writes the constants as given (Postgres folds); the oracle reads citext
+values as `model.CIText`, a `str` equal and hashed ignoring case, so its checks and unique keys
+fold as Postgres's do, and the harness draws the spec's constants in three cases.  Only ASCII
+constants: citext folds with `lower()` under the database collation, which Python's `lower()`
+may not match elsewhere.  Ordering, comparison with columns or context values, and citext keys of
+relations are refused for now: each needs collation-aware reasoning or folding of data the
+proofs only name.  Mutation `CITEXT_AS_TEXT` (the column compared as `text`) shows the
+differential sees case.  Lean: no change; columns are already `Int`-valued with interned
+constants, and the fold happens before interning.

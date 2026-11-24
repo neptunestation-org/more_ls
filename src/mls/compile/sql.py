@@ -72,7 +72,10 @@ class SqlCompiler:
                 ty = self.term_type(t, table)
                 if Mutation.IN_DROP_LAST in self.mutations:
                     consts = consts[:-1]
-                return f"({self.term(t, table)} in ({', '.join(self.term(c, table, ty) for c in consts)}))"
+                lhs = self.term(t, table)
+                if Mutation.CITEXT_AS_TEXT in self.mutations and ty == "citext":
+                    return f"({lhs}::text in ({', '.join(self.term(c, table, ty) + '::text' for c in consts)}))"
+                return f"({lhs} in ({', '.join(self.term(c, table, ty) for c in consts)}))"
             return "(" + " or ".join(self.pred(a, table) for a in p.or_) + ")"
         if isinstance(p, Not):
             return f"(not {self.pred(p.not_, table)})"
@@ -87,7 +90,10 @@ class SqlCompiler:
         if isinstance(p, Cmp):
             l, op, r = p.cmp
             ty = self.term_type(l, table) or self.term_type(r, table)
-            return f"({self.term(l, table, ty)} {op} {self.term(r, table, ty)})"
+            ls, rs = self.term(l, table, ty), self.term(r, table, ty)
+            if Mutation.CITEXT_AS_TEXT in self.mutations and ty == "citext":
+                ls, rs = f"{ls}::text", f"{rs}::text"
+            return f"({ls} {op} {rs})"
         if isinstance(p, Member):
             m = p.member
             lv = levels(self.spec, m.relation)

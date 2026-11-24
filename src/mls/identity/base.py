@@ -8,7 +8,7 @@ from typing import Any
 from mls.spec.model import CONTEXT_NOW, ColType, Spec
 
 SQL_TYPE = {"int": "integer", "bigint": "bigint", "text": "text", "bool": "boolean", "timestamp": "timestamptz",
-            "uuid": "uuid"}
+            "uuid": "uuid", "citext": "citext"}
 
 
 class Adapter(ABC):

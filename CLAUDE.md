@@ -220,6 +220,10 @@ union member the renderer does not cover.
   drift's hardening on it (`drift.identity_functions`, a gone function is a `DriftError`); import
   reads such calls (`cat["identity_functions"]`, the user table from the body's FK); fixture
   `specs.function_spec` (the harness's stand-in, `mls_harness.<name>`), `tests/templates/test_trusted_function.py`.
+- D95 (#73): `citext` columns (adopted only) compare with ASCII string constants by `=`/`<>`/`in`;
+  the encoder interns those constants lower-cased (`tvl._fold_citext`), the oracle holds values as
+  `model.CIText`, the harness draws the constants in three cases (`harness.string_constants`) and
+  creates the extension; fixture `specs.citext_spec`, mutation `CITEXT_AS_TEXT`.
 - D86 (#54): an inclusion into a relation with a condition (`restrict deferred` required) compiles to two
   deferred constraint triggers (`compile/fk.py`: `<name>` reads the target row `FOR SHARE`, `<name>_target`
   refuses a demotion), owned by `mls_internal`; never assumed by the proofs; preflight counts existing

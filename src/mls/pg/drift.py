@@ -127,7 +127,7 @@ def _live_types(spec: Spec, actual: Snapshot) -> dict[str, dict[str, str]]:
             continue
         for c, col in t.columns.items():
             lc = live["columns"].get(c)
-            if col.type in ("text", "text[]") and lc is not None and lc["type"] != col.type \
+            if col.type in ("text", "text[]", "citext") and lc is not None and lc["type"] != col.type \
                     and mls_type(lc["type"]) == col.type:
                 out.setdefault(name, {})[c] = lc["type"]
     return out

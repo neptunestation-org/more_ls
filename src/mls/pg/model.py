@@ -18,6 +18,20 @@ from mls.spec.model import (
 )
 
 Row = dict[str, Any]
+
+
+class CIText(str):
+    """#73: a citext value: equal to a string, and hashed, ignoring case (ASCII, as the checker
+    admits only ASCII constants), as Postgres compares it."""
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, str) and self.lower() == other.lower()
+
+    def __ne__(self, other: object) -> bool:
+        return not self == other
+
+    def __hash__(self) -> int:
+        return hash(self.lower())
 TV = bool | None
 
 # #63: the one key of a set relation's facts (no key column), as in the encoding

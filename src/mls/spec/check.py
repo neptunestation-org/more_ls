@@ -281,6 +281,20 @@ class Checker:
             self.err(path, f"an array column is tested only by has: type mismatch {lt} {op} {rt}",
                      "test a constant label among its elements: {\"has\": [{\"col\": name}, {\"const\": label}]}")
             return
+        if "citext" in (lt, rt):  # #73: a constant, compared ignoring case (the proofs fold it)
+            col, const, cpath = (l, r, rpath) if lt == "citext" else (r, l, lpath)
+            if lt == rt or not isinstance(const, Const) or not isinstance(const.const, str) \
+                    or isinstance(const.const, bool):
+                self.err(path, f"type mismatch: {lt} {op} {rt}: a citext column compares with a constant only",
+                         "compare it with a 'string' constant (the case does not matter)")
+            elif not const.const.isascii():
+                self.err(cpath, f"'{const.const}' is not ASCII: Postgres folds the case of a citext value under "
+                                f"the database's collation, which the proofs cannot follow",
+                         "use an ASCII constant")
+            elif op not in ("=", "<>"):
+                self.err(path, f"operator {op} is not allowed on citext values (no ordering: it depends on the "
+                               f"collation)", "use = or <>, or in for several values")
+            return
         if lt == "enum" and rt == "enum":  # two references of one enum type compare (#39)
             ln, rn = self.enum_name(l, scope), self.enum_name(r, scope)
             if ln != rn:
@@ -578,6 +592,9 @@ class Checker:
             if cv.type == "enum":
                 self.err(path + ".type", "a context value cannot be an enum",
                          "declare it text and compare an enum column with constant labels")
+            if cv.type == "citext":
+                self.err(path + ".type", "a context value cannot be citext",
+                         "declare it text; a citext column compares with constants only")
             if cv.type in ARRAY_TYPES:
                 self.err(path + ".type", "a context value cannot be an array",
                          "test an array column with a constant label instead")
@@ -665,6 +682,9 @@ class Checker:
                     self.err(f"{path}[{i}]", f"duplicate label '{label}'", "list each label once")
 
     def check_enum_column(self, tname: str, t, cname: str, col, path: str) -> None:
+        if col.type == "citext" and t.mode == "owned":
+            self.err(path + ".type", f"table '{tname}' is owned, and MLS creates its tables without citext columns",
+                     "declare it text, or adopt the table if the database already has it")
         if col.type == "text[]" and t.mode == "owned":
             self.err(path + ".type", f"table '{tname}' is owned, and MLS creates its tables without array columns",
                      "adopt the table if the database already has it")

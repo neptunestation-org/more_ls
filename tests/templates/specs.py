@@ -282,6 +282,42 @@ def function_spec() -> Spec:
     return make(d)
 
 
+CITEXT = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated
+
+table orgs adopted {
+  id uuid not null,
+  slug citext not null,
+  kind citext,
+  owner_id uuid not null;
+  primary_key (id);
+  unique (slug)
+}
+
+rules {
+  R1 policy public_orgs on orgs: authenticated select permissive using slug = 'Public' or owner_id = @uid
+  R2 policy own_kinds on orgs: authenticated update permissive using owner_id = @uid and kind in ('Team', 'personal') check owner_id = @uid
+  R3 check no_admin on orgs: slug <> 'ADMIN'
+}
+
+properties {
+  P1 must_allow orgs authenticated select: slug = 'PUBLIC'
+  P2 custom orgs authenticated select new: slug <> 'admin'
+}
+"""
+
+
+def citext_spec() -> Spec:
+    """#73: `orgs` adopted with citext columns compared with constants in another case than the
+    data has (the harness writes the spec's constants lower-, upper- and as-cased): 'Public'
+    reads 'PUBLIC' and 'public', the check keeps every case of 'admin' out, a unique slug refuses a
+    second row differing only in case.  The mutation compares the column as text (case-sensitive)."""
+    from mls.spec.syntax import parse
+
+    return make(parse(CITEXT).model_dump(mode="json", by_alias=True, exclude_none=True))
+
+
 def bigint_spec() -> Spec:
     """The session example with every key `bigint` (D53): the user id, the tenant ids and the
     document id, and the clearance a bigint context value compared with an int column.  The

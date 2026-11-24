@@ -120,6 +120,15 @@ class Encoder:
         self.rels_used.add(name)
         return rel_fun(name, self.rel_tags.get(name))
 
+    def _fold_citext(self, t, other, table: str):
+        """#73: a constant compared with a citext column is its lower-case value, so that 'Bob' and
+        'bob' are one value there (the checker admits ASCII constants only, which fold alike in
+        Python and Postgres)."""
+        if isinstance(t, Const) and isinstance(t.const, str) and not isinstance(t.const, bool) \
+                and isinstance(other, (ColRef, OldRef, NewRef)) and self._type_of(other, table) == "citext":
+            return Const(const=t.const.lower())
+        return t
+
     def const_id(self, value: str) -> int:
         if value not in self.consts:
             self.consts[value] = 1000 + len(self.consts)
@@ -194,6 +203,7 @@ class Encoder:
             return and_(not_(n), has), and_(not_(n), not_(has), not_(ARRAY_HAS_NULL(v)))
         if isinstance(p, Cmp):
             l, op, r = p.cmp
+            l, r = self._fold_citext(l, r, table), self._fold_citext(r, l, table)
             self._note_const_types(l, r, table)
             (lv, ln), (rv, rn) = self.term(l, row, table), self.term(r, row, table)
             core = {"=": eq(lv, rv), "<>": not_(eq(lv, rv)), "<": lt(lv, rv), "<=": le(lv, rv),

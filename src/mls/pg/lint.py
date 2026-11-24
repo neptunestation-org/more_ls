@@ -22,7 +22,7 @@ STATIC_NON_LEAKPROOF = {
     "enum[]": ["&&", "<", "<=", "<>", "<@", "=", ">", ">=", "@>"],
 }
 PG_TYPE = {"int": "integer", "bigint": "bigint", "text": "text", "bool": "boolean", "timestamp": "timestamptz", "uuid": "uuid",
-           "enum": "anyenum", "text[]": "anyarray", "enum[]": "anyarray"}
+           "enum": "anyenum", "text[]": "anyarray", "enum[]": "anyarray", "citext": "citext"}
 
 
 @dataclass

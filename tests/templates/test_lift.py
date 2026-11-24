@@ -36,6 +36,7 @@ ROUND_TRIP = {
     "guard": specs.guard_spec,  # #57: the column guard trigger reads back as a column rule with its condition
     "session_setting": specs.session_spec,
     "trusted_function": specs.function_spec,  # #72: the calls read back as the context values, the md5 pins
+    "citext": specs.citext_spec,  # #73: citext columns and their constants (`'x'::citext`) read back
     "bigint": specs.bigint_spec,
     "pg_roles": specs.pg_roles_spec,
     "composed": specs.composed_spec,  # D56: the nested array shape reads back as composed relations
@@ -90,7 +91,7 @@ def test_round_trip_per_template(name, pg_dsn):
         assert bad == [], [str(c) for c in bad]
         # the compiler's own relation policies and grants are recognized, not re-imported as rules
         assert not any(p.name.startswith("mls_rel_") for p in imported.policies())
-        assert any("relation-visibility policy" in n for n in res.notes)
+        assert any("relation-visibility policy" in n for n in res.notes) or not source.relations
         # what the source declares as rules comes back as rules of the same kind and name
         kinds = {(r.kind, r.name) for r in source.rules if r.kind != "column_rule"}
         assert kinds <= {(r.kind, r.name) for r in imported.rules}

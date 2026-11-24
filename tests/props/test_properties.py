@@ -810,3 +810,38 @@ def test_supabase_service_roles_are_trusted_but_keep_their_rules():
     grown = check_spec(parse((SERVICE % "").replace("  secret text;", "  secret text,\n  note text;")))
     sql = migrate(spec, grown).sql()
     assert "app role authenticated can become" in sql and "app role authenticator can become" not in sql
+
+
+CITEXT = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated
+
+table orgs adopted {
+  id uuid not null,
+  slug citext not null,
+  owner_id uuid not null;
+  primary_key (id);
+  unique (slug)
+}
+
+rules {
+  R1 policy public_orgs on orgs: authenticated select permissive using slug = 'Public' or owner_id = @uid
+  R2 check no_admin on orgs: slug <> 'ADMIN'
+}
+
+properties {
+  P1 must_allow orgs authenticated select: slug = 'PUBLIC'
+  P2 custom orgs authenticated select new: slug <> 'admin'
+  P3 custom orgs authenticated select new: slug = 'public' or owner_id = @uid
+}
+"""
+
+
+def test_citext_compares_with_constants_ignoring_case():
+    """#73: a citext column equals a constant whatever the case of either, as Postgres compares
+    them: 'Public' grants 'PUBLIC', and the check on 'ADMIN' keeps 'admin' out.  Without the
+    folding both properties would be refuted (two constants, two values)."""
+    from mls.spec.syntax import parse
+
+    v = verdicts(check_spec(parse(CITEXT)))
+    assert v == {"P1": "PROVED", "P2": "PROVED", "P3": "PROVED"}, v

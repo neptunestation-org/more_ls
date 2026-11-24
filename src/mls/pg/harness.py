@@ -115,6 +115,7 @@ class ValueGen:
         self.user_ctx = adapter.user_context_name()
         self.chained = chained_columns(spec)
         self.array_labels = sorted(array_labels(spec))
+        self.citexts = sorted({v for c in string_constants(spec) if c.isascii() for v in (c, c.lower(), c.upper())})
 
     def value(self, type_: str, nullable: bool, null_p: float | None = None, enum: str | None = None) -> Any:
         if nullable and self.rnd.random() < (self.null_p if null_p is None else null_p):
@@ -127,6 +128,10 @@ class ValueGen:
             return self.rnd.choice(self.users)
         if type_ == "text":
             return self.rnd.choice(self.texts)
+        if type_ == "citext":  # #73: the spec's constants in several cases, so that case folding shows
+            from mls.pg.model import CIText
+
+            return CIText(self.rnd.choice([*self.citexts, *self.texts[:1]]))
         if type_ == "bool":
             return self.rnd.random() < 0.5
         if type_ == "timestamp":
@@ -189,6 +194,29 @@ class ValueGen:
             else:
                 ctx[name] = self.value(cv.type, False)
         return ctx
+
+
+def string_constants(spec: Spec) -> set[str]:
+    """Every text constant a rule or property compares with (#73: what citext values are drawn from)."""
+    from pydantic import BaseModel
+
+    from mls.spec.model import Const
+
+    found: set[str] = set()
+
+    def walk(x: Any) -> None:
+        if isinstance(x, Const) and isinstance(x.const, str) and not isinstance(x.const, bool):
+            found.add(x.const)
+        elif isinstance(x, BaseModel):
+            for f in type(x).model_fields:
+                walk(getattr(x, f))
+        elif isinstance(x, (list, tuple)):
+            for v in x:
+                walk(v)
+
+    walk(spec.rules)
+    walk(spec.properties)
+    return found
 
 
 def array_labels(spec: Spec) -> set[str]:
@@ -431,6 +459,8 @@ class Harness:
         from mls.props.effective import all_policies
 
         out = [enum_ddl(name, labels) for name, labels in self.spec.enums.items()]  # D59: the database has them
+        if any(c.type == "citext" for t in self.spec.tables.values() for c in t.columns.values()):
+            out.insert(0, "create extension if not exists citext")  # #73
         for name, t in self.spec.tables.items():
             if t.mode != "adopted":
                 continue

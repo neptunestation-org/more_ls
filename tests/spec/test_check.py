@@ -744,3 +744,39 @@ def test_an_unknown_array_column_is_one_error_and_an_owned_enum_array_says_adopt
     d["rules"] = [r for r in d["rules"] if r["id"] != "R5"]
     e = next(e for e in errors(d) if e.path == "$.tables.team_members.columns.perms.type")
     assert "without array columns" in e.message and "adopt" in e.fix and " in (" not in e.fix, str(e)
+
+
+def test_citext_compares_with_ascii_constants_only():
+    """#73: a citext column (adopted tables) compares by = and <> with a constant; ordering, other
+    columns, context values and non-ASCII constants (Postgres folds those under the database's
+    collation) are refused, each with its path."""
+    from mls.spec.syntax import parse
+
+    base = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated
+table orgs %s {
+  id uuid not null,
+  slug citext not null,
+  name text;
+  primary_key (id)
+}
+rules {
+  R1 policy p on orgs: authenticated select permissive using %s
+}
+"""
+
+    def errors(pred: str, mode: str = "adopted") -> list[str]:
+        try:
+            check_spec(parse(base % (mode, pred)))
+        except SpecError as e:
+            return [f"{x.path}: {x.message}" for x in e.errors]
+        return []
+
+    assert errors("slug = 'Acme'") == []
+    assert errors("slug in ('acme', 'Beta')") == []
+    assert errors("slug is null") == []
+    assert any("ordering" in e or "operator <" in e for e in errors("slug < 'm'"))
+    assert any("constant" in e for e in errors("slug = @uid"))
+    assert any("ASCII" in e for e in errors("slug = 'Café'"))
+    assert any("is owned" in e and "citext" in e for e in errors("slug = 'acme'", mode="owned"))

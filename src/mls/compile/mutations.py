@@ -24,6 +24,7 @@ class Mutation(str, Enum):
     CARDINALITY_NO_LOCK = "cardinality_no_lock"      # skip the parent-row lock (concurrency)
     IN_DROP_LAST = "in_drop_last"                    # IN list without its last constant
     HAS_NULL_ELEMENT_FALSE = "has_null_element_false"  # a label test reads a NULL element as no match (FALSE)
+    CITEXT_AS_TEXT = "citext_as_text"                # compare a citext column as text (case-sensitive)
     REPLACE_KEEPS_FOREIGN = "replace_keeps_foreign"  # drop only the declared names on an adopted table
     ADOPTED_KEEPS_CONSTRAINT = "adopted_keeps_constraint"  # keep an adopted table's same-named constraint unseen
     HOP_VISIBILITY_DROPPED = "hop_visibility_dropped"  # omit a composed relation's hop visibility policies
