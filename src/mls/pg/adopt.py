@@ -393,11 +393,8 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 mls_keys.setdefault(name, []).append(con["colnames"])
             elif con["type"] == "u":
                 if set(con["colnames"]) <= set(cols):
+                    # #69: kept under its own name; drift matches an adopted key by its columns
                     tb.setdefault("unique", []).append(con["colnames"])
-                    expect = f"{name}_{'_'.join(con['colnames'])}_key"
-                    if con["name"] != expect:
-                        notes.append(f"unique constraint {con['name']} on {name} is named differently from MLS's "
-                                     f"{expect} (drift reports the name)")
                 else:
                     notes.append(f"unique constraint {con['name']} on {name} uses a column that is not modelled; left out")
         spec_tables[name] = tb

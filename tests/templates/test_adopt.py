@@ -334,6 +334,7 @@ create table tickets (
   status varchar(20) not null,
   title character varying,
   labels varchar(20)[],
+  constraint tickets_team_ref_uq unique (team_id, id),
   check (status in ('open', 'closed')),
   foreign key (user_id, team_id) references team_members (user_id, team_id),
   user_id bigint not null
@@ -369,7 +370,8 @@ def test_bigint_keys_and_varchar_columns_import_deploy_and_drift(typed):
     table; the imported spec deploys over the schema, drift is then clean (the CHECK over the
     varchar column included), and a key above 2³¹ passes through the compiled policy.  #65: a
     `varchar(n)[]` column is `text[]`, its label test (deparsed over a cast) is read, and drift's
-    stand-in takes the live type."""
+    stand-in takes the live type.  #69: a unique key the table has under its own name matches the
+    declared one by its columns, and a declared key the table lacks is still missing."""
     res = import_schema(typed)
     spec = check_spec(Spec.model_validate(res.spec))
     t = spec.tables["tickets"]
@@ -394,6 +396,13 @@ def test_bigint_keys_and_varchar_columns_import_deploy_and_drift(typed):
     d = drift(typed, spec, script)
     assert d.ok, [str(i) for i in d.items]
     assert not [i for i in d.items if i.kind in ("differs", "missing")], [str(i) for i in d.items]
+    assert ["team_id", "id"] in res.spec["tables"]["tickets"]["unique"]
+    assert not any("named differently" in n for n in res.notes), res.notes
+    other = spec.model_copy(deep=True)
+    other.tables["tickets"].unique.append(["status", "user_id"])
+    d = drift(typed, other, compile_spec(other))
+    assert any(i.kind == "missing" and "tickets_status_user_id_key" in i.object for i in d.items), \
+        [str(i) for i in d.items]
     with typed.transaction(force_rollback=True):
         with typed.cursor() as cur:
             cur.execute("insert into team_members values (%s, %s), (%s, 1)", (BIG, BIG + 1, BIG + 2))

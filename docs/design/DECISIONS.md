@@ -1876,3 +1876,12 @@ check looked at an app role's memberships (drift did only for `mls_internal`).
   dropping them from the spec (same).
 - `must_allow` about a service role still proves: what the platform needs from its policies is
   a lower bound, and the rules deliver it whatever else the role can do.
+
+
+**D91. An adopted table's keys keep their names (#69).**  Drift compared constraints and indexes by
+name, so a unique key the rbac `members` table had as `members_group_user_uq` was reported missing
+under MLS's `members_group_id_user_id_key` after a correct deploy (the import only noted the name).
+On an adopted table the keys are the database's: the deploy creates none of them.  Drift now
+matches a declared unique or primary key, and its index, against a live one with the same
+definition, whatever the name (`drift._own_key_names`); the import's note is gone.  Owned tables
+keep the name comparison: there MLS created the key.

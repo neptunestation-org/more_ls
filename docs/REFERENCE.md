@@ -1022,7 +1022,7 @@ All names are deterministic functions of the spec, so `mls drift` can match them
 | Object | Name |
 |---|---|
 | primary key | `<table>_pkey` |
-| unique constraint | `<table>_<col>[_<col>...]_key` |
+| unique constraint | `<table>_<col>[_<col>...]_key` (on an adopted table, the database's own name: drift matches a declared key there by its columns) |
 | unique constraint an inclusion needs, added by MLS | `mls_key_<table>_<key>_<value>` |
 | check constraint, foreign key, policy, trigger | the rule's `name` |
 | transition trigger function | `mls_tr_<table>_<name>()` |

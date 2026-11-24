@@ -190,6 +190,25 @@ def bypass_report(spec: Spec, paths: dict[str, list[dict]]) -> tuple[list[DriftI
     return items, notes
 
 
+def _own_key_names(exp: dict, act: dict) -> tuple[dict, dict]:
+    """#69: an adopted table's keys are the database's, names included.  A declared unique or
+    primary key the table has under another name (same definition) is that key, and so is its
+    index: the expected entries are renamed to the live names before the comparison."""
+    exp = {**exp, "constraints": dict(exp["constraints"]), "indexes": dict(exp["indexes"])}
+    for name, e in list(exp["constraints"].items()):
+        if e.get("type") not in ("u", "p") or name in act["constraints"]:
+            continue
+        live = next((n for n, a in act["constraints"].items()
+                     if a == e and n not in exp["constraints"]), None)
+        if live is None:
+            continue
+        exp["constraints"][live] = exp["constraints"].pop(name)
+        idx = exp["indexes"].pop(name, None)
+        if idx is not None:  # its definition names it: compare under the live name
+            exp["indexes"][live] = idx.replace(f"INDEX {name} ON", f"INDEX {live} ON", 1)
+    return exp, act
+
+
 def compare(spec: Spec, expected: Snapshot, actual: Snapshot) -> tuple[list[DriftItem], list[str]]:
     items: list[DriftItem] = []
     notes: list[str] = []
@@ -217,6 +236,8 @@ def compare(spec: Spec, expected: Snapshot, actual: Snapshot) -> tuple[list[Drif
         for c in act["columns"]:
             if c not in exp["columns"]:
                 items.append(DriftItem(extra, f"column {t}.{c}"))
+        if mode == "adopted":
+            exp, act = _own_key_names(exp, act)
         for group, label in (("constraints", "constraint"), ("policies", "policy"),
                              ("triggers", "trigger"), ("indexes", "index")):
             for name, e in exp[group].items():
