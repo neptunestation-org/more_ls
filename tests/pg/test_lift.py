@@ -700,6 +700,23 @@ def test_constant_parts_fold_and_a_predicate_compared_with_true_is_the_predicate
     assert r.pred == expected
 
 
+@pytest.mark.parametrize("text, expected", [
+    (f"({UID} IS NOT NULL)", {"lit": True}),
+    (f"({UID} IS NULL)", {"lit": False}),
+    ("(auth.uid() IS NOT NULL)", {"lit": True}),
+    (f"(({UID} IS NOT NULL) AND (level = 1))", {"cmp": [{"col": "level"}, "=", {"const": 1}]}),
+    (f"(({CLEARANCE} IS NULL) OR (level = 1))", {"cmp": [{"col": "level"}, "=", {"const": 1}]}),
+])
+def test_a_context_value_is_never_null(text, expected):
+    """#66: the model takes a context value as never NULL (an adapter's assumption), so `auth.uid()
+    IS NOT NULL` is TRUE and `IS NULL` FALSE, and they fold like a constant's: supabase-tenant-rbac's
+    "any signed-in user creates a group" is `with check ((select auth.uid()) is not null)`."""
+    r, _ = do(text)
+    assert r.kind == "lifted", r.reasons
+    assert r.pred == expected
+    assert any("context value is always set" in h for h in r.hints), r.hints
+
+
 def test_a_helper_body_with_its_own_alias_defaults_and_qualified_parameters_inlines():
     """#64: the short call takes the parameter's default; the body's alias gives way to the inlined
     one, and a parameter written `fn.param` is the parameter."""

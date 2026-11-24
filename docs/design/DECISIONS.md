@@ -1809,3 +1809,13 @@ membership relation that closes a cycle with `organization_members.workspaceId -
 key the skeleton does not carry, so only `check --dsn` saw it and creating an organization would have
 failed.  (9) The diff's integrity part compares committed data (`row_constraints(.., at_commit=True)`):
 it had left every deferred inclusion out, so adding the owner rule showed as no integrity change.
+
+**D87. Import reads `<context value> IS [NOT] NULL` as constant (#66).**  supabase-tenant-rbac's "any
+signed-in user creates a group" is `with check ((select auth.uid()) is not null)`, refused before
+because `is_null` applies only to columns.  The model already takes every context value as set (the
+adapter's assumption, in every proof report), so `lift.fold` folds the test as it folds a constant's
+(D85), and the import prints a `lint:` note that it relied on the assumption.  Rejected, from the same
+issue: taking Supabase's `authenticator` and `supabase_auth_admin` as trusted roles like
+`service_role`.  Neither has BYPASSRLS in the image, so they reach rows only through policies; a
+trusted role's policies are not imported, and a deploy replaces the whole policy set (D51), so GoTrue
+would lose its read of the claims table.  They stay app roles, and requirements cover them.

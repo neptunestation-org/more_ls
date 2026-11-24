@@ -749,19 +749,22 @@ def _const(node: Node) -> Node | None:
     return node if isinstance(node, (Str, Num, Bool, Null)) else None
 
 
-def fold(node: Node) -> Node:
+def fold(node: Node, never_null: Callable[[Node], bool] = lambda _: False) -> Node:
     """#64: what an inlined helper's body leaves constant once the call's arguments are in place:
     `<constant> IS [NOT] NULL` is TRUE or FALSE, and `and` / `or` drop their TRUE / FALSE parts (a
     FALSE part makes an `and` FALSE, a TRUE one an `or` TRUE, whatever the others are, UNKNOWN
     included).  basejump's `(role = r or r is null)` is `role = 'owner'` for r = 'owner' and TRUE for
-    r = NULL.  Anything else is returned as it is."""
+    r = NULL.  #66: so is the test of a term `never_null` says is never NULL (a context value: the
+    model's assumption, the adapter's).  Anything else is returned as it is."""
     if isinstance(node, IsNull):
         c = _const(node.x)
         if c is not None:
             return Bool((isinstance(c, Null)) != node.negated, start=node.start, end=node.end)
+        if never_null(node.x):
+            return Bool(node.negated, start=node.start, end=node.end)
         return node
     if isinstance(node, (And, Or)):
-        items = [fold(x) for x in node.items]
+        items = [fold(x, never_null) for x in node.items]
         absorb = isinstance(node, Or)  # TRUE absorbs an or, FALSE an and
         if any(isinstance(x, Bool) and x.value == absorb for x in items):
             return Bool(absorb, start=node.start, end=node.end)
@@ -820,6 +823,15 @@ class Lifter:
         self.env.invalidate()
         return name
 
+    def never_null(self, node: Node) -> bool:
+        """#66: a context value is never NULL in the model (the identity adapter's assumption), so its
+        `IS [NOT] NULL` is TRUE or FALSE; the import says so."""
+        if self.context(node) is None:
+            return False
+        self.hint(f"`{self.src(node)} IS [NOT] NULL` is read as constant: the identity adapter's "
+                  "assumption is that a context value is always set")
+        return True
+
     def hint(self, text: str) -> None:
         if text not in self.hinted:
             self.hinted.add(text)
@@ -835,7 +847,7 @@ class Lifter:
             return {"opaque": self.opaque(self.src_text, node.start, node.end)}
 
     def pred(self, node: Node, negated: bool) -> dict:
-        node = fold(node)
+        node = fold(node, self.never_null)
         if isinstance(node, Bool):
             return {"lit": node.value}
         if isinstance(node, And):

@@ -1289,7 +1289,9 @@ arguments are the row's columns or constants (`has_org_role(org_id, array['owner
 reads as the membership its `exists` holds).  A call that leaves out arguments takes their
 declared defaults.  Once the arguments are in place, what they leave constant is folded:
 `'owner' is null` is false and `null is null` true, and an `and` or `or` drops or is decided by its
-constant parts.  A helper whose role filter is `(role = r or r is null)` reads as the owners among
+constant parts.  So is a test of a context value: the identity adapter takes it as always set, so
+`(select auth.uid()) is not null` reads as true and `is null` as false, with a `lint:` note saying
+so.  A helper whose role filter is `(role = r or r is null)` reads as the owners among
 the members when called with `'owner'` and as every membership when called without a role.  A
 parameter the body writes qualified by the function's name (`has_role.team_id`) is the parameter,
 and the body's own table alias may be anything.  A call compared with `true` (`has_role(team_id) =
