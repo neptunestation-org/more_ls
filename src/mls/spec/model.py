@@ -338,13 +338,16 @@ class Hierarchy(Strict):
 class ContextVar(Strict):
     """A context value.  `source` grammar depends on the adapter:
     supabase: 'auth.uid' | 'jwt.claims.<name>';  pg_roles: 'current_user';
-    session_setting: 'app.<name>' (read with current_setting, D47)."""
+    session_setting: 'app.<name>' (read with current_setting, D47);
+    trusted_function: '<schema>.<function>' (a zero-argument function, #72), with the md5 of its
+    body, which drift compares."""
     source: str
     type: ColType
+    md5: str | None = None
 
 
 class Identity(Strict):
-    adapter: Literal["supabase", "pg_roles", "session_setting"]
+    adapter: Literal["supabase", "pg_roles", "session_setting", "trusted_function"]
     context: dict[str, ContextVar] = Field(default_factory=dict)
 
 

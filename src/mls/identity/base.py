@@ -68,6 +68,7 @@ def get_adapter(spec: Spec) -> Adapter:
     from mls.identity.pg_roles import PgRolesAdapter
     from mls.identity.session_setting import SessionSettingAdapter
     from mls.identity.supabase import SupabaseAdapter
+    from mls.identity.trusted_function import TrustedFunctionAdapter
 
-    return {"supabase": SupabaseAdapter, "pg_roles": PgRolesAdapter,
-            "session_setting": SessionSettingAdapter}[spec.identity.adapter](spec)
+    return {"supabase": SupabaseAdapter, "pg_roles": PgRolesAdapter, "session_setting": SessionSettingAdapter,
+            "trusted_function": TrustedFunctionAdapter}[spec.identity.adapter](spec)

@@ -1373,7 +1373,7 @@ They are written to be acted on by a program as much as by a person: the LLM loo
 
 A policy's context values (`@uid`, `@clearance`) come from an identity adapter.  The adapter
 decides how a name becomes SQL and what has to be true outside the database for the policy to
-mean anything.  Three adapters ship:
+mean anything.  Four adapters ship:
 
 **`session_setting`.**  `app.<name>` is a session setting read with
 `current_setting('app.<name>', true)` and cast to the declared type.  A setting that is
@@ -1396,6 +1396,14 @@ pooler sets the role per request with `SET ROLE`.
 assumption, stated in every proof report, is that clients reach the database only through
 Supabase's API layer, which verifies the JWT.  A direct connection as `authenticated` with a
 forged claim is outside the model.
+
+**`trusted_function`.**  The value is the result of a function without arguments that you
+trust to return the current user: `identity trusted_function { uid: app_public.current_user_id
+uuid md5 '<hex>' }` compiles to `(select app_public.current_user_id())`.  graphile/starter's
+`current_user_id()`, which looks the user up from a session id the API server sets, is the
+example.  The proofs trust the function as it was when the spec was written, so the spec pins its
+body with an md5 (`mls import` writes it), and `mls drift` reports a changed body, return type or
+volatility, and an app role as its owner.  A NULL result denies, as a missing setting does.
 
 `now` is a built-in context value in every adapter (the transaction start time), used by
 `now_between`.

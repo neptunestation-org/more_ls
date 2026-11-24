@@ -35,6 +35,7 @@ ROUND_TRIP = {
     "fk_implied_key": specs.implied_key_spec,  # #59: MLS's own key is recognized and added again
     "guard": specs.guard_spec,  # #57: the column guard trigger reads back as a column rule with its condition
     "session_setting": specs.session_spec,
+    "trusted_function": specs.function_spec,  # #72: the calls read back as the context values, the md5 pins
     "bigint": specs.bigint_spec,
     "pg_roles": specs.pg_roles_spec,
     "composed": specs.composed_spec,  # D56: the nested array shape reads back as composed relations

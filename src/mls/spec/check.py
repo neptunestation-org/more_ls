@@ -585,6 +585,9 @@ class Checker:
                 self.err(path, "'now' is a built-in context value", "remove it")
             if not IDENT.match(name):
                 self.err(path, f"'{name}' is not a valid context name")
+            if cv.md5 is not None and ident.adapter != "trusted_function":
+                self.err(path + ".md5", f"only a trusted_function source has an md5 (this is {ident.adapter})",
+                         "remove md5")
             if ident.adapter == "supabase":
                 if cv.source == "auth.uid":
                     if cv.type != "uuid":
@@ -596,6 +599,15 @@ class Checker:
                 else:
                     self.err(path + ".source", f"unknown supabase source '{cv.source}'",
                              "use 'auth.uid' or 'jwt.claims.<name>'")
+            elif ident.adapter == "trusted_function":
+                parts = cv.source.split(".")
+                if len(parts) != 2 or not all(CATALOG_IDENT.match(x) for x in parts):
+                    self.err(path + ".source", f"'{cv.source}' is not a schema-qualified function name",
+                             "use '<schema>.<function>', the zero-argument function that returns the value")
+                if cv.md5 is None or not re.fullmatch(r"[0-9a-f]{32}", cv.md5):
+                    self.err(path + ".md5", "a trusted_function source needs the md5 of its function's body "
+                             + ("" if cv.md5 is None else f"(32 hex digits, not '{cv.md5}')"),
+                             "copy it from mls import's output, or compute md5(prosrc) from pg_proc")
             elif ident.adapter == "session_setting":
                 from mls.identity.session_setting import SOURCE
 

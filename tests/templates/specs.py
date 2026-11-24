@@ -2,6 +2,7 @@
 isolates one template and the data shape its mutation needs (NULLs, column lists, bounds...)."""
 from __future__ import annotations
 
+import hashlib
 import json
 
 from mls.spec import check_spec
@@ -265,6 +266,20 @@ def session_spec() -> Spec:
     """The example on the session_setting adapter (D47): the harness sets app.uid and
     app.clearance with set_config inside the transaction."""
     return make(json.loads(SESSION.read_text()))
+
+
+def function_spec() -> Spec:
+    """The session example on the trusted_function adapter (#72): the context values are read
+    from `mls_ident.current_uid()` and `mls_ident.current_clearance()`, pinned by the md5 of the
+    harness's stand-in bodies (so drift on a harness database is clean)."""
+    from mls.identity.trusted_function import stand_in_body
+
+    d = json.loads(SESSION.read_text())
+    d["identity"] = {"adapter": "trusted_function", "context": {
+        n: {"source": f"mls_ident.current_{n}", "type": t,
+            "md5": hashlib.md5(stand_in_body(n, t).encode()).hexdigest()}
+        for n, t in (("uid", "uuid"), ("clearance", "int"))}}
+    return make(d)
 
 
 def bigint_spec() -> Spec:

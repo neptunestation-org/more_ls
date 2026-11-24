@@ -248,6 +248,10 @@ An adapter maps context names to SQL expressions and declares its trust assumpti
   A missing or empty setting is NULL, so every comparison with it is UNKNOWN and the row is
   denied. Assumption: clients cannot execute `SET` on `app.*`; a trusted path (pooler,
   `SET LOCAL` in a `SECURITY DEFINER` entry point, the application's connection layer) sets it.
+- `trusted_function`: `name → (select schema.function())`, a function without arguments.  A NULL
+  result denies as a missing setting does.  Assumption: the function returns the current user's
+  value, established by a trusted path no untrusted client can change; the spec pins its body
+  (md5), and drift checks it.
 
 ## 7. Proof obligations
 

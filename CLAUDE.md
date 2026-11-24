@@ -214,6 +214,11 @@ union member the renderer does not cover.
   `mls_lookup_<R>()`; import reads keyless subqueries over a parent key as sets (`SET_ALIAS` marks the
   helper's base); refused as an inclusion target, hierarchy members, in tenant_isolation and
   invariants; fixture `specs.set_spec`, mutation `SET_HELPER_INVOKER`.
+- D93 (#72): adapter `trusted_function` (`identity/trusted_function.py`): context value = a
+  zero-argument function `<schema>.<function>` with `md5` (of `prosrc`), compiled `(select s.f())`;
+  drift's hardening on it (`drift.identity_functions`, a gone function is a `DriftError`); import
+  reads such calls (`cat["identity_functions"]`, the user table from the body's FK); fixture
+  `specs.function_spec` (the harness's stand-in, `mls_harness.<name>`), `tests/templates/test_trusted_function.py`.
 - D86 (#54): an inclusion into a relation with a condition (`restrict deferred` required) compiles to two
   deferred constraint triggers (`compile/fk.py`: `<name>` reads the target row `FOR SHARE`, `<name>_target`
   refuses a demotion), owned by `mls_internal`; never assumed by the proofs; preflight counts existing

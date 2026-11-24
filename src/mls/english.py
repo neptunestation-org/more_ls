@@ -261,6 +261,9 @@ def identity_lines(spec: Spec) -> list[str]:
     if adapter.name == "session_setting":
         lines.append("- a context value whose setting is absent is unknown, so every comparison with it is "
                      "unknown and the row is denied (no context set: denied).")
+    if adapter.name == "trusted_function":
+        lines.append("- a function that returns NULL makes every comparison with its value unknown, so the row "
+                     "is denied (no context set: denied).")
     return lines
 
 

@@ -292,8 +292,12 @@ class Parser:
             n = self.name("a context value name")
             self.mark(f"$.identity.context.{n}")
             self.eat(":")
-            source = self.dotted("a source (auth.uid, jwt.claims.<name>, current_user, app.<name>)")
+            source = self.dotted("a source (auth.uid, jwt.claims.<name>, current_user, app.<name>, "
+                                 "<schema>.<function>)")
             ctx[n] = {"source": source, "type": self.word(*TYPES)}
+            if self.at_word("md5"):
+                self.advance()
+                ctx[n]["md5"] = self.string("the md5 of the function's body")
             if not self.at("}"):
                 self.eat(";")
         self.eat("}")

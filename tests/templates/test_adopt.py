@@ -149,7 +149,7 @@ def test_import_of_the_deployed_example_round_trips(pg_dsn, example_spec, tmp_pa
         imported = check_spec(Spec.model_validate(res.spec))
         assert imported.identity.adapter == "supabase"
         assert imported.identity.context["uid"].source == "auth.uid"
-        assert imported.identity.context["clearance"].model_dump() == {"source": "jwt.claims.clearance", "type": "int"}
+        assert imported.identity.context["clearance"].model_dump(exclude_none=True) == {"source": "jwt.claims.clearance", "type": "int"}
         assert imported.roles == ["authenticated"]
         assert {t: tb.mode for t, tb in imported.tables.items()} == {"docs": "adopted", "memberships": "adopted",
                                                                      "admins": "adopted"}
@@ -204,7 +204,7 @@ def test_import_of_the_brownfield_fixture(brownfield):
     res = import_schema(brownfield)
     spec = check_spec(Spec.model_validate(res.spec))
     assert spec.identity.adapter == "supabase" and set(spec.identity.context) == {"uid", "role"}
-    assert spec.identity.context["role"].model_dump() == {"source": "jwt.claims.role", "type": "text"}
+    assert spec.identity.context["role"].model_dump(exclude_none=True) == {"source": "jwt.claims.role", "type": "text"}
     assert spec.roles == ["anon", "authenticated"]
     modes = {t: tb.mode for t, tb in spec.tables.items()}
     assert modes == {"profiles": "adopted", "projects": "adopted", "project_members": "adopted",
@@ -860,7 +860,7 @@ def test_a_takeover_outside_public(pg_dsn, tmp_path, capsys):
 
 CLASH_SQL = """
 do $$ begin if not exists (select from pg_roles where rolname = 'app') then create role app; end if; end $$;
-create function whoami() returns bigint language sql stable as $f$ select 1::bigint $f$;
+create function whoami() returns bigint language sql volatile as $f$ select 1::bigint $f$;
 create table emails (id bigint primary key, user_id bigint not null, extra jsonb, label text);
 create table logins (id bigint primary key, user_id bigint not null);
 alter table emails enable row level security;
@@ -899,6 +899,71 @@ def test_an_import_names_each_tables_opaque_blocks_apart_and_drops_left_out_colu
         assert not any(r["kind"] == "policy" and r["command"] == "insert" for r in d["rules"]), d["rules"]
         assert "insert_own is not imported and the spec denies the insert" in err, err
         assert main(["check", str(out), "--dsn", dsn]) == 0, capsys.readouterr()
+    finally:
+        with psycopg.connect(pg_dsn, autocommit=True) as admin:
+            admin.execute(f'drop database if exists "{dbname}"')
+
+
+GRAPHILE_SQL = """
+do $$ begin if not exists (select from pg_roles where rolname = 'visitor') then create role visitor; end if; end $$;
+create schema app_public; create schema app_private;
+create table app_public.users (id uuid primary key, name text);
+create table app_public.orgs (id uuid primary key, name text);
+create table app_public.org_members (org_id uuid not null references app_public.orgs,
+  user_id uuid not null references app_public.users, primary key (org_id, user_id));
+create table app_private.sessions (uuid uuid primary key, user_id uuid not null references app_public.users);
+create function app_public.current_session_id() returns uuid as $f$
+  select nullif(pg_catalog.current_setting('jwt.claims.session_id', true), '')::uuid;
+$f$ language sql stable;
+create function app_public.current_user_id() returns uuid as $f$
+  select user_id from app_private.sessions where uuid = app_public.current_session_id();
+$f$ language sql stable security definer set search_path to pg_catalog, public, pg_temp;
+alter table app_public.users enable row level security;
+alter table app_public.org_members enable row level security;
+create policy select_self on app_public.users for select to visitor using (id = app_public.current_user_id());
+create policy select_own on app_public.org_members for select to visitor using (user_id = app_public.current_user_id());
+grant usage on schema app_public to visitor;
+grant select on app_public.users, app_public.org_members to visitor;
+"""
+
+
+def test_an_identity_read_from_a_trusted_function(pg_dsn, tmp_path, capsys):
+    """#72 (graphile/starter): the policies read the user from app_public.current_user_id(); the
+    import takes it as the identity, pins its body, lifts the policies, and proposes the membership
+    table keyed by the column that refers to the table the function's result refers to."""
+    dbname = "mls_trusted_fn_import"
+    with psycopg.connect(pg_dsn, autocommit=True) as admin:
+        admin.execute(f'drop database if exists "{dbname}"')
+        admin.execute(f'create database "{dbname}"')
+    dsn = psycopg.conninfo.make_conninfo(pg_dsn, dbname=dbname)
+    try:
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute(GRAPHILE_SQL)
+            digest = conn.execute("select md5(prosrc) from pg_proc where proname = 'current_user_id'").fetchone()[0]
+        kept = tmp_path / "before.json"
+        assert main(["import", "--dsn", dsn, "--schema", "app_public", "--out", str(kept)]) == 0, capsys.readouterr()
+        err = capsys.readouterr().err
+        d = json.loads(kept.read_text())
+        assert d["identity"] == {"adapter": "trusted_function", "context": {"current_user_id": {
+            "source": "app_public.current_user_id", "type": "uuid", "md5": digest}}}, d["identity"]
+        assert "trusted_function" in err and "current_user_id()" in err, err
+        assert not d.get("opaques"), d.get("opaques")
+        own = next(r for r in d["rules"] if r["table"] == "org_members")
+        assert own["using"] == {"cmp": [{"col": "user_id"}, "=", {"ctx": "current_user_id"}]}, own
+        # deployed as imported, drift is clean: the pin matches the live body
+        script = tmp_path / "deploy.sql"
+        assert main(["compile", str(kept), "--schema", "app_public", "--out", str(script)]) == 0
+        with psycopg.connect(dsn) as conn:
+            conn.execute(script.read_text())
+        capsys.readouterr()
+        assert main(["drift", str(kept), "--dsn", dsn, "--schema", "app_public"]) == 0, capsys.readouterr()
+        # the skeleton proposes the membership table: user_id refers to users, the sessions' user table
+        skel = tmp_path / "skeleton.json"
+        assert main(["import", "--dsn", dsn, "--schema", "app_public", "--policies", "discard",
+                     "--out", str(skel)]) == 0, capsys.readouterr()
+        s = json.loads(skel.read_text())
+        assert {"table": "org_members", "key": "user_id", "value": "org_id"}.items() <= \
+            next(iter(s["relations"].values())).items(), s.get("relations")
     finally:
         with psycopg.connect(pg_dsn, autocommit=True) as admin:
             admin.execute(f'drop database if exists "{dbname}"')

@@ -1485,6 +1485,12 @@ class Lifter:
                 if isinstance(arg, Str) and arg.value.startswith("app."):
                     return arg.value, cast
             return None
+        if a == "trusted_function":  # #72: the call, qualified or with its schema on the search path
+            if isinstance(node, Func) and not node.args:
+                for source, ty in self.env.context.values():
+                    if node.name in (source, source.split(".", 1)[-1]):
+                        return source, cast or ty
+            return None
         if a == "pg_roles":
             if isinstance(node, Keyword) and node.name in ("current_user", "current_role"):
                 return "current_user", cast or "text"

@@ -351,7 +351,50 @@ def compare(spec: Spec, expected: Snapshot, actual: Snapshot) -> tuple[list[Drif
                     items.append(DriftItem("differs", f"{fn} " + ("is gone" if now is None else "has a new body")
                                            + f" since the import, which read its calls in the policies on {t} "
                                              f"as its old body (fix: import again, or restore the function)"))
+    items += _identity_function_items(spec, actual.get("identity_functions", {}))
     return items, notes
+
+
+def identity_functions(conn: psycopg.Connection, spec: Spec) -> dict[str, dict]:
+    """#72: the catalog state of each trusted_function source (missing ones are left out)."""
+    from mls.identity.base import SQL_TYPE
+
+    out: dict[str, dict] = {}
+    if spec.identity.adapter != "trusted_function":
+        return out
+    for cv in spec.identity.context.values():
+        schema, fn = cv.source.split(".", 1)
+        row = conn.execute("""select p.prorettype = %s::regtype, p.provolatile = 'v', md5(p.prosrc),
+                                     pg_get_userbyid(p.proowner)
+                              from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                              where n.nspname = %s and p.proname = %s and p.pronargs = 0""",
+                           (SQL_TYPE[cv.type], schema, fn)).fetchone()
+        if row is not None:
+            out[cv.source] = {"type_ok": row[0], "volatile": row[1], "md5": row[2], "owner": row[3]}
+    return out
+
+
+def _identity_function_items(spec: Spec, live: dict[str, dict]) -> list[DriftItem]:
+    """The function a context value comes from is trusted as the spec pins it (#72)."""
+    items = []
+    if spec.identity.adapter != "trusted_function":
+        return items
+    for n, cv in spec.identity.context.items():
+        f, what = live.get(cv.source), f"{cv.source}()"
+        if f is None:
+            continue  # drift stopped before the shadow (DriftError)
+        if f["md5"] != cv.md5:
+            items.append(DriftItem("hardening", f"{what} has a new body since the spec pinned it (md5 {f['md5']}): "
+                                                f"check that it still returns {n}, then set its md5 in the spec"))
+        if not f["type_ok"]:
+            items.append(DriftItem("hardening", f"{what} no longer returns {cv.type}"))
+        if f["volatile"]:
+            items.append(DriftItem("hardening", f"{what} is VOLATILE: it may return another value for each row "
+                                                f"(fix: alter function {cv.source}() stable)"))
+        if f["owner"] in spec.roles:
+            items.append(DriftItem("hardening", f"{what} is owned by app role {f['owner']}, which can replace it "
+                                                f"(fix: alter function {cv.source}() owner to the tables' owner)"))
+    return items
 
 
 def drift(conn: psycopg.Connection, spec: Spec, script: Script, schema: str = "public") -> DriftResult:
@@ -359,6 +402,13 @@ def drift(conn: psycopg.Connection, spec: Spec, script: Script, schema: str = "p
         actual = snapshot(conn, schema, list(spec.governed()), _roles(spec), _observed(spec))
         present = [t for t in spec.governed() if actual["tables"].get(t) is not None]
         actual["bypass"] = bypass_paths(conn, schema, present, list(spec.roles))
+        actual["identity_functions"] = identity_functions(conn, spec)
+        gone = [f"{cv.source}()" for cv in spec.identity.context.values()
+                if spec.identity.adapter == "trusted_function" and cv.source not in actual["identity_functions"]]
+        if gone:
+            raise DriftError(f"{', '.join(gone)} {'is' if len(gone) == 1 else 'are'} gone (no such function without "
+                             f"arguments): the spec's identity reads {'it' if len(gone) == 1 else 'them'} "
+                             f"(fix: restore the function, or change the spec's identity)")
         actual["bodies"] = {path_key(f"function {n}({types})"): digest for n, types, digest in conn.execute(
             """select p.proname, oidvectortypes(p.proargtypes), md5(p.prosrc) from pg_proc p
                join pg_namespace n on n.oid = p.pronamespace where n.nspname = %s""", (schema,)).fetchall()}

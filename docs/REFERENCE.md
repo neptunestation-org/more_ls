@@ -121,8 +121,8 @@ nullable.
 ## 3. `identity`
 
     "identity": {
-      "adapter": "supabase" | "pg_roles" | "session_setting",
-      "context": { "<name>": {"source": "<source>", "type": "<column type>"}, ... }
+      "adapter": "supabase" | "pg_roles" | "session_setting" | "trusted_function",
+      "context": { "<name>": {"source": "<source>", "type": "<column type>", "md5": "<hex>"?}, ... }
     }
 
 A context value is a per-session value the policies may read as `{"ctx": "<name>"}`.  The
@@ -134,11 +134,17 @@ adapter maps each source to SQL and declares the trust assumption the proof repo
 | `supabase` | `jwt.claims.<claim>` | `(select (auth.jwt() ->> '<claim>')::<type>)` | any | same |
 | `pg_roles` | `current_user` | `(select current_user::text)` | must be `text` | none |
 | `session_setting` | `app.<name>` | `(select nullif(current_setting('app.<name>', true), '')::<type>)` | any | clients cannot execute `SET` on `app.*`; the setting is established by a trusted path (a pooler, a `SET LOCAL` inside a `SECURITY DEFINER` entry point, or the application's connection layer) that no untrusted client reaches |
+| `trusted_function` | `<schema>.<function>`, with `md5` | `(select <schema>.<function>())` | any | the functions return the current user's values, established by a trusted path that no untrusted client can change |
 
 `now` is a built-in context value in every adapter (the transaction start time, compiled as
 `(select now())`) and may not be declared.  The adapter cannot be changed by `mls migrate`.
 With `session_setting` a missing or empty setting is NULL: every comparison with it is UNKNOWN
-and the row is denied (the English says "no context set: denied").  The assumption of the
+and the row is denied (the English says "no context set: denied"); with `trusted_function` the
+same holds when the function returns NULL.  A `trusted_function` source is a function without
+arguments (graphile's `app_public.current_user_id()`, which looks the user up from a session
+id), and `md5` is the md5 of its body (`md5(prosrc)` in `pg_proc`; `mls import` writes it): the
+proofs trust the function as it was when the spec was written.  Terse:
+`identity trusted_function { uid: app_public.current_user_id uuid md5 '<hex>' }`.  The assumption of the
 adapter in use is stated by `mls prove`, `mls explain` and `mls diff`.
 
 An adapter may declare its platform's roles.  `supabase` declares `anon`, `authenticated`
@@ -914,8 +920,9 @@ in_task are the id of every tasks row whose project_id is the id of a projects r
 is among that user's member_of*.  A relation the spec never looks up by the current user (only
 by a constant or a column) reads by its key instead: *products (status → id): for each status,
 product_in_state are the id of every products row with that status*.  A context value reads as *the current user* when the adapter
-names it as the user (`auth.uid`, `current_user`, or on `session_setting` the one context value
-the policies use as a membership key), and as *the user's <name>* otherwise.
+names it as the user (`auth.uid`, `current_user`, or on `session_setting` and `trusted_function`
+the one context value the policies use as a membership key, or the only context value), and as
+*the user's <name>* otherwise.
 
 The terse syntax is the second concrete syntax of
 the same model: `mls explain --terse` prints the whole spec in it (`src/mls/terse.py:render`),
@@ -1085,7 +1092,10 @@ every owned table gets `ENABLE` and `FORCE ROW LEVEL SECURITY` (an adopted table
 reports (kind `hardening`) an app role that may execute a function whose body sets `app.*`
 (`set_config('app....` or `SET app....`, in any schema) and an app role with an
 `ALTER ROLE ... SET app.*` default; nothing is emitted for these, since the fix is to
-revoke or reset something MLS did not create.
+revoke or reset something MLS did not create.  With the `trusted_function` adapter, `mls drift`
+reports (kind `hardening`) a function whose body no longer has the spec's md5, that no longer
+returns the declared type, that is `VOLATILE`, or that an app role owns (it could replace it), and
+stops with an error when the function is gone.
 
 ## 15. Command-line interface
 
@@ -1254,7 +1264,9 @@ table `observed`.  The hardening state is recorded as assumptions (an app-role o
 forced, an app role with `BYPASSRLS`).  The app roles are the roles the policies and grants
 name, minus owners, superusers and `mls_internal` (`--role` overrides).  The identity adapter
 is guessed from the policy expressions (`auth.uid()`/`auth.jwt()` → `supabase`,
-`current_setting('app.*')` → `session_setting`, `current_user` → `pg_roles`) with the context
+`current_setting('app.*')` → `session_setting`, `current_user` → `pg_roles`, a call of a
+function without arguments that is not `VOLATILE` and returns a uuid, integer, bigint or text →
+`trusted_function`, with the md5 of its body) with the context
 values they read, and reported when ambiguous.  A relation is proposed for every `(key, value)`
 pair an inclusion-shaped foreign key targets and for every two-column key a policy's SQL
 reads.  Every policy becomes a rule, one per role it applies to, whose `using` and `check` the
@@ -1295,7 +1307,9 @@ on <table> discarded (--policies discard; the deploy drops it): permissive for s
 authenticated using (...)`), and the grants are not imported (the deploy grants what the rules
 need).  With no policy to read memberships from, relations are proposed from the schema: a
 table whose two-column primary or unique key has a single-column foreign key on each column is
-a membership table, keyed by the column that refers to the user table (`auth.users`, a table
+a membership table, keyed by the column that refers to the user table (`auth.users`, or on
+`trusted_function` the table its function's result refers to when the body is
+`select <column> from <table> ...` and the column has a foreign key, a table
 whose primary key refers to `auth.users` such as `profiles`, or failing those the column of the
 identity's `uid` type); when neither or both columns qualify, a note says which test failed and
 what each column refers to, and no relation is proposed.  The identity is still read from the discarded policies' text; without any, a

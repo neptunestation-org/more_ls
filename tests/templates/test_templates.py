@@ -30,6 +30,7 @@ CASES = {
     "opaque": (specs.opaque_spec, Mutation.OPAQUE_INVERT, specs.opaque_impl),
     "pg_roles": (specs.pg_roles_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),
     "session_setting": (specs.session_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),
+    "trusted_function": (specs.function_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),  # #72
     "bigint": (specs.bigint_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),  # D53
     "adopted": (specs.adopted_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),
     "adopted_replace": (specs.adopted_spec, Mutation.REPLACE_KEEPS_FOREIGN, None),  # D51

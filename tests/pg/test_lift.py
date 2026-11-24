@@ -785,3 +785,17 @@ def test_a_column_tested_only_for_null_does_not_make_a_check_unknown():
     env = env_of(owner=("int", True))
     assert nullable_columns("((owner IS NULL) <> (level IS NULL))", env.tables["docs"]) == set()
     assert nullable_columns("((owner IS NULL) OR (owner > 0))", env.tables["docs"]) == {"owner"}
+
+
+def test_a_trusted_function_call_is_its_context_value():
+    """#72: on the trusted_function adapter, a call of the function a context value comes from is
+    that value, qualified or not (the import reads with the table's schema on the search path)."""
+    from tests.templates import specs
+
+    env = Env.of_spec(specs.function_spec())
+    for call in ("mls_ident.current_uid()", "current_uid()", "( SELECT mls_ident.current_uid() AS current_uid)"):
+        r, _ = do(f"(owner_id = {call})", env=env)
+        assert r.kind == "lifted", (call, r.reasons)
+        assert r.pred == {"cmp": [{"col": "owner_id"}, "=", {"ctx": "uid"}]}, call
+    r, _ = do("(owner_id = other_uid())", env=env)
+    assert r.kind != "lifted"

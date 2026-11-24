@@ -1901,3 +1901,20 @@ weaker; modelling the column (citext) is the real fix.  Two reading fixes came w
 nullable column tested only by `IS [NOT] NULL` no longer makes a bare CHECK "pass on NULL" (that
 note was wrong for `(user_id IS NULL) <> (email IS NULL)`), and on a `NOT NULL` boolean column
 `b IS TRUE` / `b IS FALSE` is `b = true` / `b = false`, which is never UNKNOWN either.
+
+
+**D93. Identity from a trusted function (#72).**  graphile/starter reads the user in every policy
+through `app_public.current_user_id()`, a SECURITY DEFINER function that looks up
+`app_private.sessions` by a session id from `jwt.claims.session_id`.  No adapter expressed it, so
+the import fell back to `pg_roles` and every user policy was opaque.  A fourth adapter,
+`trusted_function`, takes each context value from a zero-argument function, compiled
+`(select schema.f())`.  To the proofs it is an ordinary context value (no Lean change); the trust
+is in the function, so the source carries the md5 of its body, the import writes it, and drift
+reports a changed body, return type or volatility, an app role as owner (hardening), and stops
+when the function is gone (the policies call it; the shadow cannot be built).  We did not widen
+`session_setting` instead: its assumption is about who can `SET app.*`, a different trust story.
+The import takes a zero-argument, non-volatile function returning uuid, integer, bigint or text
+called in a policy (bool is left to helper inlining, D73) and, for relation proposals, uses as the
+user table the table the function's result refers to when its body is `select col from t ...` and
+`t.col` has a foreign key.  The harness creates a stand-in of the same name reading
+`mls_harness.<name>`.  Set-returning helpers (`id in (select f())`) are a separate issue (#74).

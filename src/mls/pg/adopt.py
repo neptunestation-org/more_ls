@@ -105,9 +105,10 @@ def _trusted_roles(adapter: str) -> tuple[str, ...]:
     from mls.identity.pg_roles import PgRolesAdapter
     from mls.identity.session_setting import SessionSettingAdapter
     from mls.identity.supabase import SupabaseAdapter
+    from mls.identity.trusted_function import TrustedFunctionAdapter
 
-    return {"supabase": SupabaseAdapter, "pg_roles": PgRolesAdapter,
-            "session_setting": SessionSettingAdapter}[adapter].trusted_roles
+    return {"supabase": SupabaseAdapter, "pg_roles": PgRolesAdapter, "session_setting": SessionSettingAdapter,
+            "trusted_function": TrustedFunctionAdapter}[adapter].trusted_roles
 
 
 @dataclass
@@ -177,6 +178,29 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
                                            else [None] * nargs}
         cur.execute("select distinct proname from pg_proc where pronamespace = 'pg_catalog'::regnamespace")
         cat["builtins"] = frozenset(r[0] for r in cur.fetchall())
+        # #72: zero-argument functions a policy may read the user from (graphile's current_user_id()),
+        # with the table their result refers to when the body is `select <col> from <table> ...`
+        cur.execute("""select n.nspname, p.proname, format_type(p.prorettype, null), md5(p.prosrc), p.prosrc
+                       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                       where p.pronargs = 0 and p.prokind = 'f' and not p.proretset and p.provolatile <> 'v'
+                         and p.prorettype in ('uuid'::regtype, 'integer'::regtype, 'bigint'::regtype, 'text'::regtype)
+                         and n.nspname not in ('pg_catalog', 'information_schema', 'auth')
+                         and n.nspname not like 'pg\\_%%' and p.proname not like 'mls\\_%%'""")
+        cat["identity_functions"] = {}
+        for nsp, fname, rettype, digest, src in cur.fetchall():
+            ty = CAST_TO_MLS.get(rettype)
+            m = re.match(r"\s*select\s+([a-z_][a-z0-9_]*)\s+from\s+([a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)?)\b",
+                         src, re.I)
+            refers = None
+            if m:
+                cur.execute("""select c.confrelid::regclass::text from pg_constraint c
+                               join pg_attribute a on a.attrelid = c.conrelid and a.attnum = c.conkey[1]
+                               where c.contype = 'f' and c.conrelid = to_regclass(%s)
+                                 and cardinality(c.conkey) = 1 and a.attname = %s""", (m.group(2), m.group(1)))
+                row = cur.fetchone()
+                refers = row[0] if row else None
+            if ty is not None:
+                cat["identity_functions"][(nsp, fname)] = {"type": ty, "md5": digest, "refers": refers}
         cur.execute("select rolname, rolsuper, rolcanlogin, rolbypassrls from pg_roles")
         for name, sup, login, bypass in cur.fetchall():
             cat["roles"][name] = {"super": sup, "login": login, "bypassrls": bypass}
@@ -273,6 +297,12 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
     texts = [e for t in tables.values() for p in t["policies"] for e in (p["using"], p["check"]) if e]
     texts += [f["expr"] for n, f in cat["functions"].items() if any(n + "(" in e for e in texts)]  # #52
     hits = {a: sum(1 for e in texts if m.search(e)) for a, m in MARKERS.items()}
+    # #72: a policy calling a zero-argument function, qualified or with its schema on the search path
+    called = {k: re.compile(rf"(?<![\w.]){re.escape(k[0])}\.{re.escape(k[1])}\(\)|(?<![\w.]){re.escape(k[1])}\(\)"
+                            if k[0] == schema else rf"(?<![\w.]){re.escape(k[0])}\.{re.escape(k[1])}\(\)")
+              for k in cat["identity_functions"]}
+    called = {k: m for k, m in called.items() if any(m.search(e) for e in texts)}
+    hits["trusted_function"] = sum(1 for e in texts if any(m.search(e) for m in called.values()))
     ranked = sorted((n, a) for a, n in hits.items() if n)
     user_fks = discard and any(con["type"] == "f" and con["refname"] == USER_TABLE
                                for t in tables.values() for con in t["constraints"])
@@ -289,6 +319,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
             notes.append(f"identity: ambiguous, policies read " + ", ".join(f"{a} ({n})" for n, a in ranked[::-1])
                          + f"; the adapter is {adapter} (the most read); the others' policies stay opaque")
     context: dict[str, dict] = {}
+    user_table = USER_TABLE  # #72: or the table a trusted function's result refers to
     if adapter == "supabase":
         if any("auth.uid()" in e for e in texts) or user_fks:
             context["uid"] = {"source": "auth.uid", "type": "uuid"}
@@ -303,6 +334,15 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                                      f"declared as text")
                 if name not in context:
                     context[name] = {"source": f"jwt.claims.{claim}", "type": ty}
+    elif adapter == "trusted_function":
+        for (nsp, fname), f in sorted((k, cat["identity_functions"][k]) for k in called):
+            context[ident(fname)] = {"source": f"{nsp}.{fname}", "type": f["type"], "md5": f["md5"]}
+            if f["refers"]:
+                user_table = f["refers"]
+            notes.append(f"identity: the policies call {nsp}.{fname}(), a function without arguments: the adapter is "
+                         f"trusted_function, and every proof assumes it returns the current user's value; its "
+                         f"body is pinned (md5 {f['md5']}), and drift reports a change"
+                         + (f"; its result refers to {f['refers']}, the user table" if f["refers"] else ""))
     elif adapter == "session_setting":
         for e in texts:
             for name, cast in APP_SETTING.findall(e):
@@ -532,12 +572,14 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
     # --- membership tables, from the schema alone (D52): a two-column key with a foreign key on
     # each column, keyed by the column that refers to the user table
     if discard:
-        uid_type = context["uid"]["type"] if "uid" in context else None
+        uid_type = (context["uid"]["type"] if "uid" in context
+                    else next(iter(context.values()))["type"] if adapter == "trusted_function" and len(context) == 1
+                    else None)
         # the user table, and the tables keyed by it (`profiles.id references auth.users`)
-        user_tables = {USER_TABLE} | {
+        user_tables = {user_table} | {
             n for n, t in tables.items()
             if any(con["type"] == "p" and len(con["colnames"]) == 1 for con in t["constraints"])
-            and any(con["type"] == "f" and con["refname"] == USER_TABLE and con["colnames"]
+            and any(con["type"] == "f" and con["refname"] == user_table and con["colnames"]
                     == next(c["colnames"] for c in t["constraints"] if c["type"] == "p") for con in t["constraints"])}
         for name, t in tables.items():
             if name not in governed:
@@ -554,13 +596,13 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 if len(users) != 1:
                     refs = ", ".join(f"{c} to {single[c]['refname']}" for c in k)
                     if not by_type:  # #45: say which test failed, and what the columns refer to
-                        why = (f"both refer to the user table ({USER_TABLE})" if users else
-                               f"neither refers to the user table ({USER_TABLE})")
+                        why = (f"both refer to the user table ({user_table})" if users else
+                               f"neither refers to the user table ({user_table})")
                     elif users:
-                        why = (f"neither refers to the user table ({USER_TABLE}) and both have the user id's "
+                        why = (f"neither refers to the user table ({user_table}) and both have the user id's "
                                f"type ({uid_type}), so either could be the user")
                     else:
-                        why = (f"neither refers to the user table ({USER_TABLE}) nor has the user id's type "
+                        why = (f"neither refers to the user table ({user_table}) nor has the user id's type "
                                f"({uid_type})")
                     notes.append(f"table {name}: the key ({', '.join(k)}) has a foreign key on each column ({refs}), "
                                  f"but {why}: no relation proposed")
