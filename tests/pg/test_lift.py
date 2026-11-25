@@ -172,6 +172,8 @@ IDIOMS = {
     "claim_text_const": ("((auth.jwt() ->> 'role'::text) = 'editor'::text)",
                          {"cmp": [{"ctx": "role"}, "=", {"const": "editor"}]}, "index-friendly form"),
     "flipped_ctx": (f"({CLEARANCE} >= level)", LEVEL_LE, None),
+    # #82 (midday): the cast outside the InitPlan's subselect
+    "claim_cast_outside_select": ("(level <= (( SELECT (auth.jwt() ->> 'clearance'::text)))::integer)", LEVEL_LE, None),
 }
 
 

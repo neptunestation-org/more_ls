@@ -159,6 +159,7 @@ IDIOM_SQL = {
     "bool_column": "not archived_flag",
     "claim_text_const": "(auth.jwt() ->> 'role') = 'editor'",
     "flipped_ctx": "(select (auth.jwt() ->> 'clearance')::int) >= level",
+    "claim_cast_outside_select": "level <= ((select auth.jwt() ->> 'clearance'))::integer",
 }
 
 

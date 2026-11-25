@@ -1430,6 +1430,8 @@ class Lifter:
     def context(self, node: Node) -> tuple[str, ColType] | None:
         """The context value an expression reads, with the InitPlan wrapper stripped."""
         wrapped = False
+        if isinstance(node, Cast) and isinstance(node.x, Select) and node.x.table is None:
+            node = Select(**{**vars(node.x), "target": Cast(node.x.target, node.type)})  # #82: `(select ..)::T`
         if isinstance(node, Select) and node.table is None:
             node = node.target
             wrapped = True
