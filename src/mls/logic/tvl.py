@@ -2,7 +2,7 @@
 
 Every predicate becomes a pair (T, F) of boolean terms: T = "is TRUE", F = "is FALSE";
 UNKNOWN is ¬T ∧ ¬F.  Column values are integers (`row.col`), with a null flag (`row.col.null`)
-for nullable columns.  Context values are `ctx.name` and never NULL.  Text/uuid constants are
+for nullable columns.  Context values are `ctx.name`, never NULL unless optional (`ctx.name.null`).  Text/uuid constants are
 interned to distinct integers.  Relations are uninterpreted predicates `rel.<name>` (optionally
 tagged, e.g. `rel.<name>@before`, to talk about two states of one relation).  A composed relation
 (D56) is its base relation read through one lookup per hop: `hop.<table>.<value>` (a row with that
@@ -66,6 +66,11 @@ ARRAY_HAS_NULL = fun("arr.has_null", Sort.INT)   # D88: the array has a NULL ele
 
 def ctx_var(name: str) -> Var:
     return int_var(f"ctx.{name}")
+
+
+def ctx_null_var(name: str) -> Var:
+    """#75: an optional context value is NULL for a caller who lacks it."""
+    return bool_var(f"ctx.{name}.null")
 
 
 def rel_fun(name: str, tag: str | None = None) -> FunDecl:
@@ -143,7 +148,7 @@ class Encoder:
         if isinstance(t, NewRef):
             return self._col("new", table, t.new)
         if isinstance(t, CtxRef):
-            return ctx_var(t.ctx), FALSE
+            return ctx_var(t.ctx), self.ctx_null(t.ctx)
         if isinstance(t, Const):
             v = t.const
             if isinstance(v, bool):
@@ -152,6 +157,11 @@ class Encoder:
                 return IntVal(v), FALSE
             return IntVal(self.const_id(v)), FALSE
         raise TypeError(t)
+
+    def ctx_null(self, name: str) -> Term:
+        """The null flag of a context value: free for an optional one (#75), else FALSE."""
+        cv = self.spec.identity.context.get(name)
+        return ctx_null_var(name) if cv is not None and cv.optional else FALSE
 
     def _type_of(self, t, table: str) -> str | None:
         cols = self.spec.tables[table].columns
@@ -300,6 +310,9 @@ class Encoder:
         for c in o.context:
             args.append(ctx_var(c))
             sorts.append(Sort.INT)
+            if (n := self.ctx_null(c)) is not FALSE:  # #75: the block sees whether it is set
+                args.append(n)
+                sorts.append(Sort.BOOL)
         for r in o.relations:  # the block reads this relation: its value depends on the state copy
             args.append(int_var(f"state.{r}" + (f"@{self.rel_tags[r]}" if r in self.rel_tags else "")))
             sorts.append(Sort.INT)

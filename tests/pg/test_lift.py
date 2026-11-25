@@ -799,3 +799,14 @@ def test_a_trusted_function_call_is_its_context_value():
         assert r.pred == {"cmp": [{"col": "owner_id"}, "=", {"ctx": "uid"}]}, call
     r, _ = do("(owner_id = other_uid())", env=env)
     assert r.kind != "lifted"
+
+
+def test_an_optional_context_values_null_test_is_kept():
+    """#75: a caller may lack an optional context value (graphile/starter's signed-out visitor),
+    so `current_user_id() IS NULL` is read as the test it is, not folded."""
+    env = env_of()
+    env.optional = {"uid"}
+    r, _ = do(f"(({UID} IS NOT NULL) AND (level = 1))", env=env)
+    assert r.kind == "lifted", r.reasons
+    assert r.pred == {"and": [{"not": {"is_null": {"ctx": "uid"}}}, {"cmp": [{"col": "level"}, "=", {"const": 1}]}]}
+    assert not r.hints, r.hints

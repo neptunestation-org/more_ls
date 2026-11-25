@@ -23,8 +23,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from mls.compile.column import privileges
-from mls.logic.term import FALSE, Term, and_, forall, iff, implies, int_var
-from mls.logic.tvl import Encoder
+from mls.logic.term import FALSE, Term, and_, forall, iff, implies, int_var, not_
+from mls.logic.tvl import Encoder, ctx_null_var
 from mls.props.effective import effective, row_constraints, transition_constraints
 from mls.props.obligations import (
     Obligation, _relations_of, _rows_for, net_terms as _net_terms, relation_axioms,
@@ -207,6 +207,12 @@ def _rels(old: Spec, new: Spec, *preds: Pred | None) -> list[tuple[str, str | No
     return out
 
 
+def one_sided_optional(old: Spec, new: Spec) -> list[str]:
+    """The context values both versions declare, optional in exactly one of them."""
+    return sorted(n for n, cv in new.identity.context.items()
+                  if n in old.identity.context and old.identity.context[n].optional != cv.optional)
+
+
 def both_axioms(old: Spec, new: Spec, e_old: Encoder, e_new: Encoder) -> list[Term]:
     """Each version's relation axioms, and what ties a relation of one version to a relation of the
     other: both are projections of the same database, so two base relations over the same table,
@@ -215,6 +221,10 @@ def both_axioms(old: Spec, new: Spec, e_old: Encoder, e_new: Encoder) -> list[Te
     base relation and the shared hop functions.  Without this a renamed relation (an import names
     it after its table, the loop after its meaning) is reported as a change of access."""
     out = [*relation_axioms(old, e_old), *relation_axioms(new, e_new)]
+    # #75: a value only one version declares optional is compared for callers who have it; the
+    # other version says nothing about a caller without it
+    for n in one_sided_optional(old, new):
+        out.append(not_(ctx_null_var(n)))
     x, y = int_var("ax.k"), int_var("ax.v")
     for aname, a in old.base_relations().items():
         for bname, b in new.base_relations().items():
@@ -390,7 +400,10 @@ def diff(old: Spec, new: Spec, timeout_ms: int = 20000) -> DiffResult:
                      f"context values are compared by name")
     for n, cv in new.identity.context.items():
         o = old.identity.context.get(n)
-        if o is not None and o != cv:
+        if o is not None and o.optional != cv.optional and o.model_copy(update={"optional": cv.optional}) == cv:
+            notes.append(f"context value '{n}' may be unset in the {'new' if cv.optional else 'old'} version only; "
+                         f"compared for callers who have it")
+        elif o is not None and o != cv:
             notes.append(f"context value '{n}' changed ({o.source}:{o.type} → {cv.source}:{cv.type}); "
                          f"treated as the same value")
     for h in sorted(rebounded_hierarchies(old, new)):

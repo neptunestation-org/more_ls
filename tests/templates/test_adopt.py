@@ -149,7 +149,7 @@ def test_import_of_the_deployed_example_round_trips(pg_dsn, example_spec, tmp_pa
         imported = check_spec(Spec.model_validate(res.spec))
         assert imported.identity.adapter == "supabase"
         assert imported.identity.context["uid"].source == "auth.uid"
-        assert imported.identity.context["clearance"].model_dump(exclude_none=True) == {"source": "jwt.claims.clearance", "type": "int"}
+        assert imported.identity.context["clearance"].model_dump(exclude_defaults=True) == {"source": "jwt.claims.clearance", "type": "int"}
         assert imported.roles == ["authenticated"]
         assert {t: tb.mode for t, tb in imported.tables.items()} == {"docs": "adopted", "memberships": "adopted",
                                                                      "admins": "adopted"}
@@ -204,7 +204,7 @@ def test_import_of_the_brownfield_fixture(brownfield):
     res = import_schema(brownfield)
     spec = check_spec(Spec.model_validate(res.spec))
     assert spec.identity.adapter == "supabase" and set(spec.identity.context) == {"uid", "role"}
-    assert spec.identity.context["role"].model_dump(exclude_none=True) == {"source": "jwt.claims.role", "type": "text"}
+    assert spec.identity.context["role"].model_dump(exclude_defaults=True) == {"source": "jwt.claims.role", "type": "text"}
     assert spec.roles == ["anon", "authenticated"]
     modes = {t: tb.mode for t, tb in spec.tables.items()}
     assert modes == {"profiles": "adopted", "projects": "adopted", "project_members": "adopted",
@@ -945,7 +945,7 @@ def test_an_identity_read_from_a_trusted_function(pg_dsn, tmp_path, capsys):
         err = capsys.readouterr().err
         d = json.loads(kept.read_text())
         assert d["identity"] == {"adapter": "trusted_function", "context": {"current_user_id": {
-            "source": "app_public.current_user_id", "type": "uuid", "md5": digest}}}, d["identity"]
+            "source": "app_public.current_user_id", "type": "uuid", "md5": digest, "optional": True}}}, d["identity"]
         assert "trusted_function" in err and "current_user_id()" in err, err
         assert not d.get("opaques"), d.get("opaques")
         own = next(r for r in d["rules"] if r["table"] == "org_members")

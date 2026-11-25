@@ -199,3 +199,20 @@ def test_a_deferred_inclusion_is_an_integrity_change():
            for c in integrity_diff(specs.filtered_inclusion_base_spec(), specs.filtered_inclusion_spec())}
     assert ("projects", "stored rows", "rejected", "REFUTED") in got, got
     assert ("projects", "stored rows", "accepted", "PROVED") in got, got
+
+
+def test_a_value_optional_in_one_version_only_is_compared_for_callers_who_have_it():
+    """#75: the old version takes the user as always set, the new one may lack it (an import of a
+    trusted function).  The old version says nothing about a caller with no user, so the same rules
+    are no change; the note says how the value was compared.  A change for signed-in callers
+    still shows."""
+    from tests.props.test_properties import SIGNED_OUT
+    from mls.spec.syntax import parse
+
+    old = check_spec(parse(SIGNED_OUT.split("properties")[0] % ("", "id = @uid or id <> @uid")))
+    new = check_spec(parse(SIGNED_OUT.split("properties")[0] % (" optional", "id = @uid or id <> @uid")))
+    res = diff(old, new)
+    assert res.access_changes == [], res.access_changes
+    assert any("may be unset in the new version only" in n for n in res.notes), res.notes
+    narrowed = check_spec(parse(SIGNED_OUT.split("properties")[0] % (" optional", "id = @uid")))
+    assert any(a.table == "users" and a.direction == "denied" for a in diff(old, narrowed).access_changes)

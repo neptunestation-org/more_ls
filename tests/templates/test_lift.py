@@ -36,6 +36,7 @@ ROUND_TRIP = {
     "guard": specs.guard_spec,  # #57: the column guard trigger reads back as a column rule with its condition
     "session_setting": specs.session_spec,
     "trusted_function": specs.function_spec,  # #72: the calls read back as the context values, the md5 pins
+    "optional": specs.optional_spec,  # #75: an optional value's `IS NULL` reads back, not folded
     "citext": specs.citext_spec,  # #73: citext columns and their constants (`'x'::citext`) read back
     "defaults": specs.defaults_spec,  # #76: the defaults read back (auth.uid(), false, now(), gen_random_uuid())
     "bigint": specs.bigint_spec,

@@ -342,7 +342,8 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                     context[name] = {"source": f"jwt.claims.{claim}", "type": ty}
     elif adapter == "trusted_function":
         for (nsp, fname), f in sorted((k, cat["identity_functions"][k]) for k in called):
-            context[ident(fname)] = {"source": f"{nsp}.{fname}", "type": f["type"], "md5": f["md5"]}
+            # #75: a function may return NULL (no current user), so its value is optional
+            context[ident(fname)] = {"source": f"{nsp}.{fname}", "type": f["type"], "md5": f["md5"], "optional": True}
             if f["refers"]:
                 user_table = f["refers"]
             notes.append(f"identity: the policies call {nsp}.{fname}(), a function without arguments: the adapter is "
@@ -452,6 +453,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
 
     # --- the lifter's view of the spec so far
     env = Env(adapter=adapter, context={n: (cv["source"], cv["type"]) for n, cv in context.items()},
+              optional={n for n, cv in context.items() if cv.get("optional")},
               tables={t: {c: (col["type"], col["nullable"]) for c, col in tb["columns"].items()}
                       for t, tb in spec_tables.items()},
               enums=enums, enum_cols={t: {c: col["enum"] for c, col in tb["columns"].items() if "enum" in col}

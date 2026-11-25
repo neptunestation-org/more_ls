@@ -1819,6 +1819,8 @@ issue: taking Supabase's `authenticator` and `supabase_auth_admin` as trusted ro
 `service_role`.  Neither has BYPASSRLS in the image, so they reach rows only through policies; a
 trusted role's policies are not imported, and a deploy replaces the whole policy set (D51), so GoTrue
 would lose its read of the claims table.  They stay app roles, and requirements cover them.
+*Amended 2026-11-25 (D97):* the fold applies to a value that is always set; an `optional` one's test
+is kept.
 
 **D88. A constant label in an array column (#65).**  supabase-tenant-rbac keeps a member's roles as
 `members.roles text[]`, so "an owner of the group" was not expressible.  Column types `text[]` and
@@ -1965,3 +1967,39 @@ the right side of `col = <default>` through the lifter (constants, `now()`, the 
 SQL), the generators by name; drift reports a declared default the database no longer has; the
 harness's stand-in tables carry them and the oracle fills a left-out column with its default.
 Lean: the insert outcome with defaults is a known gap.
+
+
+**D97. Optional context values: a caller with no current user (#75; amends SEMANTICS §1 and D87).**
+graphile/starter serves signed-in users and signed-out visitors through one role, and a visitor's
+`current_user_id()` is NULL.  "A visitor who is not signed in reads no user" could not be stated:
+the model took every context value as set, and the properties pass dropped the property while the
+rules pass wrote `id = @uid or id <> @uid`, which denies a signed-out caller only through SQL's NULL
+rules and which the proofs saw as TRUE.  A context value may now be declared `optional`.  Opt-in, so
+every existing spec keeps its meaning.
+- *Encoding:* its null flag is a free boolean `ctx.<name>.null` (`Encoder.ctx_null`) where it was
+  FALSE; the (T, F) pairs then make every comparison with it UNKNOWN, as for a NULL column.  An opaque
+  block reading it takes the flag as an argument too.  `now` is never optional.
+- *Checker:* `is_null` of a context value is allowed only for an optional one; the error for any
+  other says how to declare it.  `pg_roles` refuses `optional` (`current_user` is always set).
+- *Properties:* a lower bound quantifies over the unset case too, so "every signed-in user" is
+  `not @uid is null`; an upper bound covers the signed-out caller with no change.  The English is "the
+  current user is set / is not set", and the proof report, explain and diff state which values may be
+  unset (`english.optional_line`).
+- *Defaults (D96):* `default @uid` on an optional value writes NULL for a caller who lacks it
+  (`insert_written`: `col = @uid or (@uid is null and col is null)`), so a NOT NULL column refuses that
+  insert.
+- *Relation visibility:* an unset key reaches no row of the relation's table, so the obligation
+  requires the key set.
+- *Import:* a `trusted_function` value is declared optional (a function may return NULL: graphile's
+  does for a visitor), and the lifter keeps an optional value's `IS [NOT] NULL` (D87's fold stays for
+  the others).  Supabase keeps `anon` as its signed-out role and its `auth.uid` is not made optional;
+  `session_setting` is left as declared.
+- *Diff:* a value optional in only one version is compared for callers who have it (the other version
+  says nothing about the rest), with a note.
+- *Harness:* a context draws an optional value unset one time in four (the stand-ins return NULL;
+  Supabase leaves the claim out).  Fixture `specs.optional_spec` (`function_spec` with both values
+  optional and a signed-out policy), mutation `CTX_IS_NULL_FOLDED` (the test compiled as FALSE, D87's
+  reading at the compiler).
+- *Lean:* `Env.ctxUnset` / `Valuation.ctxNull`, defaulting to set, with `Agrees.ctxNull`; the
+  soundness theorems are re-proved.
+

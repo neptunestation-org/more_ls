@@ -282,6 +282,19 @@ def function_spec() -> Spec:
     return make(d)
 
 
+def optional_spec() -> Spec:
+    """#75: `function_spec` with the user value optional, so the differential also runs as callers
+    with no current user (the stand-in function returns NULL), and a policy reads `@uid is null`:
+    a signed-out caller reads the public documents (clearance 0), a signed-in one by clearance."""
+    s = function_spec()
+    d = s.model_dump(mode="json", by_alias=True, exclude_none=True)
+    d["identity"]["context"]["uid"]["optional"] = True
+    d["rules"].append({"id": "R_signed_out", "kind": "policy", "name": "signed_out_public", "table": "docs",
+                       "role": d["roles"][0], "command": "select", "mode": "permissive",
+                       "using": {"and": [{"is_null": {"ctx": "uid"}}, {"cmp": [{"col": "level"}, "=", {"const": 0}]}]}})
+    return make(d)
+
+
 CITEXT = """mls 0.1
 identity supabase { uid: auth.uid uuid }
 roles authenticated

@@ -657,6 +657,8 @@ class Env:
     # hide rows of, which the lifter then leaves to an opaque block
     caller_reads: list[str] = field(default_factory=list)
     hidden: set[str] = field(default_factory=set)
+    # #75: the context values a caller may lack (NULL): their IS [NOT] NULL is kept, not folded
+    optional: set[str] = field(default_factory=set)
     # #45: the names of the functions in pg_catalog, so a note on a call says built-in or user function
     builtins: frozenset[str] = frozenset()
     _spec: Spec | None = field(default=None, repr=False)
@@ -665,6 +667,7 @@ class Env:
     def of_spec(cls, spec: Spec) -> "Env":
         return cls(adapter=spec.identity.adapter,
                    context={n: (cv.source, cv.type) for n, cv in spec.identity.context.items()},
+                   optional={n for n, cv in spec.identity.context.items() if cv.optional},
                    tables={t: {c: (col.type, col.nullable) for c, col in tb.columns.items()}
                            for t, tb in spec.tables.items()},
                    governed=set(spec.governed()), roles=list(spec.roles),
@@ -694,7 +697,8 @@ class Env:
         """A minimal spec for the checker: the declarations, no rules."""
         if self._spec is None:
             d = {"mls_version": "0.1", "identity": {"adapter": self.adapter,
-                                                    "context": {n: {"source": s, "type": t}
+                                                    "context": {n: {"source": s, "type": t,
+                                                                    **({"optional": True} if n in self.optional else {})}
                                                                 for n, (s, t) in self.context.items()}},
                  "roles": self.roles or ["r"], "enums": self.enums,
                  "tables": {t: {"columns": {c: {"type": ty, "nullable": nu,
@@ -830,7 +834,8 @@ class Lifter:
     def never_null(self, node: Node) -> bool:
         """#66: a context value is never NULL in the model (the identity adapter's assumption), so its
         `IS [NOT] NULL` is TRUE or FALSE; the import says so."""
-        if self.context(node) is None:
+        found = self.context(node)
+        if found is None or found[0] in self.env.optional:  # #75: an optional value's test is kept
             return False
         self.hint(f"`{self.src(node)} IS [NOT] NULL` is read as constant: the identity adapter's "
                   "assumption is that a context value is always set")

@@ -347,6 +347,9 @@ class ContextVar(Strict):
     source: str
     type: ColType
     md5: str | None = None
+    # #75: a caller may lack the value (a visitor with no current user): NULL, which policies read
+    # as UNKNOWN and properties may test with `is null`.  Otherwise the value is always set.
+    optional: bool = False
 
 
 class Identity(Strict):

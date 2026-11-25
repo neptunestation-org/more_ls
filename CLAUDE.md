@@ -228,6 +228,11 @@ union member the renderer does not cover.
   left-out columns' defaults; one with none is unconstrained, and FALSE only in a lower bound) in
   access_terms, net_terms, insert_assumptions and the must_allow antecedent; import `lift.read_default`, drift `drift.live_defaults`, harness
   `default_sql`/`default_value`; fixture `specs.defaults_spec`, `tests/templates/test_defaults.py`.
+- D97 (#75): `ContextVar.optional` (a caller may lack it: NULL); `Encoder.ctx_null` (free flag
+  `ctx.<n>.null`), `is_null` of a ctx only when optional, `pg_roles` refuses it; import marks
+  `trusted_function` values optional and keeps their `IS NULL` (`Env.optional`); diff compares a
+  one-sided optional value for callers who have it (`diff.one_sided_optional`); harness draws it unset;
+  fixture `specs.optional_spec`, mutation `CTX_IS_NULL_FOLDED`; Lean `Env.ctxUnset`.
 - D86 (#54): an inclusion into a relation with a condition (`restrict deferred` required) compiles to two
   deferred constraint triggers (`compile/fk.py`: `<name>` reads the target row `FOR SHARE`, `<name>_target`
   refuses a demotion), owned by `mls_internal`; never assumed by the proofs; preflight counts existing

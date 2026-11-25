@@ -31,6 +31,7 @@ CASES = {
     "pg_roles": (specs.pg_roles_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),
     "session_setting": (specs.session_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),
     "trusted_function": (specs.function_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),  # #72
+    "optional": (specs.optional_spec, Mutation.CTX_IS_NULL_FOLDED, None),  # #75: signed-out callers
     "citext": (specs.citext_spec, Mutation.CITEXT_AS_TEXT, None),  # #73
     "defaults": (specs.defaults_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),  # #76
     "bigint": (specs.bigint_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),  # D53

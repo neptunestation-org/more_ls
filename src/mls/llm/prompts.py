@@ -34,6 +34,9 @@ triggers, grants).  You never write SQL.
 - {"has": [{"col": arr}, {"const": "x"}]}   the array column arr (text[] or enum[]) has an element 'x'
   (UNKNOWN when arr is NULL, or has a NULL element and no 'x'); an array column is tested only this way
 - {"is_null": term}, {"and": [...]}, {"or": [...]}, {"not": p}, {"lit": true|false}, {"opaque": name}
+- {"is_null": {"ctx": c}} only for a context value the identity declares optional: a caller may lack it
+  (a visitor with no current user).  "Signed in" is {"not": {"is_null": {"ctx": "uid"}}}; any comparison
+  with an unset value is UNKNOWN.  Other context values are always set.
 - Negated member / in_group is not allowed in policies.  Context values are not allowed in checks.
 
 ## Relations (part of the schema: "relations": {name: relation})

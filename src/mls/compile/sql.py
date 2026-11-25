@@ -80,6 +80,8 @@ class SqlCompiler:
         if isinstance(p, Not):
             return f"(not {self.pred(p.not_, table)})"
         if isinstance(p, IsNull):
+            if Mutation.CTX_IS_NULL_FOLDED in self.mutations and isinstance(p.is_null, CtxRef):
+                return "false"  # the value taken as always set
             return f"({self.term(p.is_null, table)} is null)"
         if isinstance(p, Has):  # D88: the label's literal takes the element type (text, or the enum)
             col, label = p.has

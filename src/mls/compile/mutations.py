@@ -43,6 +43,7 @@ class Mutation(str, Enum):
     CARDINALITY_WHERE_DROPPED = "cardinality_where_dropped"    # #61: every row counted, the condition ignored
     PAIR_KEY_DROPPED = "pair_key_dropped"  # #59: the unique key an inclusion's foreign key needs is not added
     SET_NULL_BOTH = "set_null_both"  # #62: an on_delete set_null inclusion that nulls both columns
+    CTX_IS_NULL_FOLDED = "ctx_is_null_folded"        # #75: an optional context value's IS NULL read as FALSE
     GUARD_ANY_ROW = "guard_any_row"                  # a column guard that limits every row, its condition ignored
     GUARD_SORTS_LAST = "guard_sorts_last"            # #58: a guard trigger named to fire after the table's own
     IDENT_UNQUOTED = "ident_unquoted"                # a predicate's column unquoted, so a mixed-case name folds

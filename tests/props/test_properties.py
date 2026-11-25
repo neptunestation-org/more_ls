@@ -891,3 +891,75 @@ def test_an_insert_lower_bound_counts_on_the_defaults_of_the_columns_the_role_ca
     assert verdicts(check_spec(parse(unknown)))["P2"] == "REFUTED"
     refused = DEFAULTS.replace("is_verified bool not null default false", "is_verified bool not null default true")
     assert verdicts(check_spec(parse(refused % " default @uid")))["P1"] == "REFUTED"
+
+
+SIGNED_OUT = """mls 0.1
+identity trusted_function { uid: app_public.current_user_id uuid md5 '0123456789abcdef0123456789abcdef'%s }
+roles visitor
+
+table users adopted {
+  id uuid not null,
+  username text not null;
+  primary_key (id)
+}
+
+rules {
+  R1 policy read_users on users: visitor select permissive using %s
+}
+
+properties {
+  P1 custom users visitor select new: not @uid is null description 'a visitor who is not signed in reads no user'
+  P2 must_allow users visitor select: not @uid is null
+}
+"""
+
+
+def test_a_property_speaks_about_a_caller_with_no_current_user():
+    """#75 (graphile/starter): one role serves signed-in users and signed-out visitors, whose
+    current user is NULL.  With the user value declared `optional`, "a visitor who is not signed in
+    reads no user" is a property: proved for a policy SQL's NULL rules deny (`id = @uid or id <>
+    @uid` is UNKNOWN for no user), refuted for `true`; "every signed-in user reads every user" is
+    the lower bound `not @uid is null`.  Without `optional` the value is never NULL, and the
+    checker refuses the test and says how to declare it."""
+    from mls.errors import SpecError
+    from mls.spec.syntax import parse
+
+    v = verdicts(check_spec(parse(SIGNED_OUT % (" optional", "id = @uid or id <> @uid"))))
+    assert v == {"P1": "PROVED", "P2": "PROVED"}, v
+    v = verdicts(check_spec(parse(SIGNED_OUT % (" optional", "not @uid is null"))))
+    assert v == {"P1": "PROVED", "P2": "PROVED"}, v
+    v = verdicts(check_spec(parse(SIGNED_OUT % (" optional", "true"))))
+    assert v == {"P1": "REFUTED", "P2": "PROVED"}, v
+    with pytest.raises(SpecError) as e:
+        check_spec(parse(SIGNED_OUT % ("", "true")))
+    assert any("optional" in (x.fix or "") for x in e.value.errors), e.value.errors
+
+
+def test_a_default_from_an_optional_context_value_is_null_for_a_caller_who_lacks_it():
+    """#75 with #76: `user_id default @uid` writes NULL for a signed-out visitor.  On a NOT NULL
+    column that insert fails, so "a new row is always the caller's" still holds; on a nullable one
+    the row is written with no owner, and the same promise is refuted."""
+    from mls.spec.syntax import parse
+
+    text = """mls 0.1
+identity trusted_function { uid: app_public.current_user_id uuid md5 '0123456789abcdef0123456789abcdef' optional }
+roles visitor
+
+table notes adopted {
+  id uuid not null default fresh,
+  user_id uuid%s default @uid,
+  body text not null;
+  primary_key (id)
+}
+
+rules {
+  R1 policy add on notes: visitor insert permissive check true
+  R2 column_rule body_only on notes: visitor write body
+}
+
+properties {
+  P1 custom notes visitor insert new: user_id = @uid
+}
+"""
+    assert verdicts(check_spec(parse(text % " not null")))["P1"] == "PROVED"
+    assert verdicts(check_spec(parse(text % "")))["P1"] == "REFUTED"

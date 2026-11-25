@@ -10,7 +10,9 @@ how to write them, and `docs/design/DECISIONS.md` why each choice was made.
   text (compared for equality only in v1), enum labels (text from a fixed list, compared for
   equality only), booleans, timestamps (modeled as integers), arrays of text or enum labels
   (tested only for a constant label, §2), or NULL if the column is nullable.
-  Context values are never NULL.
+  Context values are never NULL, except an `optional` one, which is NULL for a caller who lacks it
+  (a visitor with no current user) and is then like a NULL column: comparisons with it are
+  UNKNOWN and `IS NULL` tests it.
 - Predicates evaluate to TRUE, FALSE or UNKNOWN with SQL semantics:
   - comparison with a NULL operand → UNKNOWN; `IS NULL` is two-valued;
   - AND: FALSE dominates, then UNKNOWN; OR: TRUE dominates, then UNKNOWN; NOT swaps TRUE/FALSE.

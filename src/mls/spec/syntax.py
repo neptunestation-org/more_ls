@@ -298,6 +298,9 @@ class Parser:
             if self.at_word("md5"):
                 self.advance()
                 ctx[n]["md5"] = self.string("the md5 of the function's body")
+            if self.at_word("optional"):  # #75
+                self.advance()
+                ctx[n]["optional"] = True
             if not self.at("}"):
                 self.eat(";")
         self.eat("}")

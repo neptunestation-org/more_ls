@@ -133,14 +133,14 @@ fix: declare the column bigint).  A string compared with a
 `uuid` column must be a UUID literal.  There are no NULL constants; use `is_null`.  There are no
 timestamp constants.
 
-**Context values** are never NULL (SEMANTICS §1).  Column values may be NULL when the column is
-nullable.
+**Context values** are always set unless declared `optional` (§3).  Column values may be NULL when
+the column is nullable.
 
 ## 3. `identity`
 
     "identity": {
       "adapter": "supabase" | "pg_roles" | "session_setting" | "trusted_function",
-      "context": { "<name>": {"source": "<source>", "type": "<column type>", "md5": "<hex>"?}, ... }
+      "context": { "<name>": {"source": "<source>", "type": "<column type>", "md5": "<hex>"?, "optional": true?}, ... }
     }
 
 A context value is a per-session value the policies may read as `{"ctx": "<name>"}`.  The
@@ -164,6 +164,18 @@ id), and `md5` is the md5 of its body (`md5(prosrc)` in `pg_proc`; `mls import` 
 proofs trust the function as it was when the spec was written.  Terse:
 `identity trusted_function { uid: app_public.current_user_id uuid md5 '<hex>' }`.  The assumption of the
 adapter in use is stated by `mls prove`, `mls explain` and `mls diff`.
+
+**Optional values.**  A context value is always set unless it is declared `"optional": true` (terse:
+`uid: app_public.current_user_id uuid md5 '<hex>' optional`): a caller may then lack it, as a
+visitor who is not signed in has no current user.  The proofs cover that caller too: every
+comparison with the unset value is UNKNOWN, so a policy reading it denies, and a predicate may test
+it with `{"is_null": {"ctx": "uid"}}`, which is refused for a value that is always set.  "Every
+signed-in user reads the users" is the lower bound `not @uid is null`; "a visitor who is not signed
+in reads no user" is the upper bound `not @uid is null` on what the role reads.  A column default
+`@uid` writes NULL for that caller.  `mls import` declares a `trusted_function` value optional (the
+function may return NULL); a `pg_roles` value is `current_user`, always set, and cannot be optional.
+When one version of a spec declares a value optional and the other does not, `mls diff` compares
+the callers who have it and says so.
 
 An adapter may declare its platform's roles.  `supabase` declares `anon`, `authenticated`
 and `service_role`, which Supabase's default privileges grant every new table and function in
@@ -513,7 +525,7 @@ the hierarchy's id type.  UNKNOWN if `v` is NULL.  Compiled as
 bounds are timestamp columns; a missing bound is open; a NULL bound is open.  Two-valued.  At
 least one bound must be given.
 
-**`{"is_null": term}`**: two-valued; applies to a column.
+**`{"is_null": term}`**: two-valued; applies to a column or to an optional context value (§3).
 
 **`{"has": [array column, {"const": label}]}`**, terse `'owner' = any(roles)`: the array has an
 element equal to the label, SQL `'owner' = any(roles)`.  TRUE when an element is the label;
@@ -955,11 +967,11 @@ grammar:
     spec       := 'mls' VERSION [comment] identity roles enum* table* relation* hierarchy* opaque*
                   'rules' '{' rule* '}' 'properties' '{' property* '}'
     comment    := 'comment' STRING                               (the spec's $comment)
-    identity   := 'identity' ADAPTER '{' [ctx (';' ctx)*] '}'    ctx := NAME ':' SOURCE TYPE
+    identity   := 'identity' ADAPTER '{' [ctx (';' ctx)*] '}'    ctx := NAME ':' SOURCE TYPE ['md5' STRING] ['optional']
     roles      := 'roles' NAME (',' NAME)*
     table      := 'table' NAME MODE '{' [column (',' column)* [';']] [option (';' option)*] '}'
     enum       := 'enum' NAME '(' STRING (',' STRING)* ')'        (a Postgres enum type and its labels, in order)
-    column     := NAME TYPE ['not null']                          (a bare column is nullable; TYPE 'enum' NAME for an enum,
+    column     := NAME TYPE ['not null'] ['default' (term | 'fresh')]  (a bare column is nullable; TYPE 'enum' NAME for an enum,
                                                                    'text[]' or 'enum[]' NAME for an array)
     option     := 'primary_key' '(' names ')' | 'unique' '(' names ')' | 'tags' '(' names ')'
                 | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)' | 'inlined function f(t) md5 h')

@@ -59,7 +59,7 @@ class SupabaseAdapter(Adapter):
     def harness_context_sql(self, role: str, ctx: dict[str, Any]) -> list[str]:
         claims: dict[str, Any] = {}
         for n, cv in self.spec.identity.context.items():
-            if n not in ctx:
+            if ctx.get(n) is None:  # #75: an optional value the caller lacks: no claim
                 continue
             if cv.source == "auth.uid":
                 claims["sub"] = str(ctx[n])

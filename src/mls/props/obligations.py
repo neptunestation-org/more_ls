@@ -297,8 +297,12 @@ def insert_written(spec: Spec, table: str, role: str, lower: bool = False) -> Pr
             continue
         if d == "fresh":
             parts.append(Not.model_validate({"not": {"is_null": {"col": c}}}))
-        else:
-            parts.append(Cmp.model_validate({"cmp": [{"col": c}, "=", d.model_dump(by_alias=True)]}))
+            continue
+        same = {"cmp": [{"col": c}, "=", d.model_dump(by_alias=True)]}
+        cv = spec.identity.context.get(getattr(d, "ctx", ""))
+        if cv is not None and cv.optional:  # #75: a caller who lacks the value writes NULL
+            same = {"or": [same, {"and": [{"is_null": d.model_dump(by_alias=True)}, {"is_null": {"col": c}}]}]}
+        parts.append(Or.model_validate(same) if "or" in same else Cmp.model_validate(same))
     return And.model_validate({"and": [p.model_dump(by_alias=True) for p in parts]}) if parts else Lit(lit=True)
 
 
@@ -890,8 +894,8 @@ def relation_visibility_obligations(spec: Spec, only: set[tuple[str, str]] | Non
                             reach = enc.T(cond, "x", rel.table)
                             which += " that meet the relation's condition"
                     elif lvl == 0:
-                        kv, _ = enc.term(m.key, "x", rel.table)
-                        reach = eq(col_value_var("x", rel.key), kv)
+                        kv, kn = enc.term(m.key, "x", rel.table)
+                        reach = and_(eq(col_value_var("x", rel.key), kv), not_(kn))  # #75: an unset key reaches none
                         if spec.tables[rel.table].columns[rel.key].nullable:  # #49: a NULL key is no match
                             reach = and_(reach, not_(col_null_var("x", rel.key)))
                         which = f"rows with {rel.key} = the key"

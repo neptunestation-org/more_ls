@@ -379,9 +379,15 @@ class Checker:
             return
         if isinstance(p, IsNull):
             ty = self.term_type(p.is_null, scope, f"{path}.is_null")
-            if isinstance(p.is_null, (Const, CtxRef)):
-                self.err(f"{path}.is_null", "is_null applies to a column (constants and context "
-                                            "values are never NULL)", "use {\"col\": name}")
+            if isinstance(p.is_null, Const):
+                self.err(f"{path}.is_null", "is_null applies to a column or an optional context value "
+                                            "(a constant is never NULL)", "use {\"col\": name}")
+            elif isinstance(p.is_null, CtxRef) and not getattr(self.spec.identity.context.get(p.is_null.ctx),
+                                                               "optional", False):
+                self.err(f"{path}.is_null", f"context value '{p.is_null.ctx}' is always set, so is_null of it is "
+                                            f"constant", f"if a caller may lack it (a visitor with no current "
+                                            f"user), declare it optional in identity.context.{p.is_null.ctx}; "
+                                            f"else remove the test")
             return
         if isinstance(p, Has):
             self._has(p, scope, f"{path}.has")
@@ -602,6 +608,9 @@ class Checker:
                 self.err(path, "'now' is a built-in context value", "remove it")
             if not IDENT.match(name):
                 self.err(path, f"'{name}' is not a valid context name")
+            if cv.optional and ident.adapter == "pg_roles":
+                self.err(path + ".optional", "a pg_roles context value is current_user, which is always set",
+                         "remove optional")
             if cv.md5 is not None and ident.adapter != "trusted_function":
                 self.err(path + ".md5", f"only a trusted_function source has an md5 (this is {ident.adapter})",
                          "remove md5")

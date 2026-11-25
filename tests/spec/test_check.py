@@ -812,3 +812,25 @@ table t %s {
     assert any("$.tables.t.columns.id.default" in e for e in errors("1"))
     assert any("$.tables.t.columns.id.default" in e for e in errors("@now"))
     assert any("owned" in e for e in errors("fresh", mode="owned"))
+
+
+def test_an_optional_context_value_round_trips_and_is_refused_where_it_is_always_set():
+    """#75: `optional` marks a context value a caller may lack (no current user).  pg_roles' value is
+    `current_user`, always set, so it cannot be optional."""
+    from mls.spec.syntax import parse
+    from mls.terse import render
+
+    text = """mls 0.1
+identity %s
+roles visitor
+table t adopted {
+  id uuid not null;
+  primary_key (id)
+}
+"""
+    spec = check_spec(parse(text % "session_setting { uid: app.user_id uuid optional }"))
+    assert spec.identity.context["uid"].optional
+    assert check_spec(parse(render(spec))) == spec
+    with pytest.raises(SpecError) as e:
+        check_spec(parse(text % "pg_roles { me: current_user text optional }"))
+    assert any(x.path == "$.identity.context.me.optional" for x in e.value.errors), e.value.errors

@@ -92,8 +92,10 @@ structure Schema where
 structure Env where
   /-- Column values per image; `none` is NULL. -/
   col : String → String → Option Int
-  /-- Context values are never NULL. -/
+  /-- Context values; `now` is always set. -/
   ctx : String → Int
+  /-- An optional context value the caller lacks is NULL (#75); every other one is set. -/
+  ctxUnset : String → Bool := fun _ => false
   /-- Relations, as sets of (key, value) pairs. -/
   rel : String → Int → Int → Bool
   /-- The stored rows of each hierarchy table. -/
@@ -116,7 +118,7 @@ def Term.value (e : Env) (row : String) : Term → Option Int
   | .col n => e.col row n
   | .old n => e.col "old" n
   | .new n => e.col "new" n
-  | .ctx n => some (e.ctx n)
+  | .ctx n => if e.ctxUnset n then none else some (e.ctx n)
   | .const v => some v
 
 /-- A comparison (or membership test) with a NULL operand is UNKNOWN. -/
@@ -186,6 +188,8 @@ structure Valuation where
   null : String → String → Bool
   /-- `ctx.name` -/
   ctx : String → Int
+  /-- `ctx.name.null` (#75): free for an optional value, `FALSE` (here `false`) for every other -/
+  ctxNull : String → Bool := fun _ => false
   /-- `rel.name` -/
   rel : String → Int → Int → Bool
   /-- `hier.name.has_parent` -/
@@ -214,7 +218,7 @@ def Term.tf (s : Schema) (σ : Valuation) (row : String) : Term → Int × Bool
   | .col n => Term.colTF s σ row n
   | .old n => Term.colTF s σ "old" n
   | .new n => Term.colTF s σ "new" n
-  | .ctx n => (σ.ctx n, false)
+  | .ctx n => (σ.ctx n, σ.ctxNull n)
   | .const v => (v, false)
 
 /-- `or_(fn, le(fv, now))` -/
@@ -277,6 +281,7 @@ structure Agrees (s : Schema) (σ : Valuation) (e : Env) : Prop where
   val_of_some : ∀ img n v, e.col img n = some v → σ.val img n = v
   flag_of_some : ∀ img n v, e.col img n = some v → s.nullable n = true → σ.null img n = false
   ctx : ∀ n, σ.ctx n = e.ctx n
+  ctxNull : ∀ n, σ.ctxNull n = e.ctxUnset n
   rel : ∀ r, σ.rel r = e.rel r
   forest : ∀ hn, (e.forest hn).Encodes (σ.has hn) (σ.par hn)
   opaqueT : ∀ n img, σ.opaqueT n img = (e.opaques n img).T
@@ -314,7 +319,11 @@ theorem Term.tf_null (h : Agrees s σ e) (row : String) (t : Term) :
   | col n => exact Term.colTF_null h row n
   | old n => exact Term.colTF_null h "old" n
   | new n => exact Term.colTF_null h "new" n
-  | ctx n => rfl
+  | ctx n =>
+    show σ.ctxNull n = (Term.value e row (.ctx n)).isNone
+    rw [h.ctxNull n]
+    simp only [Term.value]
+    cases e.ctxUnset n <;> rfl
   | const v => rfl
 
 theorem Term.tf_val (h : Agrees s σ e) (row : String) (t : Term) (v : Int)
@@ -324,9 +333,13 @@ theorem Term.tf_val (h : Agrees s σ e) (row : String) (t : Term) (v : Int)
   | old n => exact Term.colTF_val h "old" n v hv
   | new n => exact Term.colTF_val h "new" n v hv
   | ctx n =>
-    simp only [Term.value, Option.some.injEq] at hv
+    simp only [Term.value] at hv
     show σ.ctx n = v
-    rw [h.ctx n, hv]
+    cases hu : e.ctxUnset n with
+    | true => simp [hu] at hv
+    | false =>
+      simp only [hu, Bool.false_eq_true, if_false, Option.some.injEq] at hv
+      rw [h.ctx n, hv]
   | const c =>
     simp only [Term.value, Option.some.injEq] at hv
     exact hv

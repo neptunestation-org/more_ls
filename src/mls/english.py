@@ -63,8 +63,12 @@ def pred(spec: Spec, p: Pred, row: str = "the row", top: bool = True) -> str:
     if isinstance(p, Or):
         return wrap(" or ".join(pred(spec, a, row, False) for a in p.or_))
     if isinstance(p, Not):
+        if isinstance(p.not_, IsNull) and isinstance(p.not_.is_null, CtxRef):  # #75: the caller has it
+            return f"{term(spec, p.not_.is_null, row)} is set"
         return f"not {pred(spec, p.not_, row, False)}"
     if isinstance(p, IsNull):
+        if isinstance(p.is_null, CtxRef):  # #75: an optional value the caller lacks
+            return f"{term(spec, p.is_null, row)} is not set"
         return f"{term(spec, p.is_null, row)} is empty"
     if isinstance(p, Has):  # D88
         col, label = p.has
@@ -264,7 +268,20 @@ def identity_lines(spec: Spec) -> list[str]:
     if adapter.name == "trusted_function":
         lines.append("- a function that returns NULL makes every comparison with its value unknown, so the row "
                      "is denied (no context set: denied).")
+    if (line := optional_line(spec)) is not None:
+        lines.append(f"- {line}")
     return lines
+
+
+def optional_line(spec: Spec) -> str | None:
+    """#75: which context values the proofs take as possibly unset, and which as always set."""
+    optional = [n for n, cv in spec.identity.context.items() if cv.optional]
+    if not optional:
+        return None
+    rest = [n for n in spec.identity.context if n not in optional]
+    return (f"{', '.join(f'@{n}' for n in optional)} may be unset (a caller with no current user, NULL): "
+            f"the proofs cover that caller too" + (f"; {', '.join(f'@{n}' for n in rest)} "
+            f"{'is' if len(rest) == 1 else 'are'} taken as always set" if rest else ""))
 
 
 def assumption(table: str, a) -> str:

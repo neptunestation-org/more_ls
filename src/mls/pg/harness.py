@@ -189,7 +189,9 @@ class ValueGen:
     def context(self, role: str) -> dict[str, Any]:
         ctx: dict[str, Any] = {CONTEXT_NOW: self.now}
         for name, cv in self.spec.identity.context.items():
-            if name == self.user_ctx:
+            if cv.optional and self.rnd.random() < 0.25:
+                ctx[name] = None  # #75: a caller who lacks it (a signed-out visitor)
+            elif name == self.user_ctx:
                 ctx[name] = self.rnd.choice(self.users)
             else:
                 ctx[name] = self.value(cv.type, False)
