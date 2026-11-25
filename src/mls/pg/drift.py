@@ -84,7 +84,8 @@ def shadow_snapshot(conn: psycopg.Connection, spec: Spec, script: Script,
     shadow = "mls_shadow_" + secrets.token_hex(4)
     with conn.cursor() as cur:
         cur.execute(psql.SQL("create schema {}").format(psql.Identifier(shadow)))
-        cur.execute(psql.SQL("set local search_path to {}, {}, pg_catalog").format(
+        # the deploy's path (`<schema>, public`): a type an extension put in public, such as citext, resolves
+        cur.execute(psql.SQL("set local search_path to {}, {}, public, pg_catalog").format(
             psql.Identifier(shadow), psql.Identifier(live)))
         for r in missing_roles:
             try:

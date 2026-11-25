@@ -202,8 +202,14 @@ def bypass_paths(conn: psycopg.Connection, schema: str, tables: list[str], roles
             if using:
                 out[tbl].append({"path": f"view {name(nsp, rel)}", "roles": list(using),
                                  "kind": "materialized view" if kind == "m" else "view"})
+        # the argument types print as the search path has them: fix it to the deploy's (`<schema>, public`), so
+        # that import and drift (inside its snapshot's path) spell one function alike, and restore the caller's
+        prev = cur.execute("select current_setting('search_path')").fetchone()[0]
+        cur.execute("select set_config('search_path', quote_ident(%s) || ', public, pg_catalog', true)", (schema,))
         cur.execute(_BYPASS_FUNCTIONS, args)
-        for tbl, nsp, fn, types, owner, executing in cur.fetchall():
+        rows = cur.fetchall()
+        cur.execute("select set_config('search_path', %s, true)", (prev,))
+        for tbl, nsp, fn, types, owner, executing in rows:
             if executing:
                 out[tbl].append({"path": f"function {name(nsp, fn)}({types})", "roles": list(executing),
                                  "kind": "function", "owner": owner})

@@ -819,18 +819,23 @@ def test_a_set_null_key_imports_as_a_set_null_inclusion_and_a_clash_is_refused(b
 
 SCHEMA_SQL = """
 do $$ begin if not exists (select from pg_roles where rolname = 'app') then create role app; end if; end $$;
+create extension if not exists citext;
 create schema app;
-create table app.notes (id bigint primary key, owner_id bigint not null, body text);
+create table app.notes (id bigint primary key, owner_id bigint not null, body text, email citext);
 alter table app.notes enable row level security;
 create policy own_notes on app.notes for select to app using (
   owner_id = (select nullif(current_setting('app.uid', true), '')::bigint));
+grant usage on schema app to app;
+create function app.notes_by_email(e citext) returns setof bigint language sql security definer as $f$
+  select id from app.notes where email = e $f$;
 """
 
 
 def test_a_takeover_outside_public(pg_dsn, tmp_path, capsys):
     """#70: tables in another schema.  Every command with --dsn that finds none of the spec's
     tables in its schema says where they are and names --schema; with it, compile --schema writes
-    a script that runs there, and drift is clean after it."""
+    a script that runs there, and drift is clean after it: with a type from an extension in public
+    (citext, as graphile/starter has it), in a column and in a bypass path's signature."""
     dbname = "mls_other_schema"
     with psycopg.connect(pg_dsn, autocommit=True) as admin:
         admin.execute(f'drop database if exists "{dbname}"')
@@ -839,9 +844,12 @@ def test_a_takeover_outside_public(pg_dsn, tmp_path, capsys):
     try:
         with psycopg.connect(dsn, autocommit=True) as conn:
             conn.execute(SCHEMA_SQL)
-        spec = tmp_path / "spec.mls"
+        spec = tmp_path / "spec.mls.json"
         assert main(["import", "--dsn", dsn, "--schema", "app", "--out", str(spec)]) == 0
-        capsys.readouterr()
+        assert "bypass path: function notes_by_email(citext)" in capsys.readouterr().err
+        d = json.loads(spec.read_text())
+        d["tables"]["notes"]["assume"].append({"bypass": "function notes_by_email(citext)"})
+        spec.write_text(json.dumps(d))
         for cmd in (["check", str(spec)], ["drift", str(spec)], ["preflight", str(spec)], ["status", str(spec)]):
             assert main([*cmd, "--dsn", dsn]) != 0, cmd
             out = capsys.readouterr()
