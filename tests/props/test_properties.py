@@ -1075,3 +1075,44 @@ def test_a_user_null_test_reads_anon_as_signed_out():
 
     v = verdicts(check_spec(parse(SIGNED_IN_ONLY)))
     assert v == {"P1": "PROVED", "P2": "PROVED", "P3": "REFUTED"}, v
+
+
+PUBLISHED = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles anon, authenticated
+
+table posts adopted {
+  id uuid not null,
+  published bool not null;
+  primary_key (id)
+}
+
+table comments adopted {
+  id uuid not null,
+  post_id uuid not null;
+  primary_key (id)
+}
+
+relation published_post = posts(id) where published = true
+
+rules {
+  R1 policy read_comments on comments: anon select permissive using published_post(post_id)
+}
+
+properties {
+  P1 custom comments anon select new: false description 'anon reads no comment'
+}
+"""
+
+
+def test_a_report_prints_an_example_over_a_set():
+    """#87 (nextbase): a relation with no key is a set; the report's example lists its members as
+    single values (the renderer unpacked every entry as a pair and crashed)."""
+    from mls.props.report import to_markdown
+    from mls.spec.syntax import parse
+
+    spec = check_spec(parse(PUBLISHED))
+    results = run_all(spec)
+    assert {r.id: r.verdict for r in results} == {"P1": "REFUTED"}
+    md = to_markdown(spec, results)
+    assert "- published_post = {" in md and "(" not in md.split("- published_post = {")[1].split("}")[0], md

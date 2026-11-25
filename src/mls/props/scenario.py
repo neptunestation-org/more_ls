@@ -31,7 +31,8 @@ class Scenario:
             vals = ", ".join(f"{k} = {v}" for k, v in r["values"].items())
             lines.append(f"- {name} ({r['table']}): {vals}")
         for name, pairs in self.relations.items():
-            shown = ", ".join(f"({a}, {b})" for a, b in pairs) if pairs else "∅"
+            # #87: a set's (a relation with no key) members are single values
+            shown = ", ".join(f"({p[0]}, {p[1]})" if len(p) == 2 else str(p[0]) for p in pairs) if pairs else "∅"
             lines.append(f"- {name} = {{{shown}}}")
         for name, pairs in self.hierarchies.items():
             shown = ", ".join(f"{a} → {b}" for a, b in pairs) if pairs else "no parent links"
