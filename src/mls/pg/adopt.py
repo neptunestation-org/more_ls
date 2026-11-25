@@ -755,10 +755,14 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                                  + " (" + "; ".join(r.reasons) + ")")
                 for h in r.hints:
                     notes.append(f"lint: {what}: {h}")
-            if p["cmd"] != "insert" and "using" not in preds:
-                preds["using"] = {"lit": True}
-            if p["cmd"] == "insert" and "check" not in preds:
-                preds["check"] = {"lit": True}
+            # #81: Postgres skips a policy's missing expression (an insert's WITH CHECK, else USING): a
+            # permissive one then grants nothing (false), a restrictive one restricts nothing (true)
+            missing = ("check", "WITH CHECK") if p["cmd"] == "insert" else ("using", "USING")
+            if (p["using"] if p["cmd"] != "insert" else p["check"]) is None:
+                preds[missing[0]] = {"lit": not p["permissive"]}
+                if p["permissive"]:
+                    notes.append(f"policy {p['name']} on {name} has no {missing[1]}: it grants nothing, and is "
+                                 f"imported as false")
             if ident(p["name"]) != p["name"]:
                 notes.append(f"policy \"{p['name']}\" on {name} is imported as rule {ident(p['name'])} (MLS names are "
                              f"identifiers); until a deploy renames it, drift shows the old name as unexpected")

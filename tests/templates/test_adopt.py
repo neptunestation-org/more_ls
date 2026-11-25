@@ -1051,3 +1051,32 @@ def test_a_set_returning_helper_is_read_as_the_membership_its_body_is(pg_dsn, tm
     finally:
         with psycopg.connect(pg_dsn, autocommit=True) as admin:
             admin.execute(f'drop database if exists "{dbname}"')
+
+
+def test_a_policy_with_no_expression_imports_as_granting_nothing(brownfield):
+    """#81 (midday): Postgres grants nothing through a permissive policy whose USING is missing
+    (select, update, delete; an update with only WITH CHECK too), or an insert policy whose WITH
+    CHECK is missing.  Import reads each as `false`, with a note, never as `true`; a policy with
+    USING and no WITH CHECK keeps USING as its check.  A restrictive one restricts nothing: `true`."""
+    with brownfield.transaction(force_rollback=True):
+        brownfield.execute("""
+            create table bare (id int primary key, v int);
+            alter table bare enable row level security;
+            grant select, insert, update, delete on bare to authenticated;
+            create policy bare_read on bare for select to authenticated;
+            create policy bare_add on bare for insert to authenticated;
+            create policy bare_edit on bare for update to authenticated with check (v > 0);
+            create policy bare_drop on bare for delete to authenticated;
+            create policy bare_bump on bare for update to authenticated using (v < 10);
+            create policy bare_limit on bare as restrictive for select to authenticated;""")
+        res = import_schema(brownfield)
+    rules = {r["name"]: r for r in res.spec["rules"] if r.get("table") == "bare"}
+    assert rules["bare_read"]["using"] == {"lit": False}, rules["bare_read"]
+    assert rules["bare_add"]["check"] == {"lit": False}, rules["bare_add"]
+    assert rules["bare_edit"]["using"] == {"lit": False}, rules["bare_edit"]
+    assert rules["bare_drop"]["using"] == {"lit": False}, rules["bare_drop"]
+    assert rules["bare_bump"]["using"] != {"lit": False} and "check" not in rules["bare_bump"], rules["bare_bump"]
+    assert rules["bare_limit"]["using"] == {"lit": True}, rules["bare_limit"]  # restricts nothing
+    for name, part in (("bare_read", "USING"), ("bare_add", "WITH CHECK"), ("bare_edit", "USING")):
+        assert any(f"policy {name} on bare has no {part}" in n and "grants nothing" in n for n in res.notes), res.notes
+    check_spec(Spec.model_validate(res.spec))
