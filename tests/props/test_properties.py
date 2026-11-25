@@ -1039,3 +1039,39 @@ def test_a_scenario_lists_a_relation_over_its_own_types_only():
     scenarios = [o.scenario for o in res.obligations if o.scenario is not None]
     pairs = [x for sc in scenarios for p in sc.relations.get("member_of", []) for x in p]
     assert pairs and not [x for x in pairs if x in ("'pending'", "'done'")], pairs
+
+
+SIGNED_IN_ONLY = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles anon, authenticated
+
+table items adopted {
+  id uuid not null,
+  owner_id uuid;
+  primary_key (id)
+}
+
+rules {
+  R1 policy add_items on items: anon insert permissive check not @uid is null
+  R2 policy add_items_signed_in on items: authenticated insert permissive check not @uid is null
+  R3 policy read_items on items: anon select permissive using @uid is null
+  R4 policy read_items_signed_in on items: authenticated select permissive using true
+}
+
+properties {
+  P1 custom items anon insert new: false description 'a signed-out caller adds no item'
+  P2 must_allow items authenticated insert: true
+  P3 role_separation items select: anon | authenticated
+}
+"""
+
+
+def test_a_user_null_test_reads_anon_as_signed_out():
+    """#85 (nextbase): `not @uid is null` (nextbase's `auth.uid() IS NOT NULL`) refuses anon, whose
+    user id is NULL, and admits every signed-in user; the checker accepts the test when the spec
+    names an anonymous role.  A role-less obligation (role_separation) covers the real anon state:
+    anon reads with `@uid is null`, a signed-in user reads everything, so a row both read exists."""
+    from mls.spec.syntax import parse
+
+    v = verdicts(check_spec(parse(SIGNED_IN_ONLY)))
+    assert v == {"P1": "PROVED", "P2": "PROVED", "P3": "REFUTED"}, v

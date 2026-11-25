@@ -834,9 +834,13 @@ class Lifter:
     def never_null(self, node: Node) -> bool:
         """#66: a context value is never NULL in the model (the identity adapter's assumption), so its
         `IS [NOT] NULL` is TRUE or FALSE; the import says so."""
+        from mls.identity.base import adapter_anonymous_roles
+
         found = self.context(node)
         if found is None or found[0] in self.env.optional:  # #75: an optional value's test is kept
             return False
+        if found[0] != CONTEXT_NOW and adapter_anonymous_roles(self.env.adapter, self.env.roles):
+            return False  # #85: anon (no claims) lacks it, a signed-in caller has it: the test is kept
         self.hint(f"`{self.src(node)} IS [NOT] NULL` is read as constant: the identity adapter's "
                   "assumption is that a context value is always set")
         return True

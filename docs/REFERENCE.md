@@ -181,7 +181,9 @@ the callers who have it and says so.
 so `auth.uid()` and every claim are NULL for it.  The proofs, the diff and the differential tests
 take every context value of `anon` as unset, whether or not it is optional: a policy for `anon`
 that compares with `@uid` admits nothing, and a property about `anon` reads `@uid` as NULL.  Every
-proof report states it.
+proof report states it.  A spec that names `anon` may test a context value with `is_null` (TRUE
+for `anon`, FALSE for a signed-in caller), and `mls import` keeps `auth.uid() IS [NOT] NULL` as
+that test.
 
 An adapter may declare its platform's roles.  `supabase` declares `anon`, `authenticated`
 and `service_role`, which Supabase's default privileges grant every new table and function in

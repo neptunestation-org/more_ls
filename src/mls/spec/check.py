@@ -378,12 +378,15 @@ class Checker:
             self.pred(p.not_, scope, f"{path}.not", not negated)
             return
         if isinstance(p, IsNull):
+            from mls.identity.base import adapter_anonymous_roles
+
             ty = self.term_type(p.is_null, scope, f"{path}.is_null")
             if isinstance(p.is_null, Const):
                 self.err(f"{path}.is_null", "is_null applies to a column or an optional context value "
                                             "(a constant is never NULL)", "use {\"col\": name}")
             elif isinstance(p.is_null, CtxRef) and not getattr(self.spec.identity.context.get(p.is_null.ctx),
-                                                               "optional", False):
+                                                               "optional", False) \
+                    and not adapter_anonymous_roles(self.spec.identity.adapter, self.spec.roles):  # #85
                 self.err(f"{path}.is_null", f"context value '{p.is_null.ctx}' is always set, so is_null of it is "
                                             f"constant", f"if a caller may lack it (a visitor with no current "
                                             f"user), declare it optional in identity.context.{p.is_null.ctx}; "

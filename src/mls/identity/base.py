@@ -73,11 +73,20 @@ def anonymous_roles(spec: Spec) -> frozenset[str]:
     return frozenset(r for r in get_adapter(spec).anonymous_roles if r in spec.roles)
 
 
-def get_adapter(spec: Spec) -> Adapter:
+def adapter_anonymous_roles(adapter: str, roles) -> frozenset[str]:
+    """#85: `anonymous_roles` from an adapter's name and a list of roles (the import's view)."""
+    return frozenset(r for r in adapter_class(adapter).anonymous_roles if r in roles)
+
+
+def adapter_class(name: str) -> type[Adapter]:
     from mls.identity.pg_roles import PgRolesAdapter
     from mls.identity.session_setting import SessionSettingAdapter
     from mls.identity.supabase import SupabaseAdapter
     from mls.identity.trusted_function import TrustedFunctionAdapter
 
     return {"supabase": SupabaseAdapter, "pg_roles": PgRolesAdapter, "session_setting": SessionSettingAdapter,
-            "trusted_function": TrustedFunctionAdapter}[spec.identity.adapter](spec)
+            "trusted_function": TrustedFunctionAdapter}[name]
+
+
+def get_adapter(spec: Spec) -> Adapter:
+    return adapter_class(spec.identity.adapter)(spec)

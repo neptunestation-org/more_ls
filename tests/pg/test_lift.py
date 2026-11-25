@@ -812,3 +812,15 @@ def test_an_optional_context_values_null_test_is_kept():
     assert r.kind == "lifted", r.reasons
     assert r.pred == {"and": [{"not": {"is_null": {"ctx": "uid"}}}, {"cmp": [{"col": "level"}, "=", {"const": 1}]}]}
     assert not r.hints, r.hints
+
+
+def test_a_user_null_test_is_kept_when_anon_is_a_role():
+    """#85 (nextbase): Supabase's anon has no user id, so with anon among the roles `auth.uid() IS
+    NOT NULL` is the test it is (FALSE for anon, TRUE for a signed-in user), not folded to TRUE."""
+    env = env_of()
+    env.roles = [*env.roles, "anon"]
+    env.invalidate()
+    r, _ = do("(auth.uid() IS NOT NULL)", env=env)
+    assert r.kind == "lifted", r.reasons
+    assert r.pred == {"not": {"is_null": {"ctx": "uid"}}}
+    assert not [h for h in r.hints if "always set" in h], r.hints

@@ -166,12 +166,13 @@ class Encoder:
         cv = self.spec.identity.context.get(name)
         if cv is None:
             return FALSE
-        if self.role is not None:
-            from mls.identity.base import anonymous_roles
+        from mls.identity.base import anonymous_roles
 
-            if self.role in anonymous_roles(self.spec):
-                return TRUE
-        return ctx_null_var(name) if cv.optional else FALSE
+        anonymous = anonymous_roles(self.spec)
+        if self.role is not None and self.role in anonymous:
+            return TRUE
+        # #85: a formula for no one role, in a spec with an anonymous role, covers both states
+        return ctx_null_var(name) if cv.optional or (self.role is None and anonymous) else FALSE
 
     def _type_of(self, t, table: str) -> str | None:
         cols = self.spec.tables[table].columns

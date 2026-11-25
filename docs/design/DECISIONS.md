@@ -2014,11 +2014,16 @@ artefact).  An adapter now names its anonymous roles (`Adapter.anonymous_roles`;
   The per-role obligations (tenant isolation, column immutability, changes_only, monotone_in,
   write ⊆ read, custom, must_allow, relation visibility, cascades) and the diff's per-role pairs
   build their encoders with the role.  An encoder without a role (role_separation, the induction
-  step, the lint) keeps the old reading, which over-approximates anon (a caller who may have
-  values): sound for upper and lower bounds alike, only less precise.
+  step, the lint) takes the flag free in a spec that names an anonymous role (amended by #85: a
+  FALSE flag there left the real anon state out, so role_separation could prove no overlap that
+  anon's `@uid is null` policy had).
 - *Harness:* `Harness.context` gives an anonymous role no values, and the adapter sends no claims.
 - *Output:* `english.anonymous_line` in the identity lines and the proof report's assumptions.
 - *Lean:* no change: `Env.ctxUnset` (D97) already ranges over valuations with every value unset.
 - Rejected: declaring the user id optional on Supabase (anon could still be modelled with one, so
   the diff still overstated); a note in the diff only.
+- *Amendment (#85, nextbase):* import folded `auth.uid() IS NOT NULL` to TRUE (D87) for every role,
+  so `before.mls` let anon insert where Postgres refuses it.  With an anonymous role in the spec the
+  test is kept (`lift.never_null`), and the checker accepts `is_null` of a context value there
+  (TRUE for anon, FALSE for the others), as for an optional one.
 

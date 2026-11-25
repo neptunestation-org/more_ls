@@ -235,7 +235,9 @@ union member the renderer does not cover.
   fixture `specs.optional_spec`, mutation `CTX_IS_NULL_FOLDED`; Lean `Env.ctxUnset`.
 - D98 (#83): `Adapter.anonymous_roles` (Supabase: `anon`): every context value is NULL for them
   (`Encoder(role=..)`, `ctx_null` TRUE; per-role obligations and the diff pass the role, a role-less
-  encoder over-approximates); harness gives anon no claims; `english.anonymous_line`.
+  encoder takes the flag free when the spec names one, #85); harness gives anon no claims;
+  `english.anonymous_line`; with anon a role, import keeps `auth.uid() IS NULL` and the checker
+  accepts `is_null` of a context value.
 - D86 (#54): an inclusion into a relation with a condition (`restrict deferred` required) compiles to two
   deferred constraint triggers (`compile/fk.py`: `<name>` reads the target row `FOR SHARE`, `<name>_target`
   refuses a demotion), owned by `mls_internal`; never assumed by the proofs; preflight counts existing
