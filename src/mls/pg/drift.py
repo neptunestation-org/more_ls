@@ -459,8 +459,10 @@ def drift(conn: psycopg.Connection, spec: Spec, script: Script, schema: str = "p
                              f"arguments): the spec's identity reads {'it' if len(gone) == 1 else 'them'} "
                              f"(fix: restore the function, or change the spec's identity)")
         actual["bodies"] = {path_key(f"function {n}({types})"): digest for n, types, digest in conn.execute(
-            """select p.proname, oidvectortypes(p.proargtypes), md5(p.prosrc) from pg_proc p
-               join pg_namespace n on n.oid = p.pronamespace where n.nspname = %s""", (schema,)).fetchall()}
+            """select case when n.nspname = %(schema)s then p.proname else n.nspname || '.' || p.proname end,
+                      oidvectortypes(p.proargtypes), md5(p.prosrc) from pg_proc p
+               join pg_namespace n on n.oid = p.pronamespace
+               where n.nspname not in ('pg_catalog', 'information_schema')""", {"schema": schema}).fetchall()}
         missing = [r for r in _roles(spec) if actual["roles"].get(r) is None]
         expected = shadow_snapshot(conn, spec, script, _live_types(spec, actual), schema, missing)
     items, notes = compare(spec, expected, actual)

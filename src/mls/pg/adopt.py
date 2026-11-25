@@ -151,12 +151,16 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
         # body names (then its body reads all rows, as a relation does); an invoker one reads as
         # the same subquery written in the policy would.  #64: a VOLATILE one too (the default for
         # a function that declares none), with its parameters' defaults for a shorter call
-        cur.execute("""select p.proname, coalesce(p.proargnames, '{}'), p.pronargs, p.prosrc,
+        # #80: in any schema but an extension's, named with its schema outside the imported one
+        cur.execute("""select case when n.nspname = %(schema)s then p.proname else n.nspname || '.' || p.proname end,
+                              coalesce(p.proargnames, '{}'), p.pronargs, p.prosrc,
                               oidvectortypes(p.proargtypes), md5(p.prosrc), p.prosecdef,
                               p.provolatile = 'v', p.pronargdefaults, pg_get_expr(p.proargdefaults, 0), p.proretset
                        from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_language l on l.oid = p.prolang
                          join pg_roles o on o.oid = p.proowner
-                       where n.nspname = %s and l.lanname = 'sql'
+                       where n.nspname not in ('pg_catalog', 'information_schema') and l.lanname = 'sql'
+                         and not exists (select from pg_depend d where d.classid = 'pg_proc'::regclass
+                                         and d.objid = p.oid and d.deptype = 'e')
                          and (not p.proretset and p.prorettype = 'bool'::regtype
                               or p.proretset and p.prorettype in ('uuid'::regtype, 'integer'::regtype,
                                                                   'bigint'::regtype, 'text'::regtype))
@@ -167,7 +171,7 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
                              and p.prosrc ~* ('\\m' || t.relname || '\\M')
                              and (t.relforcerowsecurity or not pg_has_role(o.oid, t.relowner, 'USAGE'))))
                          and (select count(*) from pg_proc q where q.proname = p.proname and q.pronamespace = p.pronamespace) = 1""",
-                    (schema,))
+                    {"schema": schema})
         cat["functions"] = {}
         for fname, argnames, nargs, src, types, digest, definer, volatile, ndefaults, defaults, retset in cur.fetchall():
             expr = function_body(_strip_schema(src, schema))  # #64: `basejump.account_user` is the table
@@ -696,7 +700,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
             try:
                 r = lift(inline_lookups(inlined, cat["lookups"]), table, env, scope, make_opaque, make_relation,
                          top_is_true=top_is_true)
-                used = {re.search(r"(\w+)\s*\(", call).group(1) for _, call in calls}  # #74: `select f() as x`
+                used = {re.search(r"([\w.]+)\s*\(", call).group(1) for _, call in calls}  # #74, #80: `select s.f() as x`
                 inlined_by.setdefault(table, set()).update(cat["functions"][n]["assume"] for n in used)
                 volatile_by.setdefault(table, set()).update(n for n in used if cat["functions"][n]["volatile"])
                 return r

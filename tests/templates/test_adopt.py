@@ -1080,3 +1080,27 @@ def test_a_policy_with_no_expression_imports_as_granting_nothing(brownfield):
     for name, part in (("bare_read", "USING"), ("bare_add", "WITH CHECK"), ("bare_edit", "USING")):
         assert any(f"policy {name} on bare has no {part}" in n and "grants nothing" in n for n in res.notes), res.notes
     check_spec(Spec.model_validate(res.spec))
+
+
+def test_a_helper_in_another_schema_is_read_inline(helpers):
+    """#80 (midday): `team_id in (select private.my_teams() as my_teams)`, a set-returning definer
+    helper in a schema of its own.  Import reads it as the membership it selects, the table
+    assumes it under its qualified name, and drift checks that body."""
+    with helpers.transaction(force_rollback=True):
+        helpers.execute("""
+            create schema private;
+            create function private.my_teams() returns setof bigint language sql stable security definer as $f$
+              select team_id from members where user_id = nullif(current_setting('app.uid', true), '')::bigint
+            $f$;
+            drop policy v_read on tickets; drop policy w_read on tickets; drop policy member_read on tickets;
+            create policy team_read on tickets for select to app using (
+              team_id in (select private.my_teams() as my_teams));""")
+        res = import_schema(helpers)
+        spec = check_spec(Spec.model_validate(res.spec))
+        rules = {r.name: r for r in spec.policies()}
+        assert "member" in json.dumps(rules["team_read"].using.model_dump(by_alias=True, exclude_none=True)), res.notes
+        assert not [o for o in res.spec["opaques"].values() if "my_teams" in o["sql"]], res.spec["opaques"]
+        assumed = [a.inlined.split(" md5 ")[0] for a in spec.tables["tickets"].assume if hasattr(a, "inlined")]
+        assert "function private.my_teams()" in assumed, assumed
+        items = [str(i) for i in drift(helpers, spec, compile_spec(spec)).items if "my_teams" in i.object]
+        assert items == ["assumed: function private.my_teams() keeps the body the policies on tickets are read as"], items
