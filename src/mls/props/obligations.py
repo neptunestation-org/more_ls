@@ -398,7 +398,7 @@ def tenant_isolation(spec: Spec, p: TenantIsolation) -> list[Obligation]:
     goal_pred = Member(member=MemberBody(relation=p.relation, key=p.key, value=ColRef(col=p.column)))
     for role in bounded_roles(spec):  # #68
         for cmd in p.commands:
-            enc = Encoder(spec)
+            enc = Encoder(spec, role=role)
             if cmd == "select":
                 assumptions = select_assumptions(enc, spec, p.table, role)
             elif cmd == "insert":
@@ -420,7 +420,7 @@ def column_immutable(spec: Spec, p: ColumnImmutable) -> list[Obligation]:
     out = []
     nullable = spec.tables[p.table].columns[p.column].nullable
     for role in bounded_roles(spec):  # #68
-        enc = Encoder(spec)
+        enc = Encoder(spec, role=role)
         assumptions = update_assumptions(enc, spec, p.table, role)
         ov, nv = col_value_var("old", p.column), col_value_var("new", p.column)
         if nullable:
@@ -454,7 +454,7 @@ def changes_only(spec: Spec, p: ChangesOnly) -> list[Obligation]:
     from everything that binds the role's update: its policies, the constraints and transitions,
     the column privileges and the column guards.  A hierarchy's depth, which its own trigger
     recomputes, counts as listed, as for a guard."""
-    enc = Encoder(spec)
+    enc = Encoder(spec, role=p.role)
     assumptions = update_assumptions(enc, spec, p.table, p.role)
     if p.when is not None:
         assumptions.append(_T(enc, p.when, "old", p.table))
@@ -480,8 +480,8 @@ def monotone_in(spec: Spec, p: MonotoneIn) -> list[Obligation]:
                 if isinstance(pred, Lit) or p.relation not in _rels_in(spec, pred):
                     continue
                 consts: dict[str, int] = {}  # one interning for both state copies
-                e_big = Encoder(spec, {p.relation: "big"}, consts=consts)
-                e_small = Encoder(spec, {p.relation: "small"}, consts=consts)
+                e_big = Encoder(spec, {p.relation: "big"}, consts=consts, role=role)
+                e_small = Encoder(spec, {p.relation: "small"}, consts=consts, role=role)
                 row = _image(cmd, "old" if which == "using" else "new")
                 goal = implies(_T(e_small, pred, row, table), _T(e_big, pred, row, table))
                 # #43: a chain up a foreign key from this relation is its own symbol per copy; the
@@ -504,13 +504,13 @@ def write_subset_read(spec: Spec, p: WriteSubsetRead) -> list[Obligation]:
     out = []
     for role in bounded_roles(spec):  # #68
         sel = effective(spec, p.table, role, "select", "using")
-        enc = Encoder(spec)
+        enc = Encoder(spec, role=role)
         out.append(Obligation(
             p.id, f"insert as {role}: insertable ⇒ visible",
             insert_assumptions(enc, spec, p.table, role), _T(enc, sel, "new", p.table),
             _rows_for("insert", p.table), _all_relations(spec, p.table, role, "insert") +
             _relations_of(spec, sel), [enc]).finish())
-        enc = Encoder(spec)
+        enc = Encoder(spec, role=role)
         out.append(Obligation(
             p.id, f"update as {role}: new image ⇒ visible",
             update_assumptions(enc, spec, p.table, role), _T(enc, sel, "new", p.table),
@@ -538,7 +538,7 @@ def least_privilege(spec: Spec, p: LeastPrivilege) -> list[Obligation]:
 
 
 def custom(spec: Spec, p: Custom) -> list[Obligation]:
-    enc = Encoder(spec)
+    enc = Encoder(spec, role=p.role)
     if p.command == "select":
         assumptions = select_assumptions(enc, spec, p.table, p.role)
     elif p.command == "insert":
@@ -605,7 +605,7 @@ def must_allow(spec: Spec, p: MustAllow) -> list[Obligation]:
     the table's CHECKs and FKs — so the condition states what the role can do, not the integrity
     rules.  Plus a witness obligation: the assumptions are satisfiable (a condition no valid row
     meets would make the property vacuous; an over-restrictive CHECK shows up here)."""
-    enc = Encoder(spec)
+    enc = Encoder(spec, role=p.role)
     admitted = access_terms(spec, p.table, p.role, p.command, enc)
     rows = _rows_for(p.command, p.table)
     assumptions: list[Term] = [*relation_axioms(spec, enc)]
@@ -886,7 +886,7 @@ def relation_visibility_obligations(spec: Spec, only: set[tuple[str, str]] | Non
                     if k in seen:
                         continue
                     seen.add(k)
-                    enc = Encoder(spec)
+                    enc = Encoder(spec, role=role)
                     if lvl == 0 and rel.key is None:  # #63: a set reads every row of its table
                         reach, which = TRUE, f"rows of {rel.table}"
                         cond = condition(spec, m.relation)
@@ -945,7 +945,7 @@ def cascade_obligations(spec: Spec) -> list[Obligation]:
         for role in bounded_roles(spec):  # #68: a service role is trusted
             if "delete" not in privs.get((role, parent), {}):
                 continue
-            enc = Encoder(spec)
+            enc = Encoder(spec, role=role)
             refs = []
             for c, pc in zip(inc.columns, (rel.key, rel.value)):
                 refs.append(eq(col_value_var("c", c), col_value_var("old", pc)))
@@ -1005,7 +1005,7 @@ def _set_null_obligations(spec: Spec, inc: InclusionRule, privs: dict) -> list[O
     for role in bounded_roles(spec):  # #68
         if "delete" not in privs.get((role, parent), {}):
             continue
-        enc = Encoder(spec)
+        enc = Encoder(spec, role=role)
         out.append(Obligation(
             "soundness", f"a delete on {parent} by {role} sets {child}.{c0} NULL only where it could",
             [*delete_assumptions(enc, spec, parent, role, row="p"), *base(enc)],

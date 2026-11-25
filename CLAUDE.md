@@ -233,6 +233,9 @@ union member the renderer does not cover.
   `trusted_function` values optional and keeps their `IS NULL` (`Env.optional`); diff compares a
   one-sided optional value for callers who have it (`diff.one_sided_optional`); harness draws it unset;
   fixture `specs.optional_spec`, mutation `CTX_IS_NULL_FOLDED`; Lean `Env.ctxUnset`.
+- D98 (#83): `Adapter.anonymous_roles` (Supabase: `anon`): every context value is NULL for them
+  (`Encoder(role=..)`, `ctx_null` TRUE; per-role obligations and the diff pass the role, a role-less
+  encoder over-approximates); harness gives anon no claims; `english.anonymous_line`.
 - D86 (#54): an inclusion into a relation with a condition (`restrict deferred` required) compiles to two
   deferred constraint triggers (`compile/fk.py`: `<name>` reads the target row `FOR SHARE`, `<name>_target`
   refuses a demotion), owned by `mls_internal`; never assumed by the proofs; preflight counts existing

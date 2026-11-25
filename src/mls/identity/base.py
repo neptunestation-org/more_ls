@@ -26,6 +26,10 @@ class Adapter(ABC):
     # or create roles), so no upper bound holds for them and the deploy never alters them.
     service_roles: tuple[str, ...] = ()
     service_note: str = ""
+    # #83: roles whose callers carry no identity (Supabase's anon key has no claims): every context
+    # value is NULL for them
+    anonymous_roles: tuple[str, ...] = ()
+    anonymous_note: str = ""
 
     def __init__(self, spec: Spec):
         self.spec = spec
@@ -62,6 +66,11 @@ def bounded_roles(spec: Spec) -> list[str]:
     """The roles an upper bound speaks for (#68): the spec's roles but the platform's service roles."""
     service = get_adapter(spec).service_roles
     return [r for r in spec.roles if r not in service]
+
+
+def anonymous_roles(spec: Spec) -> frozenset[str]:
+    """#83: the spec's roles whose callers have no context values (every one is NULL for them)."""
+    return frozenset(r for r in get_adapter(spec).anonymous_roles if r in spec.roles)
 
 
 def get_adapter(spec: Spec) -> Adapter:

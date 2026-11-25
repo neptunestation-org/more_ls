@@ -119,6 +119,8 @@ class Encoder:
     ups_used: set[tuple[str, int]] = field(default_factory=set)  # (relation, upward hop) read (#43)
     # (table, array column) -> the labels a `has` tested on it (D88): what a scenario lists
     array_labels: dict[tuple[str, str], set[str]] = field(default_factory=dict)
+    # #83: the role the formula speaks for; an anonymous one (Supabase's anon) has no context values
+    role: str | None = None
 
     # ------------------------------------------------------------------ symbols
     def rel(self, name: str) -> FunDecl:
@@ -159,9 +161,17 @@ class Encoder:
         raise TypeError(t)
 
     def ctx_null(self, name: str) -> Term:
-        """The null flag of a context value: free for an optional one (#75), else FALSE."""
+        """The null flag of a context value: TRUE for an anonymous role's caller (#83), free for an
+        optional one (#75), else FALSE."""
         cv = self.spec.identity.context.get(name)
-        return ctx_null_var(name) if cv is not None and cv.optional else FALSE
+        if cv is None:
+            return FALSE
+        if self.role is not None:
+            from mls.identity.base import anonymous_roles
+
+            if self.role in anonymous_roles(self.spec):
+                return TRUE
+        return ctx_null_var(name) if cv.optional else FALSE
 
     def _type_of(self, t, table: str) -> str | None:
         cols = self.spec.tables[table].columns

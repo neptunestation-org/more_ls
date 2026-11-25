@@ -2003,3 +2003,22 @@ every existing spec keeps its meaning.
 - *Lean:* `Env.ctxUnset` / `Valuation.ctxNull`, defaulting to set, with `Agrees.ctxNull`; the
   soundness theorems are re-proved.
 
+**D98. Supabase's anon has no context values (#83; amends SEMANTICS §1).**  On the midday takeover,
+`mls diff before.mls spec.mls` reported for 20 tables that `anon` "can no longer read some rows that
+were allowed before": today's membership policies apply `to public`, and the model gave `anon` a
+user id like any caller.  Supabase's anon key carries no claims, so `auth.uid()` is NULL for anon
+and those policies admitted nothing; the diff overstated (in the safe direction, but in the approval
+artefact).  An adapter now names its anonymous roles (`Adapter.anonymous_roles`; `supabase`:
+`anon`), and for them every context value is NULL.
+- *Encoding:* `Encoder.role`; `ctx_null` is TRUE for an anonymous role, before D97's optional flag.
+  The per-role obligations (tenant isolation, column immutability, changes_only, monotone_in,
+  write ⊆ read, custom, must_allow, relation visibility, cascades) and the diff's per-role pairs
+  build their encoders with the role.  An encoder without a role (role_separation, the induction
+  step, the lint) keeps the old reading, which over-approximates anon (a caller who may have
+  values): sound for upper and lower bounds alike, only less precise.
+- *Harness:* `Harness.context` gives an anonymous role no values, and the adapter sends no claims.
+- *Output:* `english.anonymous_line` in the identity lines and the proof report's assumptions.
+- *Lean:* no change: `Env.ctxUnset` (D97) already ranges over valuations with every value unset.
+- Rejected: declaring the user id optional on Supabase (anon could still be modelled with one, so
+  the diff still overstated); a note in the diff only.
+

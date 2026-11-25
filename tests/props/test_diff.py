@@ -231,3 +231,17 @@ def test_an_example_says_when_the_caller_lacks_an_optional_value():
     assert denied and denied[0].scenario.context.get("uid", "absent") is None, denied
     text = to_markdown(old, new, res)
     assert "is not set" in text, text
+
+
+def test_dropping_a_signed_out_callers_user_policy_is_no_change():
+    """#83 (midday): an anon policy comparing with the user id granted nothing (anon has none), so
+    removing it is no access change; removing a signed-in user's is one."""
+    from tests.props.test_properties import ANON
+    from mls.spec.syntax import parse
+
+    old = check_spec(parse(ANON.split("properties")[0]))
+    new = check_spec(parse(ANON.split("properties")[0].replace(
+        "  R1 policy own_notes on notes: anon select permissive using owner_id = @uid\n", "").replace(
+        "using owner_id = @uid\n}", "using false\n}")))
+    changes = {(a.role, a.direction) for a in diff(old, new).access_changes}
+    assert changes == {("authenticated", "denied")}, changes

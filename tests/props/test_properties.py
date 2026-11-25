@@ -963,3 +963,35 @@ properties {
 """
     assert verdicts(check_spec(parse(text % " not null")))["P1"] == "PROVED"
     assert verdicts(check_spec(parse(text % "")))["P1"] == "REFUTED"
+
+
+ANON = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles anon, authenticated
+
+table notes adopted {
+  id uuid not null,
+  owner_id uuid not null;
+  primary_key (id)
+}
+
+rules {
+  R1 policy own_notes on notes: anon select permissive using owner_id = @uid
+  R2 policy own_notes_signed_in on notes: authenticated select permissive using owner_id = @uid
+}
+
+properties {
+  P1 custom notes anon select new: false description 'a signed-out caller reads no note'
+  P2 custom notes authenticated select new: false description 'a signed-in user reads no note'
+}
+"""
+
+
+def test_a_signed_out_supabase_caller_has_no_user():
+    """#83 (midday): Supabase's anon key carries no claims, so `auth.uid()` is NULL for anon and a
+    policy comparing with it grants anon nothing.  The proofs take anon's context values as unset;
+    a signed-in user still has one."""
+    from mls.spec.syntax import parse
+
+    v = verdicts(check_spec(parse(ANON)))
+    assert v == {"P1": "PROVED", "P2": "REFUTED"}, v

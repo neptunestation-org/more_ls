@@ -271,7 +271,20 @@ def identity_lines(spec: Spec) -> list[str]:
                      "is denied (no context set: denied).")
     if (line := optional_line(spec)) is not None:
         lines.append(f"- {line}")
+    if (line := anonymous_line(spec)) is not None:
+        lines.append(f"- {line}")
     return lines
+
+
+def anonymous_line(spec: Spec) -> str | None:
+    """#83: the roles whose callers have no context values, when the spec names one."""
+    from mls.identity import get_adapter
+    from mls.identity.base import anonymous_roles
+
+    if not anonymous_roles(spec):
+        return None
+    return (f"{get_adapter(spec).anonymous_note}: the proofs take every context value as unset (NULL) for "
+            f"{', '.join(sorted(anonymous_roles(spec)))}")
 
 
 def optional_line(spec: Spec) -> str | None:

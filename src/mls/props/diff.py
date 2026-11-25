@@ -139,12 +139,12 @@ def changed_opaques(old: Spec, new: Spec) -> set[str]:
     return {n for n, o in new.opaques.items() if n in old.opaques and old.opaques[n] != o}
 
 
-def encoders(old: Spec, new: Spec) -> tuple[Encoder, Encoder]:
+def encoders(old: Spec, new: Spec, role: str | None = None) -> tuple[Encoder, Encoder]:
     consts: dict[str, int] = {}
-    e_old = Encoder(old, consts=consts)
+    e_old = Encoder(old, consts=consts, role=role)
     e_new = Encoder(new, {r: "new" for r in changed_relations(old, new)},
                     opaque_tags={o: "new" for o in changed_opaques(old, new)},
-                    hier_tags={h: "new" for h in changed_hierarchies(old, new)}, consts=consts)
+                    hier_tags={h: "new" for h in changed_hierarchies(old, new)}, consts=consts, role=role)
     return e_old, e_new
 
 
@@ -263,7 +263,7 @@ def _access_pair(old: Spec, new: Spec, view: Spec, table: str, role: str, cmd: s
     p_new = effective(new, table, role, cmd, which) if table in new.tables else Lit(lit=False)
     if _same(old, new, p_old, p_new):
         return [AccessChange(table, role, cmd, which, d, None, "PROVED") for d in ("granted", "denied")]
-    e_old, e_new = encoders(old, new)
+    e_old, e_new = encoders(old, new, role)
     img = {"select": "r", "insert": "new", "delete": "old"}.get(cmd, "old" if which == "using" else "new")
     rows = _rows_for(cmd, table)
     common = _common_rows(old, new, table, rows, e_old, e_new) if table in old.tables and table in new.tables else []
@@ -336,7 +336,7 @@ NET_CASES = ("select", "insert", "update", "delete")
 
 def _net_pair(old: Spec, new: Spec, view: Spec, table: str, role: str, cmd: str,
               timeout_ms: int) -> list[AccessChange]:
-    e_old, e_new = encoders(old, new)
+    e_old, e_new = encoders(old, new, role)
     in_old, in_new = table in old.tables, table in new.tables
     ps_old, t_old = _net_terms(old, table, role, cmd, e_old) if in_old else ([], FALSE)
     ps_new, t_new = _net_terms(new, table, role, cmd, e_new) if in_new else ([], FALSE)

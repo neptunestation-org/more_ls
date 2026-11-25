@@ -388,22 +388,20 @@ the conditions under which the proofs say anything.
 
     $ uv run mls diff before.mls spec.mls
     # MLS access diff
-    **10 access change(s), 0 integrity change(s), 8 privilege change(s), 0 undecided**
+    **8 access change(s), 0 integrity change(s), 8 privilege change(s), 0 undecided**
     ...
     - table 'team_members' is observed in the old version: what roles can do there is not modelled (row level security is off, or the table is not governed), so its access, integrity and privileges are not compared
-    ...
-    - anon can no longer update some existing rows of profiles that were allowed before
     ...
     - authenticated can now read rows of tasks that were not allowed before
       - before: `false`
       - after: `in_project(@uid, project_id)`
 
 Every change in effect, with an example.  Go through them with whoever owns the requirements;
-each one should be a sentence of step 5 or a mistake.  Here they are what was intended.  The
-old update policy on `profiles` was `to public`, so it also named `anon`, and the new rules give
-`anon` no update (with Supabase's anon key `auth.uid()` is NULL, so in practice the old policy
-admitted nothing for `anon` either, but the model does not assume what the API layer sends); the
-rest are the new grants.  The exit code is 2 when
+each one should be a sentence of step 5 or a mistake.  Here they are what was intended: the
+new grants.  The old update policy on `profiles` was `to public`, so it also named `anon`, and
+the new rules give `anon` no update; that is no change, since Supabase's anon key carries no
+claims, `auth.uid()` is NULL for `anon` and the old policy admitted nothing for it (every proof
+and diff on Supabase takes `anon`'s context values as unset).  The exit code is 2 when
 anything changed, so a CI job can require a reviewed diff.
 
 `team_members` is not compared: today it has no row-level security, so every app role with a

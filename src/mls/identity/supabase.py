@@ -17,6 +17,9 @@ class SupabaseAdapter(Adapter):
     trusted_note = ("service_role has BYPASSRLS (Supabase's backend key) and is trusted: it reads and "
                     "writes every row whatever the policies say")
     service_roles = ("authenticator", "supabase_auth_admin")
+    anonymous_roles = ("anon",)
+    anonymous_note = ("anon is the signed-out caller: its key carries no claims, so auth.uid() and every "
+                      "claim are NULL for it")
     service_note = ("authenticator (the API's login, which can become service_role) and "
                     "supabase_auth_admin (the auth service, which can create roles) are the platform's "
                     "service roles and are trusted: their own rules are deployed and what they must be "

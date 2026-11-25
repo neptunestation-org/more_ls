@@ -177,6 +177,12 @@ function may return NULL); a `pg_roles` value is `current_user`, always set, and
 When one version of a spec declares a value optional and the other does not, `mls diff` compares
 the callers who have it and says so.
 
+**Anonymous roles.**  `supabase`'s `anon` is the signed-out caller: the anon key carries no claims,
+so `auth.uid()` and every claim are NULL for it.  The proofs, the diff and the differential tests
+take every context value of `anon` as unset, whether or not it is optional: a policy for `anon`
+that compares with `@uid` admits nothing, and a property about `anon` reads `@uid` as NULL.  Every
+proof report states it.
+
 An adapter may declare its platform's roles.  `supabase` declares `anon`, `authenticated`
 and `service_role`, which Supabase's default privileges grant every new table and function in
 `public`.  The deploy revokes every privilege on governed tables and MLS functions from those
