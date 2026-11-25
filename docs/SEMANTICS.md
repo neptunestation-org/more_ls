@@ -12,7 +12,9 @@ how to write them, and `docs/design/DECISIONS.md` why each choice was made.
   (tested only for a constant label, §2), or NULL if the column is nullable.
   Context values are never NULL, except an `optional` one, which is NULL for a caller who lacks it
   (a visitor with no current user) and is then like a NULL column: comparisons with it are
-  UNKNOWN and `IS NULL` tests it.  For an anonymous role of the identity adapter (Supabase's
+  UNKNOWN and `IS NULL` tests it.  A context value may be of an enum type (a claim cast to one of
+  the schema's enums): it is then one of that type's labels (or NULL, if optional), as an enum
+  column is.  For an anonymous role of the identity adapter (Supabase's
   `anon`, whose key carries no claims) every context value is NULL.
 - Predicates evaluate to TRUE, FALSE or UNKNOWN with SQL semantics:
   - comparison with a NULL operand → UNKNOWN; `IS NULL` is two-valued;

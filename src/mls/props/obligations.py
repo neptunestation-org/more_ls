@@ -91,6 +91,18 @@ def enum_row_axioms(encs: list[Encoder], rows: dict[str, str]) -> list[Term]:
             v, null = col_value_var(row, c), col_null_var(row, c)
             dom = or_(*[eq(v, IntVal(i)) for i in ids])
             out.append(or_(null, dom) if any(d.nullable for d in decl) else dom)
+    # #89: an enum context value is NULL (when a caller may lack it) or one of its type's labels:
+    # the token carries what the auth service wrote, and a cast of another string raises
+    for name in encs[0].spec.identity.context:
+        decl = [enc.spec.identity.context.get(name) for enc in encs]
+        if not all(d is not None and d.type == "enum" for d in decl):
+            continue
+        labels = sorted({x for enc, d in zip(encs, decl) for x in enc.spec.enums[d.enum]})
+        dom = or_(*[eq(ctx_var(name), IntVal(encs[0].const_id(x))) for x in labels])
+        for enc in encs:
+            for x in labels:
+                enc.const_types.setdefault(x, set()).add("enum")
+        out.extend(or_(enc.ctx_null(name), dom) for enc in encs)
     return out
 
 

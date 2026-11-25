@@ -485,7 +485,7 @@ def test_enum_declarations_and_columns_are_checked():
     assert has(errors(d), "$.tables.docs.columns.level.enum", "column 'level' is int, not enum")
     d = enum_dict()
     d["identity"]["context"]["clearance"]["type"] = "enum"
-    assert has(errors(d), "$.identity.context.clearance.type", "a context value cannot be an enum")
+    assert has(errors(d), "$.identity.context.clearance.enum", "an enum context value needs a declared enum type")
 
 
 def test_a_relation_is_unique_through_a_key_column():
@@ -834,3 +834,42 @@ table t adopted {
     with pytest.raises(SpecError) as e:
         check_spec(parse(text % "pg_roles { me: current_user text optional }"))
     assert any(x.path == "$.identity.context.me.optional" for x in e.value.errors), e.value.errors
+
+
+ENUM_CTX = """mls 0.1
+identity supabase { uid: auth.uid uuid; user_role: %s }
+roles authenticated
+enum app_role ('admin', 'moderator')
+
+table channels adopted {
+  id bigint not null,
+  created_by uuid not null,
+  min_role enum app_role;
+  primary_key (id)
+}
+
+rules {
+  R1 policy remove on channels: authenticated delete permissive using created_by = @uid or @user_role = %s
+}
+"""
+
+
+def test_an_enum_context_value_names_its_enum_type():
+    """#89 (Slack clone): `(auth.jwt() ->> 'user_role')::app_role` is a context value of an enum type;
+    it compares with that enum's labels and columns, and round-trips through both syntaxes."""
+    from mls.spec.syntax import parse
+    from mls.terse import render
+
+    spec = check_spec(parse(ENUM_CTX % ("jwt.claims.user_role enum app_role optional", "'admin'")))
+    cv = spec.identity.context["user_role"]
+    assert (cv.type, cv.enum, cv.optional) == ("enum", "app_role", True)
+    assert check_spec(parse(render(spec))) == spec
+    check_spec(parse((ENUM_CTX % ("jwt.claims.user_role enum app_role", "'admin'")).replace(
+        "@user_role = 'admin'", "min_role = @user_role")))
+    for decl, label, where in (("jwt.claims.user_role enum app_role", "'owner'", "rules[0].using.or[1].cmp[2]"),
+                               ("jwt.claims.user_role enum", "'admin'", "identity.context.user_role.enum"),
+                               ("jwt.claims.user_role enum nope", "'admin'", "identity.context.user_role.enum"),
+                               ("jwt.claims.user_role text app_role", "'admin'", "identity.context.user_role.enum")):
+        with pytest.raises(SpecError) as e:
+            check_spec(parse(ENUM_CTX % (decl, label)))
+        assert any(x.path == f"$.{where}" for x in e.value.errors), (decl, e.value.errors)

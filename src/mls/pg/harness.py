@@ -199,7 +199,7 @@ class ValueGen:
             elif name == self.user_ctx:
                 ctx[name] = self.rnd.choice(self.users)
             else:
-                ctx[name] = self.value(cv.type, False)
+                ctx[name] = self.value(cv.type, False, enum=cv.enum)  # #89: an enum value draws a label
         return ctx
 
 

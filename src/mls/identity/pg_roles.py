@@ -5,7 +5,7 @@ from typing import Any
 
 from mls.identity.base import Adapter
 from mls.sqltext import q
-from mls.spec.model import ColType, Spec
+from mls.spec.model import Spec
 
 
 class PgRolesAdapter(Adapter):
@@ -13,7 +13,7 @@ class PgRolesAdapter(Adapter):
     assumption = ("Identity is the Postgres role of the session (current_user); no external "
                   "component is trusted.")
 
-    def _ctx_sql(self, name: str, source: str, type_: ColType) -> str:
+    def _ctx_sql(self, name: str, source: str, sql_type: str) -> str:
         return "(select current_user::text)"
 
     def user_context_name(self) -> str | None:

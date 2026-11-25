@@ -346,6 +346,8 @@ class ContextVar(Strict):
     body, which drift compares."""
     source: str
     type: ColType
+    # #89: the enum type of an enum value (a claim cast to one of the schema's enums)
+    enum: str | None = None
     md5: str | None = None
     # #75: a caller may lack the value (a visitor with no current user): NULL, which policies read
     # as UNKNOWN and properties may test with `is null`.  Otherwise the value is always set.

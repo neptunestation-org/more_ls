@@ -272,12 +272,13 @@ def function_spec() -> Spec:
     """The session example on the trusted_function adapter (#72): the context values are read
     from `mls_ident.current_uid()` and `mls_ident.current_clearance()`, pinned by the md5 of the
     harness's stand-in bodies (so drift on a harness database is clean)."""
+    from mls.identity.base import SQL_TYPE
     from mls.identity.trusted_function import stand_in_body
 
     d = json.loads(SESSION.read_text())
     d["identity"] = {"adapter": "trusted_function", "context": {
         n: {"source": f"mls_ident.current_{n}", "type": t,
-            "md5": hashlib.md5(stand_in_body(n, t).encode()).hexdigest()}
+            "md5": hashlib.md5(stand_in_body(n, SQL_TYPE[t]).encode()).hexdigest()}
         for n, t in (("uid", "uuid"), ("clearance", "int"))}}
     return make(d)
 
@@ -319,6 +320,41 @@ properties {
   P2 custom orgs authenticated select new: slug <> 'admin'
 }
 """
+
+
+ROLE_CLAIM = """mls 0.1
+identity supabase { uid: auth.uid uuid; user_role: jwt.claims.user_role enum app_role optional }
+roles authenticated
+enum app_role ('admin', 'moderator', 'it''s')
+
+table channels adopted {
+  id bigint not null,
+  created_by uuid not null,
+  min_role enum app_role;
+  primary_key (id)
+}
+
+rules {
+  R1 policy read_channels on channels: authenticated select permissive using min_role is null or min_role = @user_role or @user_role = 'admin'
+  R2 policy remove_channels on channels: authenticated delete permissive using created_by = @uid or @user_role in ('admin', 'moderator')
+  R3 policy edit_channels on channels: authenticated update permissive using @user_role <> 'it''s' check created_by = @uid
+  R4 policy add_channels on channels: authenticated insert permissive check created_by = @uid
+}
+
+properties {
+  P1 custom channels authenticated delete new: created_by = @uid or not @user_role is null
+  P2 must_allow channels authenticated delete: @user_role = 'moderator'
+}
+"""
+
+
+def role_claim_spec() -> Spec:
+    """#89 (Slack clone): an optional claim of an enum type, `(auth.jwt() ->> 'user_role')::app_role`,
+    whose labels need quoting.  The harness gives a caller a label or no claim; reads compare an enum
+    column with the claim, deletes list two labels (the mutation drops 'moderator')."""
+    from mls.spec.syntax import parse
+
+    return make(parse(ROLE_CLAIM).model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
 def citext_spec() -> Spec:

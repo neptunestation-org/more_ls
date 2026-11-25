@@ -295,6 +295,9 @@ class Parser:
             source = self.dotted("a source (auth.uid, jwt.claims.<name>, current_user, app.<name>, "
                                  "<schema>.<function>)")
             ctx[n] = {"source": source, "type": self.word(*TYPES)}
+            if self.tok.kind in ("ident", "qident") and not self.at_word("md5", "optional"):  # #89
+                self.mark(f"$.identity.context.{n}.enum")
+                ctx[n]["enum"] = self.name("the enum type's name")
             if self.at_word("md5"):
                 self.advance()
                 ctx[n]["md5"] = self.string("the md5 of the function's body")

@@ -9,10 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from mls.identity.base import SQL_TYPE
+from mls.identity.base import ctx_type_sql
 from mls.identity.session_setting import SessionSettingAdapter
 from mls.sqltext import q
-from mls.spec.model import ColType
 
 HARNESS_NAMESPACE = "mls_harness"
 
@@ -22,9 +21,9 @@ def call_sql(source: str) -> str:
     return f"{q(schema)}.{q(fn)}()"
 
 
-def stand_in_body(name: str, type_: ColType) -> str:
+def stand_in_body(name: str, sql_type: str) -> str:
     """The body of the harness's stand-in for the function behind context value `name`."""
-    return f" select nullif(current_setting('{HARNESS_NAMESPACE}.{name}', true), '')::{SQL_TYPE[type_]} "
+    return f" select nullif(current_setting('{HARNESS_NAMESPACE}.{name}', true), '')::{sql_type} "
 
 
 class TrustedFunctionAdapter(SessionSettingAdapter):
@@ -44,7 +43,7 @@ class TrustedFunctionAdapter(SessionSettingAdapter):
             return next(iter(self.spec.identity.context))
         return name
 
-    def _ctx_sql(self, name: str, source: str, type_: ColType) -> str:
+    def _ctx_sql(self, name: str, source: str, sql_type: str) -> str:
         return f"(select {call_sql(source)})"
 
     # --- harness: a stand-in function of the same name reads a setting the harness sets
@@ -53,8 +52,8 @@ class TrustedFunctionAdapter(SessionSettingAdapter):
         for n, cv in spec.identity.context.items():
             schema = cv.source.split(".", 1)[0]
             out += [f"create schema if not exists {q(schema)}",
-                    f"create or replace function {call_sql(cv.source)} returns {SQL_TYPE[cv.type]} "
-                    f"language sql stable as $${stand_in_body(n, cv.type)}$$",
+                    f"create or replace function {call_sql(cv.source)} returns {ctx_type_sql(cv)} "
+                    f"language sql stable as $${stand_in_body(n, ctx_type_sql(cv))}$$",
                     *[f"grant usage on schema {q(schema)} to {q(r)}; "
                       f"grant execute on function {call_sql(cv.source)} to {q(r)}" for r in spec.roles]]
         return out

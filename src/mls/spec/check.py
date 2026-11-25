@@ -218,6 +218,9 @@ class Checker:
 
     def enum_name(self, term, scope: Scope) -> str | None:
         """The enum type of the column `term` names (D59), or None when it names no enum column."""
+        if isinstance(term, CtxRef):  # #89: an enum context value
+            cv = self.spec.identity.context.get(term.ctx)
+            return cv.enum if cv is not None and cv.type == "enum" else None
         col = term.col if isinstance(term, ColRef) else term.old if isinstance(term, OldRef) else \
             term.new if isinstance(term, NewRef) else None
         t = self.spec.tables.get(scope.table) if col is not None and scope.table else None
@@ -598,9 +601,14 @@ class Checker:
         ident = self.spec.identity
         for name, cv in ident.context.items():
             path = f"$.identity.context.{name}"
-            if cv.type == "enum":
-                self.err(path + ".type", "a context value cannot be an enum",
-                         "declare it text and compare an enum column with constant labels")
+            if cv.type == "enum" and (cv.enum is None or cv.enum not in self.spec.enums):  # #89
+                self.err(path + ".enum", "an enum context value needs a declared enum type"
+                         + (f" ('{cv.enum}' is not declared)" if cv.enum else ""),
+                         f"name one of: {', '.join(self.spec.enums) or '(none declared: add an enum)'}")
+            elif cv.type != "enum" and cv.enum is not None:
+                self.err(path + ".enum", f"context value '{name}' is {cv.type}, not enum", "remove the enum name")
+            if cv.type == "enum" and ident.adapter == "pg_roles":
+                self.err(path + ".type", "a pg_roles context value is current_user, a role name", "declare it text")
             if cv.type == "citext":
                 self.err(path + ".type", "a context value cannot be citext",
                          "declare it text; a citext column compares with constants only")

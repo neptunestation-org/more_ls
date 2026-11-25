@@ -13,9 +13,9 @@ import re
 import uuid
 from typing import Any
 
-from mls.identity.base import SQL_TYPE, Adapter
+from mls.identity.base import Adapter
 from mls.sqltext import q
-from mls.spec.model import ColType, Spec
+from mls.spec.model import Spec
 
 NAMESPACE = "app"
 SOURCE = re.compile(r"^app\.[a-z_][a-z0-9_]*$")
@@ -29,9 +29,9 @@ class SessionSettingAdapter(Adapter):
     name = "session_setting"
     assumption = ASSUMPTION
 
-    def _ctx_sql(self, name: str, source: str, type_: ColType) -> str:
+    def _ctx_sql(self, name: str, source: str, sql_type: str) -> str:
         # nullif: a setting that was set and then reset reads as '' rather than NULL
-        return f"(select nullif(current_setting('{source}', true), '')::{SQL_TYPE[type_]})"
+        return f"(select nullif(current_setting('{source}', true), '')::{sql_type})"
 
     def user_context_name(self) -> str | None:
         """No source is distinguished as the user: the user context is the one the policies use

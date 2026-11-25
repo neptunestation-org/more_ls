@@ -77,7 +77,13 @@ table out of the spec.  MLS's own names (relation, hierarchy, opaque and context
 
 `int` and `bigint` compare with each other, in a comparison, a membership, an inclusion and a
 cardinality group: the fragment has no arithmetic, so they differ only in range.  A
-context value may be declared `bigint` too (`org_id: jwt.claims.org_id bigint`).  On an
+context value may be declared `bigint` too (`org_id: jwt.claims.org_id bigint`), or of one of the
+spec's enum types (`user_role: jwt.claims.user_role enum app_role optional`; JSON
+`{"type": "enum", "enum": "app_role"}`): it compiles to the claim cast to that type, compares with
+its labels and with enum columns of the same type by `=`, `<>` and `in`, and the proofs take it to be
+one of the labels (Postgres raises an error on a cast of any other string; the auth service
+writes the claim).  `mls import` declares a claim cast to one of the schema's enums so, optional
+(a token may carry none).  On an
 adopted table a `character varying(n)` column is declared `text`: Postgres compares it as text,
 `mls import` reads it so, `check --dsn` and `drift` accept it; MLS creates owned tables `text`.
 

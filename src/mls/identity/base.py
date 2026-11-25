@@ -5,10 +5,17 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from mls.spec.model import CONTEXT_NOW, ColType, Spec
+from mls.spec.model import CONTEXT_NOW, Spec
 
 SQL_TYPE = {"int": "integer", "bigint": "bigint", "text": "text", "bool": "boolean", "timestamp": "timestamptz",
             "uuid": "uuid", "citext": "citext"}
+
+
+def ctx_type_sql(cv) -> str:
+    """A context value's SQL type: an enum value's is its Postgres type, quoted (#89)."""
+    from mls.sqltext import q
+
+    return q(cv.enum) if cv.type == "enum" else SQL_TYPE[cv.type]
 
 
 class Adapter(ABC):
@@ -39,10 +46,10 @@ class Adapter(ABC):
         if name == CONTEXT_NOW:
             return "(select now())"
         cv = self.spec.identity.context[name]
-        return self._ctx_sql(name, cv.source, cv.type)
+        return self._ctx_sql(name, cv.source, ctx_type_sql(cv))
 
     @abstractmethod
-    def _ctx_sql(self, name: str, source: str, type_: ColType) -> str: ...
+    def _ctx_sql(self, name: str, source: str, sql_type: str) -> str: ...
 
     # --- differential-test harness hooks (plain Postgres stands in for the real environment)
     @abstractmethod

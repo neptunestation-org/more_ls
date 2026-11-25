@@ -5,9 +5,9 @@ import json
 import uuid
 from typing import Any
 
-from mls.identity.base import SQL_TYPE, Adapter
+from mls.identity.base import Adapter
 from mls.sqltext import q
-from mls.spec.model import ColType, Spec
+from mls.spec.model import Spec
 
 
 class SupabaseAdapter(Adapter):
@@ -29,11 +29,11 @@ class SupabaseAdapter(Adapter):
                   "the JWT before setting request.jwt.claims; direct database connections by "
                   "untrusted clients are out of scope.")
 
-    def _ctx_sql(self, name: str, source: str, type_: ColType) -> str:
+    def _ctx_sql(self, name: str, source: str, sql_type: str) -> str:
         if source == "auth.uid":
             return "(select auth.uid())"
         claim = source[len("jwt.claims."):]
-        return f"(select (auth.jwt() ->> '{claim}')::{SQL_TYPE[type_]})"
+        return f"(select (auth.jwt() ->> '{claim}')::{sql_type})"
 
     def user_context_name(self) -> str | None:
         for n, cv in self.spec.identity.context.items():

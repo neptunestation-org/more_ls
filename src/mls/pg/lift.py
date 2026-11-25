@@ -661,6 +661,8 @@ class Env:
     hidden: set[str] = field(default_factory=set)
     # #75: the context values a caller may lack (NULL): their IS [NOT] NULL is kept, not folded
     optional: set[str] = field(default_factory=set)
+    # #89: the enum type of each enum context value
+    context_enums: dict[str, str] = field(default_factory=dict)
     # #45: the names of the functions in pg_catalog, so a note on a call says built-in or user function
     builtins: frozenset[str] = frozenset()
     _spec: Spec | None = field(default=None, repr=False)
@@ -670,6 +672,7 @@ class Env:
         return cls(adapter=spec.identity.adapter,
                    context={n: (cv.source, cv.type) for n, cv in spec.identity.context.items()},
                    optional={n for n, cv in spec.identity.context.items() if cv.optional},
+                   context_enums={n: cv.enum for n, cv in spec.identity.context.items() if cv.enum},
                    tables={t: {c: (col.type, col.nullable) for c, col in tb.columns.items()}
                            for t, tb in spec.tables.items()},
                    governed=set(spec.governed()), roles=list(spec.roles),
@@ -700,6 +703,8 @@ class Env:
         if self._spec is None:
             d = {"mls_version": "0.1", "identity": {"adapter": self.adapter,
                                                     "context": {n: {"source": s, "type": t,
+                                                                    **({"enum": self.context_enums[n]}
+                                                                       if n in self.context_enums else {}),
                                                                     **({"optional": True} if n in self.optional else {})}
                                                                 for n, (s, t) in self.context.items()}},
                  "roles": self.roles or ["r"], "enums": self.enums,
@@ -1468,6 +1473,7 @@ class Lifter:
         if isinstance(node, Select) and node.table is None:
             node = node.target
             wrapped = True
+        enum_cast = node.type if isinstance(node, Cast) and node.type in self.env.enums else None  # #89
         found = self._context_source(node)
         if found is None:
             return None
@@ -1480,8 +1486,11 @@ class Lifter:
                 raise Unreadable(f"reads {source}, which is not a declared context value (declare it under "
                                  f"identity.context)")
             ty = self.env.context[name][1]
+            if enum_cast is not None and self.env.context_enums.get(name) != enum_cast:
+                raise Unreadable(f"reads {source} as the enum {enum_cast}, but context value {name} is declared "
+                                 + (f"enum {self.env.context_enums[name]}" if name in self.env.context_enums else ty))
             if cast is not None and cast != ty:
-                raise Unreadable(f"reads {source} as {SQL_TYPE_OF[cast]}, but context value {name} is declared "
+                raise Unreadable(f"reads {source} as {SQL_TYPE_OF.get(cast, cast)}, but context value {name} is declared "
                                  f"{ty}")
             if cast is None and ty != "text" and source != "auth.uid":
                 raise Unreadable(f"reads {source} as text, but context value {name} is declared {ty}")
@@ -1497,7 +1506,7 @@ class Lifter:
             if node.type == "text" and isinstance(node.x, (Keyword, Func, BinOp, Cast)):
                 cast = "text"
             else:
-                cast = CAST_TO_MLS.get(node.type)
+                cast = CAST_TO_MLS.get(node.type) or ("enum" if node.type in self.env.enums else None)  # #89
                 if cast is None:
                     return None
             node = node.x

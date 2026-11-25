@@ -238,6 +238,9 @@ union member the renderer does not cover.
   encoder takes the flag free when the spec names one, #85); harness gives anon no claims;
   `english.anonymous_line`; with anon a role, import keeps `auth.uid() IS NULL` and the checker
   accepts `is_null` of a context value.
+- D100 (#89): `ContextVar.enum` (a claim of an enum type); `check.enum_name` answers for it,
+  `enum_row_axioms` bounds it to its labels, `identity.base.ctx_type_sql` casts it; import reads
+  the cast (optional); fixture `specs.role_claim_spec`, mutation `IN_DROP_LAST`; Lean known gap.
 - D99 (#86): on Supabase, import lifts a policy that reads `auth.role()` once per role (`Env.role`;
   `lift.fold`'s `_role_test` makes `auth.role() = 'x'` a constant); test in `tests/templates/test_adopt.py`.
 - D86 (#54): an inclusion into a relation with a condition (`restrict deferred` required) compiles to two

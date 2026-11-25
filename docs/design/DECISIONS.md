@@ -2039,3 +2039,21 @@ outside a policy) the call stays unread.  The note says the reading assumes the 
 is the session's role: a direct connection as `authenticated` with no claims has a NULL
 `auth.role()`, which the import does not model.  Import only: the compiler never emits `auth.role()`.
 
+**D100. Context values of an enum type (#89; amends SEMANTICS §1).**  Supabase's documented RBAC
+(the Slack-clone example) puts the user's role in a claim, `(auth.jwt() ->> 'user_role')::app_role`,
+and compares it with `role_permissions.role`.  A context value could not be an enum, so the
+claim could not be stated.  `ContextVar.enum` names its type (terse `TYPE [ENUM]`, as a column).
+- *Checker:* `enum_name` answers for a context value too, so `_cmp`'s enum rules (its own labels,
+  another reference of the same type) apply unchanged; an undeclared or missing type is an error at
+  `identity.context.<n>.enum`; pg_roles' value (a role name) cannot be one.
+- *Encoding:* `enum_row_axioms` adds, per encoder, `null ∨ value ∈ labels` (the null flag of that
+  encoder: TRUE for an anonymous role, free for an optional value).  A token carrying another string
+  makes the cast raise, so no statement succeeds with it; the axiom takes the auth service to write
+  labels only, which the identity adapter's assumption (the JWT is verified) already covers.
+- *Compiler:* adapters get the SQL type (`identity.base.ctx_type_sql`, the enum quoted); same for the
+  trusted_function stand-in and drift's return-type check.  Fixture `specs.role_claim_spec` under
+  `IN_DROP_LAST` (the claim compiles inside an IN list).
+- *Import:* `JWT_CLAIM` reads an enum cast; such a claim is declared optional (an auth hook writes
+  `null` for a user without a role); the lifter reads the cast (`Env.context_enums`).
+- *Lean:* known gap, as the column axiom (D59).
+

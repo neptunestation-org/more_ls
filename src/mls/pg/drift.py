@@ -405,7 +405,7 @@ def _show_default(d) -> str | None:
 
 def identity_functions(conn: psycopg.Connection, spec: Spec) -> dict[str, dict]:
     """#72: the catalog state of each trusted_function source (missing ones are left out)."""
-    from mls.identity.base import SQL_TYPE
+    from mls.identity.base import ctx_type_sql
 
     out: dict[str, dict] = {}
     if spec.identity.adapter != "trusted_function":
@@ -416,7 +416,7 @@ def identity_functions(conn: psycopg.Connection, spec: Spec) -> dict[str, dict]:
                                      pg_get_userbyid(p.proowner)
                               from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                               where n.nspname = %s and p.proname = %s and p.pronargs = 0""",
-                           (SQL_TYPE[cv.type], schema, fn)).fetchone()
+                           (ctx_type_sql(cv), schema, fn)).fetchone()
         if row is not None:
             out[cv.source] = {"type_ok": row[0], "volatile": row[1], "md5": row[2], "owner": row[3]}
     return out

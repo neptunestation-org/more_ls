@@ -58,7 +58,8 @@ MARKERS = {"supabase": re.compile(r"\bauth\.(uid|jwt)\(\)"),
            "session_setting": re.compile(r"current_setting\('app\."),
            "pg_roles": re.compile(r"\bcurrent_user\b|\bsession_user\b")}
 # the deparser writes the claim name as 'name'::text and the cast of the whole as ((...))::integer
-JWT_CLAIM = re.compile(r"auth\.jwt\(\)\s*->>\s*'([A-Za-z_][A-Za-z0-9_]*)'(?:::text)?\s*\)*\s*(?:::([a-z ]+))?")
+JWT_CLAIM = re.compile(r"auth\.jwt\(\)\s*->>\s*'([A-Za-z_][A-Za-z0-9_]*)'(?:::text)?\s*\)*\s*"
+                       r"(?:::((?:[a-z_][a-z0-9_]*\.)?(?:\"[^\"]+\"|[a-z_][a-z0-9_ ]*)))?")  # #89: an enum type too
 # bare `current_setting('app.x', true)::t` and the compiler's `(NULLIF(current_setting('app.x'::text, true), ''::text))::t`
 APP_SETTING = re.compile(r"current_setting\('app\.([a-z_][a-z0-9_]*)'(?:::text)?[^)]*\)(?:,\s*''(?:::text)?\))?"
                          r"\s*\)*\s*(?:::([a-z ]+))?")
@@ -336,11 +337,21 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
         for e in texts:
             for claim, cast in JWT_CLAIM.findall(e):
                 name = ident(claim)
-                ty = CAST_TO_MLS.get((cast or "").strip())
+                cast = (cast or "").strip()
+                enum = cast.rsplit(".", 1)[-1].strip('"')
+                if enum in cat["enums"] and name not in context:
+                    # #89: a claim of one of the schema's enum types; the token may carry none (an auth
+                    # hook writes null for a user without one), so it is optional
+                    context[name] = {"source": f"jwt.claims.{claim}", "type": "enum", "enum": enum, "optional": True}
+                    notes.append(f"identity: claim '{claim}' is cast to the enum {enum}: declared an optional enum "
+                                 f"value (a token may carry no {claim}; one that carries another string makes "
+                                 f"Postgres raise an error, and the proofs assume the auth service writes a label)")
+                    continue
+                ty = CAST_TO_MLS.get(cast)
                 if ty is None:
                     ty = "text"
                     if cast:
-                        notes.append(f"identity: claim '{claim}' is cast to {cast.strip()}, not an MLS type; "
+                        notes.append(f"identity: claim '{claim}' is cast to {cast}, not an MLS type; "
                                      f"declared as text")
                 if name not in context:
                     context[name] = {"source": f"jwt.claims.{claim}", "type": ty}
@@ -389,7 +400,8 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
     # --- tables
     spec_tables: dict[str, dict] = {}
     modelled: dict[str, set[str]] = {}
-    enums: dict[str, list[str]] = {}
+    enums: dict[str, list[str]] = {cv["enum"]: cat["enums"][cv["enum"]] for cv in context.values()
+                                   if cv.get("type") == "enum"}  # #89: an enum context value's type
     mls_keys: dict[str, list[list[str]]] = {}  # #59: per table, the keys MLS added (`mls_key_*`)
     for name, t in tables.items():
         cols: dict[str, dict] = {}
@@ -458,6 +470,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
     # --- the lifter's view of the spec so far
     env = Env(adapter=adapter, context={n: (cv["source"], cv["type"]) for n, cv in context.items()},
               optional={n for n, cv in context.items() if cv.get("optional")},
+              context_enums={n: cv["enum"] for n, cv in context.items() if cv.get("enum")},
               tables={t: {c: (col["type"], col["nullable"]) for c, col in tb["columns"].items()}
                       for t, tb in spec_tables.items()},
               enums=enums, enum_cols={t: {c: col["enum"] for c, col in tb["columns"].items() if "enum" in col}

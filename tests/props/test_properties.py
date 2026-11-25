@@ -1116,3 +1116,36 @@ def test_a_report_prints_an_example_over_a_set():
     assert {r.id: r.verdict for r in results} == {"P1": "REFUTED"}
     md = to_markdown(spec, results)
     assert "- published_post = {" in md and "(" not in md.split("- published_post = {")[1].split("}")[0], md
+
+
+ROLE_CLAIM = """mls 0.1
+identity supabase { uid: auth.uid uuid; user_role: jwt.claims.user_role enum app_role optional }
+roles authenticated
+enum app_role ('admin', 'moderator')
+
+table channels adopted {
+  id bigint not null,
+  created_by uuid not null;
+  primary_key (id)
+}
+
+rules {
+  R1 policy remove on channels: authenticated delete permissive using created_by = @uid or @user_role <> 'moderator'
+}
+
+properties {
+  P1 custom channels authenticated delete new: created_by = @uid or @user_role = 'admin'
+  P2 must_allow channels authenticated delete: @user_role = 'admin'
+  P3 custom channels authenticated delete new: created_by = @uid
+}
+"""
+
+
+def test_an_enum_claim_is_one_of_its_labels_or_unset():
+    """#89 (Slack clone): the `user_role` claim is an `app_role` label or unset (the hook writes null
+    for a user with no role).  `@user_role <> 'moderator'` admits an admin and denies a caller with
+    no role (UNKNOWN), so it is `@user_role = 'admin'`: P1 needs the labels as the claim's domain."""
+    from mls.spec.syntax import parse
+
+    v = verdicts(check_spec(parse(ROLE_CLAIM)))
+    assert v == {"P1": "PROVED", "P2": "PROVED", "P3": "REFUTED"}, v

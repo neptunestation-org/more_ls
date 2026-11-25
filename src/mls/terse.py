@@ -9,7 +9,7 @@ approval artifact (D10, D33).  The grammar:
     spec       := 'mls' VERSION comment? identity roles enum* table* relation* hierarchy* opaque*
                   'rules' '{' rule* '}' 'properties' '{' property* '}'
     comment    := 'comment' STRING                               ($comment, an author's note)
-    identity   := 'identity' ADAPTER '{' [ctx (';' ctx)*] '}'    ctx := NAME ':' SOURCE TYPE ['md5' STRING] ['optional']
+    identity   := 'identity' ADAPTER '{' [ctx (';' ctx)*] '}'    ctx := NAME ':' SOURCE TYPE [ENUM] ['md5' STRING] ['optional']
     roles      := 'roles' NAME (',' NAME)*
     table      := 'table' NAME MODE '{' [column (',' column)* [';']] [option (';' option)*] '}'
     enum       := 'enum' NAME '(' STRING (',' STRING)* ')'        (a Postgres enum type and its labels, in order)
@@ -76,7 +76,7 @@ _DOTTED = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 RENDERED_FIELDS: dict[type, set[str]] = {
     Spec: {"comment", "mls_version", "identity", "roles", "enums", "tables", "relations", "hierarchies", "opaques",
            "rules", "properties"},
-    Identity: {"adapter", "context"}, ContextVar: {"source", "type", "md5", "optional"},
+    Identity: {"adapter", "context"}, ContextVar: {"source", "type", "enum", "md5", "optional"},
     Table: {"columns", "primary_key", "unique", "mode", "assume", "tags"}, Column: {"type", "nullable", "enum", "default"},
     Relation: {"table", "key", "value", "where"}, ComposedRelation: {"of", "through"},
     Hop: {"table", "key", "value"},
@@ -311,7 +311,8 @@ def scenario(sc) -> str:
 
 # ----------------------------------------------------------------------------- the spec
 def identity(i: Identity) -> str:
-    ctx = "; ".join(f"{ident(n)}: {ident(c.source, dotted=True)} {c.type}" + (f" md5 '{c.md5}'" if c.md5 else "") + (" optional" if c.optional else "")
+    ctx = "; ".join(f"{ident(n)}: {ident(c.source, dotted=True)} {c.type}" + (f" {ident(c.enum)}" if c.enum else "")
+                    + (f" md5 '{c.md5}'" if c.md5 else "") + (" optional" if c.optional else "")
                     for n, c in i.context.items())
     return f"identity {i.adapter} {{ {ctx} }}" if ctx else f"identity {i.adapter} {{ }}"
 
