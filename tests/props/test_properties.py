@@ -995,3 +995,47 @@ def test_a_signed_out_supabase_caller_has_no_user():
 
     v = verdicts(check_spec(parse(ANON)))
     assert v == {"P1": "PROVED", "P2": "REFUTED"}, v
+
+
+ENUM_MEMBER = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated
+enum doc_status ('pending', 'done')
+
+table members adopted {
+  user_id uuid not null,
+  team_id uuid not null;
+  primary_key (user_id, team_id)
+}
+
+table docs adopted {
+  id uuid not null,
+  team_id uuid not null,
+  status enum doc_status;
+  primary_key (id)
+}
+
+relation member_of = members(user_id, team_id)
+
+rules {
+  R1 policy team_docs on docs: authenticated select permissive using member_of(@uid, team_id)
+  R2 policy own_memberships on members: authenticated select permissive using user_id = @uid
+}
+
+properties {
+  P1 custom docs authenticated select new: false description 'nobody reads a doc'
+}
+"""
+
+
+def test_a_scenario_lists_a_relation_over_its_own_types_only():
+    """#84 (midday): the labels of an enum column the obligation reads are interned like text
+    constants; a scenario listed them as members of a uuid relation.  Each pair holds values of
+    the relation's own column types."""
+    from mls.spec.syntax import parse
+
+    res = {r.id: r for r in run_all(check_spec(parse(ENUM_MEMBER)))}["P1"]
+    assert res.verdict == "REFUTED"
+    scenarios = [o.scenario for o in res.obligations if o.scenario is not None]
+    pairs = [x for sc in scenarios for p in sc.relations.get("member_of", []) for x in p]
+    assert pairs and not [x for x in pairs if x in ("'pending'", "'done'")], pairs

@@ -85,6 +85,9 @@ def enum_row_axioms(encs: list[Encoder], rows: dict[str, str]) -> list[Term]:
             ids = [encs[0].const_id(x) for x in labels]
             assert all(enc.const_id(x) == i for enc in encs for x, i in zip(labels, ids)), \
                 "encoders of one obligation must share their constants"
+            for enc in encs:  # #84: labels of an enum column, never a uuid or text value in a scenario
+                for x in labels:
+                    enc.const_types.setdefault(x, set()).add("enum")
             v, null = col_value_var(row, c), col_null_var(row, c)
             dom = or_(*[eq(v, IntVal(i)) for i in ids])
             out.append(or_(null, dom) if any(d.nullable for d in decl) else dom)
