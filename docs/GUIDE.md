@@ -1499,7 +1499,10 @@ what it cannot read, a call to a function of yours for instance, becomes an `opa
 carrying the columns, context values and relations the SQL reads, and the notes say which part
 of which policy and why.  A permissive policy written without USING (an insert policy without
 WITH CHECK) grants nothing in Postgres, and is imported as `false` with a note; a restrictive one
-without it restricts nothing (`true`).  A CHECK it reads becomes a check rule.  The notes printed on stderr
+without it restricts nothing (`true`).  On Supabase, `auth.uid() IS NULL` is kept when the
+spec names `anon` (anon's caller has no user id), and `auth.role() = 'x'` is the caller's role:
+a policy reading it is imported once per role, the test TRUE in the rule for role `x` and FALSE in
+the others.  A CHECK it reads becomes a check rule.  The notes printed on stderr
 list what was left out: a column whose type MLS does not model (`bigint` keys, Supabase's
 default, are modelled; a `varchar` column is read as `text`; a column of one of the schema's
 enum types is read with the type's labels), a trigger (listed, not

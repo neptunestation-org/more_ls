@@ -737,43 +737,62 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
             if len(pol_roles) > 1:
                 notes.append(f"policy {p['name']} on {name} applies to {', '.join(pol_roles)}: imported as one rule per "
                              f"role (MLS policies have one role; after a deploy the catalog holds one policy per rule)")
-            preds: dict[str, dict] = {}
-            for which, text in (("using", p["using"]), ("check", p["check"])):
-                if text is None:
-                    continue
-                if which == "check" and p["cmd"] in ("update", "all") and text == p["using"]:
-                    continue  # equal to USING: one predicate, as the compiler writes it
-                env.caller_reads = []
-                r = lift_expr(name, text, f"{p['name']}_{which}", "policy", depcols[p["name"]])
-                preds[which] = r.pred
-                lifted_exprs.append({"table": name, "policy": p, "which": which, "text": text, "result": r,
-                                     "caller": set(env.caller_reads), "rules": [
-                                         (ident(p["name"]) if i == 0 else suffixed(p["name"], role), role)
-                                         for i, role in enumerate(pol_roles)]})
-                what = f"policy {p['name']} on {name}, {'with check' if which == 'check' else 'using'}"
-                if r.kind == "lifted":
-                    lifted_n += 1
-                else:
-                    opaque_n += len(r.opaques)
-                    notes.append(f"{what}: " + ("an opaque block" if r.kind == "opaque" else "partly opaque")
-                                 + " (" + "; ".join(r.reasons) + ")")
-                for h in r.hints:
-                    notes.append(f"lint: {what}: {h}")
+            rule_names = {role: ident(p["name"]) if i == 0 else suffixed(p["name"], role)
+                          for i, role in enumerate(pol_roles)}
+            # #86: Supabase's auth.role() is the caller's role (the JWT's role claim, which PostgREST
+            # also takes as the session's role): such a policy is lifted once per role, the test a constant
+            reads_role = env.adapter == "supabase" and any(
+                t is not None and re.search(r"\bauth\.role\s*\(", t) for t in (p["using"], p["check"]))
+            if reads_role:
+                notes.append(f"policy {p['name']} on {name} reads auth.role(): read for each role as the role "
+                             f"the rule applies to (Supabase sets it from the token's role claim, the role "
+                             f"PostgREST takes)")
+            preds_of: dict[str | None, dict[str, dict]] = {}
+            for as_role in (pol_roles if reads_role else [None]):
+                env.role = as_role
+                preds = preds_of.setdefault(as_role, {})
+                for which, text in (("using", p["using"]), ("check", p["check"])):
+                    if text is None:
+                        continue
+                    if which == "check" and p["cmd"] in ("update", "all") and text == p["using"]:
+                        continue  # equal to USING: one predicate, as the compiler writes it
+                    env.caller_reads = []
+                    r = lift_expr(name, text, f"{p['name']}_{which}", "policy", depcols[p["name"]])
+                    preds[which] = r.pred
+                    lifted_exprs.append({"table": name, "policy": p, "which": which, "text": text, "result": r,
+                                         "caller": set(env.caller_reads), "rules": [
+                                             (rule_names[role], role) for role in pol_roles
+                                             if as_role is None or role == as_role]})
+                    what = f"policy {p['name']} on {name}, {'with check' if which == 'check' else 'using'}"
+                    first = as_role in (None, pol_roles[0])  # count a policy's expression once
+                    if r.kind == "lifted":
+                        lifted_n += first
+                    else:
+                        opaque_n += len(r.opaques) if first else 0
+                        note = (f"{what}: " + ("an opaque block" if r.kind == "opaque" else "partly opaque")
+                                + " (" + "; ".join(r.reasons) + ")")
+                        if note not in notes:
+                            notes.append(note)
+                    for h in r.hints:
+                        if f"lint: {what}: {h}" not in notes:
+                            notes.append(f"lint: {what}: {h}")
+            env.role = None
             # #81: Postgres skips a policy's missing expression (an insert's WITH CHECK, else USING): a
             # permissive one then grants nothing (false), a restrictive one restricts nothing (true)
             missing = ("check", "WITH CHECK") if p["cmd"] == "insert" else ("using", "USING")
             if (p["using"] if p["cmd"] != "insert" else p["check"]) is None:
-                preds[missing[0]] = {"lit": not p["permissive"]}
+                for preds in preds_of.values():
+                    preds[missing[0]] = {"lit": not p["permissive"]}
                 if p["permissive"]:
                     notes.append(f"policy {p['name']} on {name} has no {missing[1]}: it grants nothing, and is "
                                  f"imported as false")
             if ident(p["name"]) != p["name"]:
                 notes.append(f"policy \"{p['name']}\" on {name} is imported as rule {ident(p['name'])} (MLS names are "
                              f"identifiers); until a deploy renames it, drift shows the old name as unexpected")
-            for i, role in enumerate(pol_roles):
-                rname = ident(p["name"]) if i == 0 else suffixed(p["name"], role)
-                rule = {"kind": "policy", "name": rname, "table": name, "role": role, "command": p["cmd"],
-                        "mode": "permissive" if p["permissive"] else "restrictive", **preds}
+            for role in pol_roles:
+                rule = {"kind": "policy", "name": rule_names[role], "table": name, "role": role, "command": p["cmd"],
+                        "mode": "permissive" if p["permissive"] else "restrictive",
+                        **preds_of[role if reads_role else None]}
                 rules.append(rule)
         permissive = {(r["role"], c) for r in rules if r["kind"] == "policy" and r["table"] == name
                       and r["mode"] == "permissive"

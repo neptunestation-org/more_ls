@@ -2027,3 +2027,15 @@ artefact).  An adapter now names its anonymous roles (`Adapter.anonymous_roles`;
   test is kept (`lift.never_null`), and the checker accepts `is_null` of a context value there
   (TRUE for anon, FALSE for the others), as for an optional one.
 
+**D99. Import reads Supabase's auth.role() per role (#86).**  nextbase's blog policies apply to
+public and read `(auth.uid() = author_id) OR (auth.role() = 'service_role')`; the lifter did not
+read `auth.role()`, so four policies were partly opaque.  On Supabase `auth.role()` is the token's
+role claim, which PostgREST also takes as the session's role, so in a rule of one role it is that
+role.  Import already splits a policy to public (or to several roles) into one rule per role; a
+policy that mentions `auth.role()` is now lifted once per role with `Env.role` set, and
+`lift.fold` reads `auth.role() = 'x'`, `<>`, `= ANY (ARRAY[..])` and `<> ALL` as TRUE or FALSE
+(`_role_test`), folding `not` of a constant too.  Without a role (another adapter, or a lift
+outside a policy) the call stays unread.  The note says the reading assumes the token's role claim
+is the session's role: a direct connection as `authenticated` with no claims has a NULL
+`auth.role()`, which the import does not model.  Import only: the compiler never emits `auth.role()`.
+

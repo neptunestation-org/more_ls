@@ -824,3 +824,30 @@ def test_a_user_null_test_is_kept_when_anon_is_a_role():
     assert r.kind == "lifted", r.reasons
     assert r.pred == {"not": {"is_null": {"ctx": "uid"}}}
     assert not [h for h in r.hints if "always set" in h], r.hints
+
+
+@pytest.mark.parametrize("text, role, expected", [
+    ("(auth.role() = 'service_role'::text)", "authenticated", {"lit": False}),
+    ("(auth.role() = 'authenticated'::text)", "authenticated", {"lit": True}),
+    ("(auth.role() <> 'anon'::text)", "anon", {"lit": False}),
+    ("((select auth.role()) = ANY (ARRAY['anon'::text, 'authenticated'::text]))", "anon", {"lit": True}),
+    ("(NOT (auth.role() = 'anon'::text))", "authenticated", {"lit": True}),
+    ("((level = 1) OR (auth.role() = 'service_role'::text))", "authenticated",
+     {"cmp": [{"col": "level"}, "=", {"const": 1}]}),
+])
+def test_auth_role_is_the_rules_role(text, role, expected):
+    """#86 (nextbase): Supabase's auth.role() is the caller's role, so in a rule of one role a test
+    of it is TRUE or FALSE: `author_id = auth.uid() or auth.role() = 'service_role'` is the owner
+    test for authenticated."""
+    env = env_of()
+    env.roles = ["anon", "authenticated"]
+    env.role = role
+    env.invalidate()
+    r, _ = do(text, env=env)
+    assert r.kind == "lifted", r.reasons
+    assert r.pred == expected
+
+
+def test_auth_role_without_a_role_is_not_read():
+    r, _ = do("(auth.role() = 'service_role'::text)")
+    assert r.kind != "lifted"

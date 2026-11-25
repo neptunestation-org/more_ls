@@ -238,6 +238,8 @@ union member the renderer does not cover.
   encoder takes the flag free when the spec names one, #85); harness gives anon no claims;
   `english.anonymous_line`; with anon a role, import keeps `auth.uid() IS NULL` and the checker
   accepts `is_null` of a context value.
+- D99 (#86): on Supabase, import lifts a policy that reads `auth.role()` once per role (`Env.role`;
+  `lift.fold`'s `_role_test` makes `auth.role() = 'x'` a constant); test in `tests/templates/test_adopt.py`.
 - D86 (#54): an inclusion into a relation with a condition (`restrict deferred` required) compiles to two
   deferred constraint triggers (`compile/fk.py`: `<name>` reads the target row `FOR SHARE`, `<name>_target`
   refuses a demotion), owned by `mls_internal`; never assumed by the proofs; preflight counts existing

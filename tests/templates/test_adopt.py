@@ -1082,6 +1082,32 @@ def test_a_policy_with_no_expression_imports_as_granting_nothing(brownfield):
     check_spec(Spec.model_validate(res.spec))
 
 
+def test_a_policy_reading_auth_role_imports_per_role(brownfield):
+    """#86 (nextbase): `author_id = auth.uid() or auth.role() = 'service_role'` to public.  Supabase's
+    auth.role() is the caller's role, so each role's rule reads the test as a constant: the owner
+    test for anon and authenticated (service_role is the trusted role, no app role)."""
+    with brownfield.transaction(force_rollback=True):
+        brownfield.execute("""
+            create function auth.role() returns text language sql stable as $f$
+              select nullif(current_setting('request.jwt.claim.role', true), '')::text $f$;
+            create table posts (id int primary key, author_id uuid, published boolean not null);
+            alter table posts enable row level security;
+            grant select on posts to authenticated, anon;
+            create policy posts_read on posts for select using (
+              published or (auth.uid() = author_id) or (auth.role() = 'service_role'::text));
+            create policy posts_signed_in on posts for update using (auth.role() = 'authenticated');""")
+        res = import_schema(brownfield)
+    rules = {(r["name"], r["role"]): r for r in res.spec["rules"] if r.get("table") == "posts"}
+    for name in ("posts_read", "posts_read_authenticated"):
+        role = "authenticated" if name.endswith("authenticated") else "anon"
+        assert "opaque" not in json.dumps(rules[(name, role)]), rules[(name, role)]
+        assert "service_role" not in json.dumps(rules[(name, role)])
+    assert rules[("posts_signed_in", "anon")]["using"] == {"lit": False}
+    assert rules[("posts_signed_in_authenticated", "authenticated")]["using"] == {"lit": True}
+    assert any("posts_read on posts reads auth.role()" in n for n in res.notes), res.notes
+    check_spec(Spec.model_validate(res.spec))
+
+
 def test_a_helper_in_another_schema_is_read_inline(helpers):
     """#80 (midday): `team_id in (select private.my_teams() as my_teams)`, a set-returning definer
     helper in a schema of its own.  Import reads it as the membership it selects, the table

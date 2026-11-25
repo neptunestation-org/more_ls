@@ -638,6 +638,8 @@ class Env:
     governed: set[str]
     keys: dict[str, list[frozenset[str]]] = field(default_factory=dict)  # table -> its PK and unique column sets
     roles: list[str] = field(default_factory=list)
+    # #86: the role of the rule being lifted, when a policy reads Supabase's auth.role()
+    role: str | None = None
     relations: dict[str, tuple[str, str, str]] = field(default_factory=dict)
     # D56: composed relations, name -> (base relation, ((table, key, value), ...)), and the name a
     # chain of n hops ending on a table should get (the compiler's hop policies carry it)
@@ -757,13 +759,40 @@ def _const(node: Node) -> Node | None:
     return node if isinstance(node, (Str, Num, Bool, Null)) else None
 
 
-def fold(node: Node, never_null: Callable[[Node], bool] = lambda _: False) -> Node:
+def _role_call(node: Node) -> bool:
+    """#86: Supabase's `auth.role()`, bare, cast, or in an InitPlan `(select auth.role())`."""
+    while isinstance(node, Cast) or (isinstance(node, Select) and node.table is None):
+        node = node.x if isinstance(node, Cast) else node.target
+    return isinstance(node, Func) and node.name == "auth.role" and not node.args
+
+
+def _role_test(node: Node, role: str) -> Bool | None:
+    """#86: `auth.role() = 'x'` (`<>`, `= ANY (ARRAY[..])`, `<> ALL`) for a caller of `role`, or None."""
+    if isinstance(node, Cmp) and node.op in ("=", "<>"):
+        for a, b in ((node.l, node.r), (node.r, node.l)):
+            c = _const(b)
+            if _role_call(a) and isinstance(c, Str):
+                return Bool((c.value == role) == (node.op == "="), start=node.start, end=node.end)
+    if isinstance(node, AnyOf) and _role_call(node.l) and (node.quant, node.op) in (("any", "="), ("all", "<>")):
+        arr = node.arr.x if isinstance(node.arr, Cast) else node.arr
+        if isinstance(arr, ArrayLit) and all(isinstance(_const(x), Str) for x in arr.items):
+            hit = any(_const(x).value == role for x in arr.items)
+            return Bool(hit == (node.quant == "any"), start=node.start, end=node.end)
+    return None
+
+
+def fold(node: Node, never_null: Callable[[Node], bool] = lambda _: False, role: str | None = None) -> Node:
     """#64: what an inlined helper's body leaves constant once the call's arguments are in place:
     `<constant> IS [NOT] NULL` is TRUE or FALSE, and `and` / `or` drop their TRUE / FALSE parts (a
     FALSE part makes an `and` FALSE, a TRUE one an `or` TRUE, whatever the others are, UNKNOWN
     included).  basejump's `(role = r or r is null)` is `role = 'owner'` for r = 'owner' and TRUE for
     r = NULL.  #66: so is the test of a term `never_null` says is never NULL (a context value: the
     model's assumption, the adapter's).  Anything else is returned as it is."""
+    if role is not None and (test := _role_test(node, role)) is not None:
+        return test  # #86: the caller's role, a constant in a rule of one role
+    if isinstance(node, Not):
+        x = fold(node.x, never_null, role)
+        return Bool(not x.value, start=node.start, end=node.end) if isinstance(x, Bool) else node
     if isinstance(node, IsNull):
         c = _const(node.x)
         if c is not None:
@@ -772,7 +801,7 @@ def fold(node: Node, never_null: Callable[[Node], bool] = lambda _: False) -> No
             return Bool(node.negated, start=node.start, end=node.end)
         return node
     if isinstance(node, (And, Or)):
-        items = [fold(x, never_null) for x in node.items]
+        items = [fold(x, never_null, role) for x in node.items]
         absorb = isinstance(node, Or)  # TRUE absorbs an or, FALSE an and
         if any(isinstance(x, Bool) and x.value == absorb for x in items):
             return Bool(absorb, start=node.start, end=node.end)
@@ -860,7 +889,7 @@ class Lifter:
             return {"opaque": self.opaque(self.src_text, node.start, node.end)}
 
     def pred(self, node: Node, negated: bool) -> dict:
-        node = fold(node, self.never_null)
+        node = fold(node, self.never_null, self.env.role)
         if isinstance(node, Bool):
             return {"lit": node.value}
         if isinstance(node, And):
