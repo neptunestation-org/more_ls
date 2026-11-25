@@ -315,3 +315,14 @@ The takeover of GUIDE §3 replayed on `starter_schema.sql` with data, as `postgr
 - `mls generate --skeleton` wrote the whole rules section, so the imported CHECKs were kept only
   if the model restated them; since #26 they are fixed rules, shown to both passes and added
   after the model's.
+
+## A UTC wall-clock default is not now() (#88; PG 16)
+
+nextbase (and many Supabase schemas) declare `created_at timestamptz default timezone('utc', now())`.
+`timezone('utc', now())` is a `timestamp without time zone` (the UTC wall clock); assigning it to a
+`timestamptz` column converts it with the session's `TimeZone`.  Measured
+(`tests/templates/test_adopt.py::test_a_utc_wall_clock_default_is_not_now`): under
+`America/New_York` the stored value differs from `now()`, under `UTC` it equals it.  Supabase runs
+in UTC by default, but a role, database or session setting changes that, so import does not read
+the default as `now()` (it would be unsound outside UTC) and its note names the fix, `default now()`.
+

@@ -125,7 +125,10 @@ column's type, `{"ctx": "now"}` for `now()`), or `"fresh"` for a value the datab
 (a uuid generator or a sequence).  Terse: `is_verified bool not null default false`,
 `user_id uuid not null default @uid`, `id uuid not null default fresh`.  The insert proofs count on
 them (§12.8); `mls import` reads them from the catalog, and `drift` reports a declared default the
-database no longer has.  An owned table declares none.
+database no longer has.  An owned table declares none.  `timezone('utc', now())` on a
+`timestamptz` column is not read as `now()`: Postgres turns that UTC wall-clock time back into an
+instant with the session's time zone, so it is `now()` only for a session in UTC; the import note
+gives the fix, `set default now()`.
 
 **Constants** (`{"const": v}`): a JSON integer, string or boolean.  An integer constant must be
 within the range of the type it is compared with (`constant 2147483648 is out of range for int`,

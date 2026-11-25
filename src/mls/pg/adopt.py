@@ -65,8 +65,8 @@ APP_SETTING = re.compile(r"current_setting\('app\.([a-z_][a-z0-9_]*)'(?:::text)?
 
 
 USER_TABLE = "auth.users"  # what a membership table's user column refers to on Supabase
-
-
+# #88: `timezone('utc', now())`, as the catalog deparses it
+_UTC_NOW = re.compile(r"timezone\('utc'(::text)?,\s*(now\(\)|CURRENT_TIMESTAMP)\)", re.IGNORECASE)
 
 def _hop_base(env, table: str, using: str) -> tuple | None:
     """The base relation (table, key, value, condition key) a hop visibility policy's chain starts
@@ -475,7 +475,14 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 continue
             # an identity column generates its value (`fresh`); a generated column is never inserted
             d = "fresh" if c["default"] == "fresh" else read_default(c["default"], name, c["name"], env)
-            if d is None:
+            if d is None and _UTC_NOW.fullmatch(c["default"].strip()):
+                # #88: the UTC wall clock, converted back to an instant with the session's time zone
+                notes.append(f"column {name}.{c['name']}: its default {c['default']} is not read: it is now() only "
+                             f"when the session's time zone is UTC, and shifted by the session's offset otherwise "
+                             f"(fix: `alter table {name} alter column {c['name']} set default now()`, the same "
+                             f"instant in every time zone); until then an insert that leaves it out is admitted "
+                             f"for no row in the proofs")
+            elif d is None:
                 notes.append(f"column {name}.{c['name']}: its default {c['default']} is not read (a constant, now(), "
                              f"a context value or a generated value is): an insert that leaves it out is "
                              f"admitted for no row in the proofs")

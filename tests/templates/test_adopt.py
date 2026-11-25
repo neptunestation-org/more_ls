@@ -1108,6 +1108,28 @@ def test_a_policy_reading_auth_role_imports_per_role(brownfield):
     check_spec(Spec.model_validate(res.spec))
 
 
+def test_a_utc_wall_clock_default_is_not_now(brownfield):
+    """#88 (nextbase): `timestamptz default timezone('utc', now())` stores now() only when the
+    session's time zone is UTC; under another it is shifted by the offset, so import does not read
+    it as now() and says why, with the fix."""
+    with brownfield.transaction(force_rollback=True):
+        brownfield.execute("""
+            create table stamped (id int primary key, at timestamptz not null default timezone('utc', now()),
+                                  plain timestamptz not null default now());
+            alter table stamped enable row level security;""")
+        brownfield.execute("set local time zone 'America/New_York'")
+        shifted, same = brownfield.execute(
+            "insert into stamped (id) values (1) returning at <> now(), plain = now()").fetchone()
+        brownfield.execute("set local time zone 'UTC'")
+        utc = brownfield.execute("insert into stamped (id) values (2) returning at = now()").fetchone()[0]
+        res = import_schema(brownfield)
+    assert shifted and same and utc
+    cols = res.spec["tables"]["stamped"]["columns"]
+    assert "default" not in cols["at"] and cols["plain"]["default"] == {"ctx": "now"}, cols
+    assert any("stamped.at" in n and "only when the session's time zone is UTC" in n and "set default now()" in n
+               for n in res.notes), res.notes
+
+
 def test_a_helper_in_another_schema_is_read_inline(helpers):
     """#80 (midday): `team_id in (select private.my_teams() as my_teams)`, a set-returning definer
     helper in a schema of its own.  Import reads it as the membership it selects, the table
