@@ -25,7 +25,8 @@ class Scenario:
     def to_markdown(self) -> str:
         lines = []
         if self.context:
-            lines.append("- context: " + ", ".join(f"{k} = {v}" for k, v in self.context.items()))
+            lines.append("- context: " + ", ".join(f"{k} not set" if v is None else f"{k} = {v}"
+                                                   for k, v in self.context.items()))
         for name, r in self.rows.items():
             vals = ", ".join(f"{k} = {v}" for k, v in r["values"].items())
             lines.append(f"- {name} ({r['table']}): {vals}")
@@ -80,6 +81,9 @@ def render_scenario(spec: Spec, ob: Obligation, model: Model) -> Scenario:
             ty = spec.context_type(name)
             universe.setdefault(ty, set()).add(v)
             sc.context[name] = _render(spec, ty, v, consts, now)
+        cv = spec.identity.context.get(name)
+        if cv is not None and cv.optional and model.var(f"ctx.{name}.null", Sort.BOOL):
+            sc.context[name] = None  # #78: a caller who lacks the value
     tested: dict[tuple[str, str], set[str]] = {}  # D88: per array column, the labels the obligation tested
     for e in ob.encoders:
         for k, xs in e.array_labels.items():

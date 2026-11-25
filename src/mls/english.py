@@ -228,7 +228,8 @@ def scenario(spec: Spec, sc) -> str:
     """One paragraph: who, which rows, which memberships."""
     parts = []
     if sc.context:
-        ctx = ", ".join(f"{ctx_phrase(spec, k)} is {_v(v)}" for k, v in sc.context.items())
+        ctx = ", ".join(f"{ctx_phrase(spec, k)} is not set" if v is None else f"{ctx_phrase(spec, k)} is {_v(v)}"
+                        for k, v in sc.context.items())
         parts.append(ctx)
     for name, r in sc.rows.items():
         vals = ", ".join(f"{k} = {_v(v)}" for k, v in r["values"].items())

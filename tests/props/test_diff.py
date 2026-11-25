@@ -216,3 +216,18 @@ def test_a_value_optional_in_one_version_only_is_compared_for_callers_who_have_i
     assert any("may be unset in the new version only" in n for n in res.notes), res.notes
     narrowed = check_spec(parse(SIGNED_OUT.split("properties")[0] % (" optional", "id = @uid")))
     assert any(a.table == "users" and a.direction == "denied" for a in diff(old, narrowed).access_changes)
+
+
+def test_an_example_says_when_the_caller_lacks_an_optional_value():
+    """#78 (graphile/starter): reading users narrowed from everyone to signed-in callers.  The
+    only caller who loses the read is one with no current user, and the example says so."""
+    from tests.props.test_properties import SIGNED_OUT
+    from mls.spec.syntax import parse
+
+    old = check_spec(parse(SIGNED_OUT.split("properties")[0] % (" optional", "true")))
+    new = check_spec(parse(SIGNED_OUT.split("properties")[0] % (" optional", "not @uid is null")))
+    res = diff(old, new)
+    denied = [a for a in res.access_changes if a.table == "users" and a.direction == "denied"]
+    assert denied and denied[0].scenario.context.get("uid", "absent") is None, denied
+    text = to_markdown(old, new, res)
+    assert "is not set" in text, text

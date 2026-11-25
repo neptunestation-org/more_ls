@@ -1324,7 +1324,8 @@ the property is false.  Read it as a story.
     - admin_of = {∅}                             the facts in each relation; {∅} is empty
     - member_of = {(uuid#2, 3)}
 
-`uuid#0`, `uuid#1` and so on are distinct, otherwise arbitrary UUIDs.  `None` is NULL.  Columns
+`uuid#0`, `uuid#1` and so on are distinct, otherwise arbitrary UUIDs.  `None` is NULL.  A
+context value declared `optional` reads `uid not set` for a caller who lacks it.  Columns
 the solver did not need are usually left out.  `mls diff` and the LLM loop print the same
 scenario as an English sentence.
 
