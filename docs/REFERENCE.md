@@ -1248,7 +1248,9 @@ schema comes first on the search path and the live schema (`--schema`) after it,
 block's unqualified call of one of the schema's functions resolves.  A role the spec needs and the
 server lacks (before the first deploy, the helpers' owner `mls_internal`) is reported `missing`;
 the shadow creates it inside the rolled-back transaction, which needs CREATEROLE, and without it
-drift stops with an error naming the role.  Items are
+drift stops with an error naming the role.  Once deployed, the shadow hands its helpers to
+`mls_internal` as the deploy does, so a connection that may not act as that role (the tables'
+owner, say) stops with an error too: run drift as the role that runs the deploy.  Items are
 `<kind>: <object> (expected ..., found ...)` with kinds `missing`, `unexpected`, `differs`,
 `hardening` (drift; the bypass paths of §5 among them), `assumed` (hardening the spec's `assume` accounts for, §5) and `foreign`
 (an object on an adopted table that the spec does not declare and that cannot grant access: a

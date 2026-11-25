@@ -97,6 +97,18 @@ def shadow_snapshot(conn: psycopg.Connection, spec: Spec, script: Script,
             if r == INTERNAL_ROLE:  # the helpers' owner: transferring them needs the membership
                 cur.execute(psql.SQL("grant {} to {}").format(psql.Identifier(r), psql.Identifier(
                     cur.execute("select current_user").fetchone()[0])))
+        if INTERNAL_ROLE not in missing_roles and any(f"owner to {q(INTERNAL_ROLE)}" in st.sql
+                                                      for st in script.statements):
+            # the shadow hands its helpers to their owner as the deploy does, which needs SET ROLE on it (#79)
+            priv = "SET" if conn.info.server_version >= 160000 else "MEMBER"
+            user, able = cur.execute(
+                "select current_user, case when exists (select from pg_roles where rolname = %s) "
+                "then pg_has_role(current_user, %s, %s) else true end",
+                (INTERNAL_ROLE, INTERNAL_ROLE, priv)).fetchone()
+            if not able:
+                raise DriftError(f"{user} may not act as {INTERNAL_ROLE}, which owns the spec's helper functions, so "
+                                 f"the spec cannot be deployed into the shadow schema (fix: run drift as the role "
+                                 f"that runs the deploy, or as a superuser)")
         for name, labels in spec.enums.items():  # the stand-ins' types, named as the live ones print
             live_labels = cur.execute(
                 """select array(select e.enumlabel from pg_enum e where e.enumtypid = t.oid order by e.enumsortorder)

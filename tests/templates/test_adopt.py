@@ -15,6 +15,7 @@ import pytest
 from mls.cli import main
 from mls.compile import compile_spec
 from mls.errors import SpecError
+from mls.identity.base import get_adapter
 from mls.pg.adopt import import_schema, verify_adopted
 from mls.pg.drift import DriftError, drift
 from mls.pg.harness import Harness, run_differential
@@ -767,6 +768,34 @@ def test_drift_of_an_import_mls_never_deployed(undeployed):
             drift(undeployed, spec, compile_spec(spec))
     finally:
         undeployed.execute("reset role")
+
+
+def test_drift_as_a_role_that_cannot_act_as_the_helpers_owner(pg_dsn):
+    """#79 (graphile/starter): after a deploy, the helpers' owner exists, and the shadow transfers
+    its helpers to it as the deploy did; a connection that may not act as that role (the tables'
+    owner, say) gets an error naming the role and the fix, not a traceback."""
+    dbname = "mls_drift_nonmember"
+    with psycopg.connect(pg_dsn, autocommit=True) as admin:
+        admin.execute(f'drop database if exists "{dbname}"')
+        admin.execute(f'create database "{dbname}"')
+    dsn = psycopg.conninfo.make_conninfo(pg_dsn, dbname=dbname)
+    try:
+        spec = specs.lookup_spec()
+        script = compile_spec(spec)
+        with psycopg.connect(dsn) as conn:
+            for st in get_adapter(spec).harness_setup_sql(spec)[:3]:  # auth.jwt(), auth.uid(); no grants yet
+                conn.execute(st)
+            conn.execute(script.sql())
+            conn.commit()
+            assert drift(conn, spec, script).ok
+            conn.execute("do $$ begin if not exists (select from pg_roles where rolname = 'mls_not_internal') then "
+                         "create role mls_not_internal; end if; end $$; "
+                         f'grant create on database "{dbname}" to mls_not_internal; set role mls_not_internal')
+            with pytest.raises(DriftError, match="mls_not_internal may not act as mls_internal.*fix: run drift as"):
+                drift(conn, spec, script)
+    finally:
+        with psycopg.connect(pg_dsn, autocommit=True) as admin:
+            admin.execute(f'drop database if exists "{dbname}"')
 
 
 def test_a_cascading_key_imports_as_a_cascade_inclusion_and_a_clash_is_refused(brownfield):
