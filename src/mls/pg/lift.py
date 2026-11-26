@@ -1097,13 +1097,22 @@ class Lifter:
                     keys.append((i, k, c))
                 else:
                     rest.append(c)  # D61: a condition on the relation's own rows, or unreadable
-            (key_col, key_term), more = self.pick_key(keys)
-            # #63: no key filter: the parent rows that meet a condition, correlated on a key of their own
-            is_set = key_col is None and val_col is not None and frozenset((val_col,)) in self.env.keys.get(rel_table, [])
-            if (key_col is None and not is_set) or val_col is None:
-                raise Unreadable("EXISTS without both a key filter and a correlation on the row")
-            where = self.condition(more + rest, rel_table, sel.table_alias)
-            value_json = {"col": outer_col}
+            ctx_keys = [k for k in keys if "ctx" in k[1]]
+            const_keys = [k for k in keys if "const" in k[1]]
+            if val_col is None and len(ctx_keys) == 1 and len(const_keys) == 1 and len(keys) == 2:
+                # #90: no correlation, a context value and a constant: a fact of the caller alone
+                # (`authorize('channels.delete')`: the caller's role holds that permission)
+                (key_col, key_term, _), (val_col, value_json, _) = ctx_keys[0], const_keys[0]
+                where = self.condition(rest, rel_table, sel.table_alias)
+            else:
+                (key_col, key_term), more = self.pick_key(keys)
+                # #63: no key filter: the parent rows that meet a condition, correlated on a key of their own
+                is_set = key_col is None and val_col is not None and \
+                    frozenset((val_col,)) in self.env.keys.get(rel_table, [])
+                if (key_col is None and not is_set) or val_col is None:
+                    raise Unreadable("EXISTS without both a key filter and a correlation on the row")
+                where = self.condition(more + rest, rel_table, sel.table_alias)
+                value_json = {"col": outer_col}
         else:
             (rel_table, key_col, val_col), key_term, hops, where = self.chain(sel)
             value_json, _ = self.term(value_node)
@@ -1697,6 +1706,27 @@ def function_body(src: str) -> str | None:
     return m.group(1)
 
 
+_COUNT_INTO = re.compile(
+    r"^\s*declare\s+(\w+)\s+(?:int|integer|bigint|int4|int8)\s*;\s*begin\s+select\s+count\s*\(\s*(?:\*|1)\s*\)\s+"
+    r"(?:into\s+(?P<v1>\w+)\s+from\s+(?P<a>.+?)|from\s+(?P<b>.+?)\s+into\s+(?P<v2>\w+))\s*;\s*"
+    r"return\s+(?P<r>\w+)\s*(?:>\s*0|>=\s*1|<>\s*0|!=\s*0)\s*;\s*end\s*;?\s*$", re.IGNORECASE | re.DOTALL)
+
+
+def count_body(src: str) -> str | None:
+    """#90: Supabase's documented RBAC helper, `authorize()`, is plpgsql: it counts the matching rows
+    into a variable and returns whether the count is positive.  That body, and only that body, is
+    the EXISTS it means: `exists (select 1 from <rest>)`; anything else is None."""
+    src = re.sub(r"--[^\n]*", "", src)
+    m = _COUNT_INTO.match(src)
+    if m is None:
+        return None
+    var, into = m.group(1).lower(), (m.group("v1") or m.group("v2")).lower()
+    rest = m.group("a") or m.group("b")
+    if into != var or m.group("r").lower() != var or ";" in rest or re.search(r"\b(group|having|limit)\b", rest, re.I):
+        return None
+    return f"exists (select 1 from {rest.strip()})"
+
+
 def split_args(text: str) -> list[str]:
     """A comma-separated list of SQL expressions (a function's argument defaults, as
     `pg_get_expr(proargdefaults)` prints them), split at its top-level commas."""
@@ -1802,11 +1832,14 @@ _FROM_ALIAS = re.compile(r'\b(from|join)\s+("?[a-z_][a-z0-9_]*"?)\s+(?:as\s+)?(?
 def _unalias(expr: str, alias: str) -> str:
     """#64: a helper body's own table alias (`from account_user wu where wu.user_id = ...`) taken
     out and its columns qualified with `alias`, the one the inlined FROM gets to say how it reads
-    (`mls_definer`, `mls_inline`)."""
+    (`mls_definer`, `mls_inline`); #90: so are columns qualified with the bare table's name."""
     for m in list(_FROM_ALIAS.finditer(expr)):
         table, own = m.group(2), m.group(3)
         expr = re.sub(rf'(?<![\w."]){re.escape(own)}\.', f"{alias}.", expr)
         expr = expr.replace(m.group(0), f"{m.group(1)} {table}", 1)
+    for m in list(_FUNC_FROM.finditer(expr)):  # #90: `from role_permissions where role_permissions.role = ..`
+        table = m.group(2).rsplit(".", 1)[-1].strip('"')
+        expr = re.sub(rf'(?<![\w."]){re.escape(table)}\.(?=[a-z_"])', f"{alias}.", expr)
     return expr
 
 

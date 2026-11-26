@@ -851,3 +851,34 @@ def test_auth_role_is_the_rules_role(text, role, expected):
 def test_auth_role_without_a_role_is_not_read():
     r, _ = do("(auth.role() = 'service_role'::text)")
     assert r.kind != "lifted"
+
+
+AUTHORIZE = """
+declare
+  bind_permissions int;
+begin
+  select count(*)
+  from public.role_permissions
+  where role_permissions.permission = authorize.requested_permission
+    and role_permissions.role = (auth.jwt() ->> 'user_role')::public.app_role
+  into bind_permissions;
+
+  return bind_permissions > 0;
+end;
+"""
+
+
+def test_the_counting_helper_is_its_exists():
+    """#90: Supabase's documented `authorize()` counts matching rows into a variable and returns
+    whether the count is positive: the EXISTS it means.  Any other plpgsql body is not read."""
+    from mls.pg.lift import count_body
+
+    assert count_body(AUTHORIZE) == (
+        "exists (select 1 from public.role_permissions\n  where role_permissions.permission = "
+        "authorize.requested_permission\n    and role_permissions.role = (auth.jwt() ->> 'user_role')::public.app_role)")
+    assert count_body(AUTHORIZE.replace("count(*)\n  from public.role_permissions", "count(*) into bind_permissions "
+                                        "from public.role_permissions").replace("\n  into bind_permissions;", ";")) \
+        is not None
+    for other in (AUTHORIZE.replace("> 0", "> 1"), AUTHORIZE.replace("return bind_permissions", "return other"),
+                  AUTHORIZE.replace("begin", "begin perform 1;"), "begin return true; end;"):
+        assert count_body(other) is None, other

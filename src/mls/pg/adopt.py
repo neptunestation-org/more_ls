@@ -45,7 +45,7 @@ from mls.compile.internal import INTERNAL_ROLE
 from mls.errors import MlsError, SpecError
 from mls.pg.catalog import _strip_schema, bypass_paths
 from mls.pg.lift import (
-    CAST_TO_MLS, Env, Unreadable, read_default, function_body, inline_functions, split_args, inline_lookups, restore_calls, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr, guard_parts, inclusion_parts,
+    CAST_TO_MLS, Env, Unreadable, read_default, function_body, count_body, inline_functions, split_args, inline_lookups, restore_calls, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr, guard_parts, inclusion_parts,
     mls_type,
 )
 from mls.pg.lift import IsTrue as _IsTrue
@@ -156,10 +156,11 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
         cur.execute("""select case when n.nspname = %(schema)s then p.proname else n.nspname || '.' || p.proname end,
                               coalesce(p.proargnames, '{}'), p.pronargs, p.prosrc,
                               oidvectortypes(p.proargtypes), md5(p.prosrc), p.prosecdef,
-                              p.provolatile = 'v', p.pronargdefaults, pg_get_expr(p.proargdefaults, 0), p.proretset
+                              p.provolatile = 'v', p.pronargdefaults, pg_get_expr(p.proargdefaults, 0), p.proretset,
+                              l.lanname
                        from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_language l on l.oid = p.prolang
                          join pg_roles o on o.oid = p.proowner
-                       where n.nspname not in ('pg_catalog', 'information_schema') and l.lanname = 'sql'
+                       where n.nspname not in ('pg_catalog', 'information_schema') and l.lanname in ('sql', 'plpgsql')
                          and not exists (select from pg_depend d where d.classid = 'pg_proc'::regclass
                                          and d.objid = p.oid and d.deptype = 'e')
                          and (not p.proretset and p.prorettype = 'bool'::regtype
@@ -174,8 +175,10 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
                          and (select count(*) from pg_proc q where q.proname = p.proname and q.pronamespace = p.pronamespace) = 1""",
                     {"schema": schema})
         cat["functions"] = {}
-        for fname, argnames, nargs, src, types, digest, definer, volatile, ndefaults, defaults, retset in cur.fetchall():
-            expr = function_body(_strip_schema(src, schema))  # #64: `basejump.account_user` is the table
+        for fname, argnames, nargs, src, types, digest, definer, volatile, ndefaults, defaults, retset, lang \
+                in cur.fetchall():
+            # #64: `basejump.account_user` is the table; #90: a plpgsql one only as the counting helper
+            expr = (function_body if lang == "sql" else count_body)(_strip_schema(src, schema))
             if expr is not None:
                 expr = _qualified_params(expr, fname, (list(argnames) + [""] * nargs)[:nargs])
                 given = split_args(_strip_schema(defaults, schema)) if defaults else []

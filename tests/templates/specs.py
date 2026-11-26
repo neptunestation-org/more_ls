@@ -357,6 +357,50 @@ def role_claim_spec() -> Spec:
     return make(parse(ROLE_CLAIM).model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
+GRANTS = """mls 0.1
+identity supabase { uid: auth.uid uuid; user_role: jwt.claims.user_role enum app_role optional }
+roles authenticated
+enum app_role ('admin', 'moderator', 'member', 'guest')
+enum app_permission ('channels.delete', 'messages.delete', 'channels.edit', 'messages.edit', 'users.ban', 'users.mute', 'invites.send', 'reports.read')
+
+table role_permissions adopted {
+  id bigint not null,
+  role enum app_role not null,
+  permission enum app_permission not null;
+  primary_key (id);
+  unique (role, permission)
+}
+
+table channels adopted {
+  id bigint not null,
+  created_by uuid not null;
+  primary_key (id)
+}
+
+relation role_grants = role_permissions(role, permission)
+
+rules {
+  R1 policy read_channels on channels: authenticated select permissive using true
+  R2 policy remove_channels on channels: authenticated delete permissive using created_by = @uid or role_grants(@user_role, 'channels.delete')
+}
+
+properties {
+  P1 must_allow channels authenticated delete: role_grants(@user_role, 'channels.delete')
+}
+"""
+
+
+def grants_spec() -> Spec:
+    """#90 (Slack clone): Supabase's documented `authorize('channels.delete')`, the caller's role (an
+    enum claim) holding a permission in role_permissions: a membership whose value is a constant.
+    The harness draws the grant rows (32 pairs for 25 rows, so some role lacks the permission) and the
+    claim; the mutation takes any permission of the caller's role for the one named, which a role
+    holding others but not this one catches."""
+    from mls.spec.syntax import parse
+
+    return make(parse(GRANTS).model_dump(mode="json", by_alias=True, exclude_none=True))
+
+
 def citext_spec() -> Spec:
     """#73: `orgs` adopted with citext columns compared with constants in another case than the
     data has (the harness writes the spec's constants lower-, upper- and as-cased): 'Public'

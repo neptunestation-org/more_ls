@@ -47,3 +47,4 @@ class Mutation(str, Enum):
     GUARD_ANY_ROW = "guard_any_row"                  # a column guard that limits every row, its condition ignored
     GUARD_SORTS_LAST = "guard_sorts_last"            # #58: a guard trigger named to fire after the table's own
     IDENT_UNQUOTED = "ident_unquoted"                # a predicate's column unquoted, so a mixed-case name folds
+    MEMBER_CONST_ANY_VALUE = "member_const_any_value"  # #90: a constant-value membership met by any value

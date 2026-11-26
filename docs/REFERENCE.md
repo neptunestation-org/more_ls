@@ -532,6 +532,9 @@ compiles the same way.
 relation's value type, nullable or not.  UNKNOWN if `v` is NULL, so a policy denies the row and
 a CHECK passes it: a row with no tenant is nobody's.  Compiled as `v = any(array(select value from <table> where key = <k>))`; over a
 composed relation, one nested `= any(array(select ...))` per hop, innermost the base relation.
+When `k` is a context value or a constant, `v` may be a constant: a fact about the caller alone,
+the same for every row (`role_grants(@user_role, 'channels.delete')`: the caller's role holds that
+permission).  An enum key or value column takes a label, or a context value of its enum type.
 
 **`{"in_group": {"hierarchy": H, "key": k, "value": v}}`**: the group `v` is one of the key's
 groups in `H` or lies below one, within `max_depth`.  `k` is a context value, `v` a column of

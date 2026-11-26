@@ -39,6 +39,7 @@ ROUND_TRIP = {
     "optional": specs.optional_spec,  # #75: an optional value's `IS NULL` reads back, not folded
     "citext": specs.citext_spec,  # #73: citext columns and their constants (`'x'::citext`) read back
     "role_claim": specs.role_claim_spec,  # #89: a claim cast to an enum type reads back as an enum value
+    "grants": specs.grants_spec,  # #90: a membership with a constant value reads back
     "defaults": specs.defaults_spec,  # #76: the defaults read back (auth.uid(), false, now(), gen_random_uuid())
     "bigint": specs.bigint_spec,
     "pg_roles": specs.pg_roles_spec,

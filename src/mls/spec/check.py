@@ -475,8 +475,13 @@ class Checker:
                 self.err(f"{path}.member.key", "the membership key must be a context value or "
                                                "constant (a column key is a per-row correlated "
                                                "subquery)", "use {\"ctx\": name}")
-            if not isinstance(m.value, (ColRef, OldRef, NewRef)):
-                self.err(f"{path}.member.value", "the membership value must be a column",
+            # #90: a constant value with a key that is no column: a fact of the caller alone, the
+            # same for every row (Supabase's authorize('channels.delete'): the caller's role has it)
+            const_value = isinstance(m.value, Const) and not isinstance(m.key, (ColRef, OldRef, NewRef)) \
+                and m.key is not None
+            if not isinstance(m.value, (ColRef, OldRef, NewRef)) and not const_value:
+                self.err(f"{path}.member.value", "the membership value must be a column, or a constant when the "
+                                                 "key is a context value or constant",
                          "use {\"col\": name}")
             ends = self.relation_ends(m.relation)
             if ends is None:
@@ -485,9 +490,16 @@ class Checker:
             rkt, rvt = self.col_type(kt_, kc), self.col_type(vt_, vc)
             if rkt == "enum":
                 # an enum key column (D59): the key is one of its labels, e.g. the open sessions,
-                # `sessions(status, id)` with key 'IN_PROGRESS' (D60)
-                labels = self.spec.enums.get(self.spec.tables[kt_].columns[kc].enum or "", [])
-                if not (isinstance(m.key, Const) and isinstance(m.key.const, str)):
+                # `sessions(status, id)` with key 'IN_PROGRESS' (D60); or a context value of its type (#90)
+                key_enum = self.spec.tables[kt_].columns[kc].enum
+                labels = self.spec.enums.get(key_enum or "", [])
+                if isinstance(m.key, CtxRef) and kt == "enum":
+                    if self.enum_name(m.key, scope) != key_enum:
+                        self.err(f"{path}.member.key", f"context value '{m.key.ctx}' is enum "
+                                                       f"{self.enum_name(m.key, scope)}, relation key {kt_}.{kc} "
+                                                       f"is enum {key_enum}",
+                                 f"use a context value of type {key_enum}, or one of its labels")
+                elif not (isinstance(m.key, Const) and isinstance(m.key.const, str)):
                     self.err(f"{path}.member.key", f"relation key {kt_}.{kc} is an enum column: the key "
                                                    f"must be one of its labels",
                              f"one of: {', '.join(repr(x) for x in labels)}")
@@ -498,7 +510,14 @@ class Checker:
             if kt is not None and rkt is not None and not comparable(kt, rkt):
                 self.err(f"{path}.member.key", f"key type {kt} does not match relation key "
                                                f"{kt_}.{kc}: {rkt}")
-            if vt is not None and rvt is not None and not comparable(vt, rvt):
+            if rvt == "enum" and const_value:  # #90: a label of the value column's enum type
+                labels = self.spec.enums.get(self.spec.tables[vt_].columns[vc].enum or "", [])
+                if not isinstance(m.value.const, str) or m.value.const not in labels:
+                    self.err(f"{path}.member.value", f"{m.value.const!r} is not a label of {vt_}.{vc}'s enum type",
+                             f"one of: {', '.join(repr(x) for x in labels)}")
+                vt = None
+            if vt is not None and rvt is not None and not comparable(vt, rvt) \
+                    and not (const_value and {vt, rvt} == {"uuid", "text"}):
                 self.err(f"{path}.member.value", f"value type {vt} does not match relation value "
                                                  f"{vt_}.{vc}: {rvt}")
             return

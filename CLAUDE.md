@@ -241,6 +241,10 @@ union member the renderer does not cover.
 - D100 (#89): `ContextVar.enum` (a claim of an enum type); `check.enum_name` answers for it,
   `enum_row_axioms` bounds it to its labels, `identity.base.ctx_type_sql` casts it; import reads
   the cast (optional); fixture `specs.role_claim_spec`, mutation `IN_DROP_LAST`; Lean known gap.
+- D101 (#90): a membership's value may be a constant when its key is no column (`check`'s
+  `const_value`; `role_grants(@user_role, 'channels.delete')`); import reads Supabase's plpgsql
+  `authorize()` (`lift.count_body`, uncorrelated EXISTS in `Lifter._member`); fixture
+  `specs.grants_spec`, mutation `MEMBER_CONST_ANY_VALUE`.
 - D99 (#86): on Supabase, import lifts a policy that reads `auth.role()` once per role (`Env.role`;
   `lift.fold`'s `_role_test` makes `auth.role() = 'x'` a constant); test in `tests/templates/test_adopt.py`.
 - D86 (#54): an inclusion into a relation with a condition (`restrict deferred` required) compiles to two

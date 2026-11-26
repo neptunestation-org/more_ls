@@ -1149,3 +1149,48 @@ def test_an_enum_claim_is_one_of_its_labels_or_unset():
 
     v = verdicts(check_spec(parse(ROLE_CLAIM)))
     assert v == {"P1": "PROVED", "P2": "PROVED", "P3": "REFUTED"}, v
+
+
+GRANTS = """mls 0.1
+identity supabase { uid: auth.uid uuid; user_role: jwt.claims.user_role enum app_role optional }
+roles authenticated
+enum app_role ('admin', 'moderator')
+enum app_permission ('channels.delete', 'messages.delete')
+
+table role_permissions adopted {
+  id bigint not null,
+  role enum app_role not null,
+  permission enum app_permission not null;
+  primary_key (id);
+  unique (role, permission)
+}
+
+table channels adopted {
+  id bigint not null,
+  created_by uuid not null;
+  primary_key (id)
+}
+
+relation role_grants = role_permissions(role, permission)
+
+rules {
+  R1 policy remove on channels: authenticated delete permissive using created_by = @uid or role_grants(@user_role, 'channels.delete')
+  R2 policy read_grants on role_permissions: authenticated select permissive using role = @user_role
+}
+
+properties {
+  P1 custom channels authenticated delete new: created_by = @uid or not @user_role is null
+  P2 must_allow channels authenticated delete: role_grants(@user_role, 'channels.delete')
+  P3 custom channels authenticated delete new: created_by = @uid
+}
+"""
+
+
+def test_a_permission_of_the_callers_role_is_a_membership_with_a_constant_value():
+    """#90 (Slack clone): `authorize('channels.delete')` asks whether the caller's role (an enum
+    claim) holds the permission in role_permissions: a membership whose key is the claim and whose
+    value is a constant label, the same for every row.  A caller with no role holds none (P1)."""
+    from mls.spec.syntax import parse
+
+    v = verdicts(check_spec(parse(GRANTS)))
+    assert v == {"P1": "PROVED", "P2": "PROVED", "P3": "REFUTED"}, v

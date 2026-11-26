@@ -29,6 +29,7 @@ how to write them, and `docs/design/DECISIONS.md` why each choice was made.
 | `cmp(col, op, ctx|const)` | ordinary comparison | `col` indexed |
 | `in(term, [c1, …, cn])` | sugar for `cmp(term, =, c1) ∨ … ∨ cmp(term, =, cn)`, expanded by the checker before encoding; compiled as `term in (c1, …, cn)` | `col` indexed (one `= any` condition) |
 | `member(rel, key=ctx, val=col)` | `(ctx, col) ∈ rel` | compiles to `col = any(array(select ...))` |
+| `member(rel, key=ctx, val=const)` | `(ctx, const) ∈ rel`, the same for every row | compiles to `const = any(array(select ...))`, one InitPlan per statement |
 | `member(R, key=ctx, val=col)`, `R` composed (§3.4) | `∃ t₁…tₙ: (ctx, t₁) ∈ base ∧ T₁(k₁ = t₁, v₁ = t₂) ∧ … ∧ Tₙ(kₙ = tₙ, vₙ = col)` | one nested `= any(array(select ...))` per level, each hop key indexed |
 | `member(S, val=col)`, `S` a relation without a key (`T(v) where p`) | `col ∈ S`: some stored `T` row has `v = col` and `T(p(row))` | `col = any((select mls_lookup_S())::t[])`, a definer helper without an argument |
 | `now_between(from_col, until_col)` | `from <= now < until`, NULL bound = open | indexed bounds or small row set |

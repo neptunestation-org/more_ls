@@ -120,6 +120,8 @@ class SqlCompiler:
             for h in lv[1:]:  # D56: one uncorrelated InitPlan per level
                 inner = f"select {q(h.value)} from {q(h.table)} where {q(h.key)} = any (array({inner}))"
             out = f"({self.term(m.value, table)} = any (array({inner})))"
+            if Mutation.MEMBER_CONST_ANY_VALUE in self.mutations and isinstance(m.value, Const):
+                out = f"(cardinality(array({inner})) > 0)"
             if Mutation.MEMBER_NULL_PASSES in self.mutations:
                 out = f"({self.term(m.value, table)} is null or {out})"
             return out

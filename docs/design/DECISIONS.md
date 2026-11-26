@@ -2057,3 +2057,23 @@ claim could not be stated.  `ContextVar.enum` names its type (terse `TYPE [ENUM]
   `null` for a user without a role); the lifter reads the cast (`Env.context_enums`).
 - *Lean:* known gap, as the column axiom (D59).
 
+**D101. A membership with a constant value; import reads Supabase's authorize() (#90).**  The
+Slack clone's delete policies call `authorize('channels.delete')`, Supabase's documented RBAC
+helper: plpgsql, SECURITY DEFINER, counting the `role_permissions` rows of the caller's role claim
+(D100) with that permission.  The call is a fact about the caller, not the row, and a membership's
+value had to be a column.
+- *Construct:* `member(R, key, value)` with `value` a constant when `key` is a context value or a
+  constant (`check`: `const_value`); an enum key column takes a context value of its enum, an enum
+  value column a label.  Nothing new in the encoding (`rel(k, v)` with a constant `v`), the
+  compiler (`'x' = any(array(select ...))`, one InitPlan) or the visibility policy (`key = k`).
+  Decidability unchanged: a ground atom.  Lean's `Pred.member` already takes any term as value.
+- *Mutation:* `MEMBER_CONST_ANY_VALUE` (any permission of the role passes), fixture
+  `specs.grants_spec`; a mutation dropping the key filter was tried first and is masked by the
+  relation's own visibility policy (`role = @user_role` on `role_permissions`), so it proves
+  nothing.
+- *Import:* the helper query takes plpgsql bodies, but only the exact counting shape
+  (`lift.count_body`: `declare v int; begin select count(*) from .. [into v]; return v > 0; end`)
+  as `exists (select 1 from ..)`; `_unalias` requalifies a body's `table.column` to the inlined
+  alias; the lifter reads an uncorrelated EXISTS with one context-value filter and one constant
+  filter as this membership.  The table assumes the function by md5, as for SQL helpers.
+
