@@ -1194,3 +1194,17 @@ def test_a_permission_of_the_callers_role_is_a_membership_with_a_constant_value(
 
     v = verdicts(check_spec(parse(GRANTS)))
     assert v == {"P1": "PROVED", "P2": "PROVED", "P3": "REFUTED"}, v
+
+
+def test_the_trusted_roles_line_does_not_claim_forced_rls_on_adopted_tables():
+    """#93: the compiler forces row level security on the tables it creates, never on an adopted
+    one; the report says so only when the spec adopts a table."""
+    from mls.props.report import assumptions
+    from tests.templates import specs
+
+    owned = make(base())
+    adopted = specs.adopted_spec([{"rls": "not_forced"}])
+    line = lambda s: next(a for a in assumptions(s, []) if a.startswith("trusted roles:"))
+    assert "the compiler forces RLS for owners" in line(owned)
+    assert "forces RLS for owners" not in line(adopted)
+    assert "never on an adopted table, whose owner is bound only if the table forces RLS itself" in line(adopted)

@@ -39,6 +39,11 @@ def assumptions(spec: Spec, results: list[PropertyResult]) -> list[str]:
     trusted = ("trusted roles: the owner of the MLS schema and superusers bypass policies; the compiler "
                "forces RLS for owners, so only superusers (and roles granted BYPASSRLS outside MLS) "
                "remain trusted")
+    if any(tb.mode == "adopted" for tb in spec.tables.values()):  # #93: it never alters an adopted table
+        trusted = ("trusted roles: superusers (and roles granted BYPASSRLS outside MLS) bypass policies; the "
+                   "compiler forces RLS on the tables it creates, so their owners are bound, but never on an "
+                   "adopted table, whose owner is bound only if the table forces RLS itself (its assumptions "
+                   "below say which)")
     if adapter.trusted_note:
         trusted += f"; {adapter.trusted_note}"
     if adapter.service_note and any(r in spec.roles for r in adapter.service_roles):

@@ -83,7 +83,7 @@ were assigned after the fact.
 | midday (11-25) | Supabase JWT, L, teams, helpers in another schema | 49, 110 | — / 0 | 3 (#81 #83 #84) | 2 (#80 #82) | 1 (#79) | run 1, first try | 221 | deployed, drift none, 49 proved |
 | nextbase (11-25) | Supabase JWT, S, `to public` policies, `auth.role()` | 3, 12 | — / — | 1 (#85) | 1 (#86) | 2 (#87 #88) | first try | 43 | deployed, drift none, 3 proved |
 | slack-clone (11-25) | Supabase JWT, S, RBAC through a role claim and `authorize()` | 5, 13 | — / 0 | 0 | 2 (#89 #90) | 1 (b3e95f4) | 1 repair round | 34 | deployed, drift none, 5 proved |
-| postgrest-starter-kit (11-25) | session settings (PostgREST claims, read through helper functions), S, views as the API | 2, 1 | 0 / 0 | 1 (#91) | 1 (#92) | 0 | first try | 12 | deployed, drift none, 2 proved |
+| postgrest-starter-kit (11-25) | session settings (PostgREST claims, read through helper functions), S, views as the API | 2, 1 | 0 / 0 | 1 (#91) | 1 (#92) | 1 (#93) | first try | 12 | deployed, drift none, 2 proved |
 
 postgrest-starter-kit, the first row chosen by the program (empty identity cell, unexercised
 pattern), loaded unchanged as the superuser its Docker setup uses.  Its claims come through helper
