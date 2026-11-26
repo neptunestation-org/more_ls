@@ -11,7 +11,7 @@ from typing import Any
 from mls.spec.model import (
     CONTEXT_NOW, And, BypassAssumed, CardinalityRule, CheckRule, ColRef, ComposedRelation, ColumnImmutable, ColumnRule, Cmp, Const,
     AlwaysOnUpdate, ChangesOnly, CtxRef, Custom, InclusionRule, InGroup, InvariantPreserved, IsNull, Has, LeastPrivilege, Lit, Member, MonotoneIn,
-    MustAllow, NewRef, Not, NowBetween, OldRef, OpaqueRef, Or, OwnerAssumed, PathAssumed, InlinedAssumed, PolicyRule, Pred, Property,
+    MustAllow, NewRef, Not, NowBetween, OldRef, OpaqueRef, Or, OwnerAssumed, PathAssumed, InlinedAssumed, DelegateAssumed, DELEGATION, PolicyRule, Pred, Property,
     RlsAssumed,
     RoleSeparation,
     Rule, Spec, TenantIsolation, TransitionRule, WriteSubsetRead,
@@ -315,7 +315,18 @@ def assumption(table: str, a) -> str:
         fn, _, digest = a.inlined.rpartition(" md5 ")
         return (f"assumed: {fn} keeps the body it had when it was imported (md5 {digest}): its calls in the "
                 f"policies on `{table}` are read as that body")
+    if isinstance(a, DelegateAssumed):
+        view, owner, callers = delegation_parts(a.delegate)
+        who = "every role" if callers == ["public"] else ", ".join(f"`{r}`" for r in callers)
+        return (f"assumed: {who} reach `{table}` through {view}, which runs as its owner `{owner}`; the policies "
+                f"bind `{owner}`, so what is proved for `{owner}` holds for them")
     raise TypeError(a)
+
+
+def delegation_parts(text: str) -> tuple[str, str, list[str]]:
+    """#92: `view v as owner to r1, r2` as (view path, owner, callers)."""
+    m = DELEGATION.fullmatch(" ".join(text.split()))
+    return m["view"], m["owner"], [r.strip() for r in m["callers"].split(",")]
 
 
 def assumption_lines(spec: Spec) -> list[str]:

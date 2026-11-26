@@ -116,7 +116,8 @@ TABLES = st.fixed_dictionaries(
               "assume": st.lists(st.one_of(NAMES.map(lambda r: {"owner": r}), NAMES.map(lambda r: {"bypassrls": r}),
                                            st.just({"rls": "not_forced"}),
                                            st.sampled_from([{"bypass": "view v"}, {"bypass": "function f(integer, text)"},
-                                                            {"inlined": "function f(integer, text) md5 0cc175b9c0f1b6a831c399e269772661"}])),
+                                                            {"inlined": "function f(integer, text) md5 0cc175b9c0f1b6a831c399e269772661"},
+                                                            {"delegate": "view api.v as a to b, c"}])),
                                  max_size=2)})
 
 SPECS = st.fixed_dictionaries(

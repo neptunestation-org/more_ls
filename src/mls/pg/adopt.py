@@ -1120,11 +1120,19 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
             "enums": enums, "tables": spec_tables, "relations": relations, "opaques": opaques, "rules": rules, "properties": []}
 
     # --- bypass paths (D54): listed with their fix, never assumed by the import
-    from mls.pg.drift import bypass_report
+    from mls.pg.catalog import delegation_text
+    from mls.pg.drift import _who, bypass_report
 
     with conn.transaction():
         paths = bypass_paths(conn, schema, sorted(governed), list(roles))
     notes += [f"bypass path: {i.object}" for i in bypass_report(checked, paths)[0]]
+    for t, found in sorted(paths.items()):  # #92: a view whose owner the policies bind is how its users act as it
+        for f in found:
+            if f["kind"] == "delegation":
+                spec_tables[t].setdefault("assume", []).append({"delegate": delegation_text(f)})
+                notes.append(f"table {t}: {f['path']} runs as its owner {f['owner']}, whom the policies bind, so "
+                             f"{_who(f)} act as {f['owner']} through it (assumed: the proof report says that what "
+                             f"is proved for {f['owner']} holds for them)")
 
     n_adopted = len(governed)
     comment = (f"imported by mls import{' --policies discard' if discard else ''} from schema '{schema}' on "

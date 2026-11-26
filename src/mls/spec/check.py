@@ -27,7 +27,7 @@ from mls.spec.model import (
     CONTEXT_NOW, And, BypassAssumed, CardinalityRule, CheckRule, ColRef, ColType, ColumnRule, Cmp, Const, CtxRef,
     INT_RANGE, In, AlwaysOnUpdate, ChangesOnly, Custom, InclusionRule, InGroup, InvariantPreserved, IsNull, Lit, Member, MonotoneIn, MustAllow, NewRef, Not,
     RoleSeparation, ARRAY_TYPES, Has,
-    NowBetween, OldRef, OpaqueRef, Or, OwnerAssumed, PathAssumed, InlinedAssumed, PolicyRule, RlsAssumed, Spec, TenantIsolation,
+    NowBetween, OldRef, OpaqueRef, Or, OwnerAssumed, PathAssumed, InlinedAssumed, DelegateAssumed, DELEGATION, PolicyRule, RlsAssumed, Spec, TenantIsolation,
     ColumnImmutable, WriteSubsetRead, LeastPrivilege, TransitionRule, comparable, pair_unique,
 )
 
@@ -826,6 +826,20 @@ class Checker:
                                                  f"'function <name>(<argument types>) md5 <32 hex digits>'",
                              "copy it from mls import's output, e.g. \"function is_member(uuid) md5 "
                              "0cc175b9c0f1b6a831c399e269772661\"")
+            elif isinstance(a, DelegateAssumed):
+                text = " ".join(a.delegate.split())
+                key = ("delegate", text.split(" as ")[0])
+                m = DELEGATION.fullmatch(text)
+                if not m:
+                    self.err(f"{apath}.delegate", f"'{a.delegate}' is not a delegation: one is 'view <name> as "
+                                                  f"<owner> to <role>, <role>' (or 'to public'), as mls drift reports it",
+                             "copy it from the drift or import report, e.g. \"view api.todos as api to anonymous, "
+                             "webuser\"")
+                elif m["owner"] not in self.spec.roles:
+                    self.err(f"{apath}.delegate", f"'{m['owner']}' is not an app role of this spec: a view delegates "
+                                                  f"to its owner only when the policies bind the owner, and the "
+                                                  f"policies name only app roles",
+                             f"one of: {', '.join(self.spec.roles)}; or remove the assumption")
             else:
                 self.err(apath, "unknown assumption")
                 continue

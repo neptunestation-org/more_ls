@@ -133,7 +133,7 @@ def table_statuses(spec: Spec, results: list[PropertyResult], snapshot: dict | N
         from mls.spec.model import PathAssumed
 
         for st in out:
-            found = [f["path"] for f in snapshot.get("bypass", {}).get(st.table, [])]
+            found = [f["path"] for f in snapshot.get("bypass", {}).get(st.table, []) if f["kind"] != "delegation"]
             assumed = {path_key(a.bypass) for a in spec.tables[st.table].assume if isinstance(a, PathAssumed)}
             st.bypass = [f for f in found if path_key(f) not in assumed]
             st.trusted = [f for f in found if path_key(f) in assumed]

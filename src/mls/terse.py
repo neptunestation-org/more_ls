@@ -16,7 +16,8 @@ approval artifact (D10, D33).  The grammar:
     column     := NAME TYPE ['not null'] ['default' (term | 'fresh')]                          (a bare column is nullable; TYPE 'enum' NAME for an enum,
                                                                    'text[]' or 'enum[]' NAME for an array)
     option     := 'primary_key' '(' names ')' | 'unique' '(' names ')' | 'tags' '(' names ')'
-                | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)' | 'inlined function f(t) md5 h')
+                | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)' | 'inlined function f(t) md5 h'
+                                                                   | 'delegate view v as r to r1, r2')
     relation   := 'relation' NAME '=' TABLE '(' KEY ',' VALUE ')' ['where' pred]
                 | 'relation' NAME '=' TABLE '(' VALUE ')' ['where' pred]        (a set of values, no key)
                 | 'relation' NAME '=' RELATION ('.' TABLE '(' KEY ',' VALUE ')')+   (D56, ≤ 3 hops)
@@ -52,7 +53,7 @@ from mls.spec.model import (
     Hierarchy, Identity, In, InclusionRule, InGroup, InvariantPreserved, IsNull, Has, LeastPrivilege, Lit, Member,
     MonotoneIn, MustAllow, NewRef, Not, NowBetween, OldRef, Opaque, OpaqueRef, Or, PolicyRule, Pred, Property,
     Relation, ComposedRelation, Hop, RoleSeparation, Rule, RuleBase, Spec, Table, TenantIsolation, TransitionRule, WriteSubsetRead,
-    OwnerAssumed, BypassAssumed, RlsAssumed, PathAssumed, InlinedAssumed, ContextVar, Column,
+    OwnerAssumed, BypassAssumed, RlsAssumed, PathAssumed, InlinedAssumed, DelegateAssumed, ContextVar, Column,
 )
 
 OR, AND, NOT, ATOM = 1, 2, 3, 4
@@ -91,7 +92,7 @@ RENDERED_CLASSES: set[type] = {
     Custom, MustAllow, RoleSeparation,
     Lit, And, Or, Not, IsNull, Has, Cmp, In, Member, InGroup, NowBetween, OpaqueRef,
     ColRef, OldRef, NewRef, CtxRef, Const,
-    OwnerAssumed, BypassAssumed, RlsAssumed, PathAssumed, InlinedAssumed,
+    OwnerAssumed, BypassAssumed, RlsAssumed, PathAssumed, InlinedAssumed, DelegateAssumed,
 }
 
 
@@ -328,6 +329,8 @@ def assumption(a) -> str:
         return string(f"bypass {a.bypass}")
     if isinstance(a, InlinedAssumed):
         return string(f"inlined {a.inlined}")
+    if isinstance(a, DelegateAssumed):
+        return string(f"delegate {a.delegate}")
     raise TypeError(a)
 
 

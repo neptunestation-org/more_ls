@@ -152,3 +152,62 @@ def test_a_mixed_case_path_is_named_as_sql_spells_it(bypassed):
         assert any(fix in o for o in hard), hard
         h.conn.execute(fix)
         assert 'view "DocTitles"' not in _found(h.conn)
+
+
+OUTSIDER = """
+do $$ begin
+  if not exists (select 1 from pg_roles where rolname = 'mls_outsider') then create role mls_outsider nologin; end if;
+end $$;
+"""
+
+
+def test_a_path_only_a_role_outside_the_spec_may_use_is_found(bypassed):
+    """#91: the roles asked about are every role not trusted with the table, not only the spec's."""
+    spec, h, _ = bypassed
+    with h.conn.transaction(force_rollback=True):
+        h.conn.execute(OUTSIDER + """
+            create function count_docs_outside() returns bigint language sql security definer as $$ select count(*) from docs $$;
+            revoke execute on function count_docs_outside() from public;
+            grant execute on function count_docs_outside() to mls_outsider""")
+        paths = bypass_paths(h.conn, "public", ["docs"], ["authenticated"])["docs"]
+        f = next(f for f in paths if f["path"] == "function count_docs_outside()")
+        assert (f["roles"], f["outside"], f["grantees"], f["public"]) == ([], ["mls_outsider"], ["mls_outsider"], False)
+        hard = [i.object for i in drift(h.conn, spec, compile_spec(spec)).by_kind("hardening")]
+        assert any(o.startswith("function count_docs_outside() reaches table docs without its policies")
+                   and "and mls_outsider (not roles of the spec) may use it (fix: revoke execute on function "
+                       "count_docs_outside() from public, mls_outsider;" in o for o in hard), hard
+
+
+def test_a_view_whose_owner_the_policies_bind_is_a_delegation(bypassed):
+    """#92: a view owned by an app role the policies bind is no bypass path: its users act as the
+    owner.  Drift notes it until the table assumes it, import writes the assumption, the proof report
+    states it; a view owned by a bound role outside the spec is neither."""
+    _, h, _ = bypassed
+    with h.conn.transaction(force_rollback=True):
+        h.conn.execute(OUTSIDER + """
+            grant create on schema public to authenticated, mls_plain;
+            create view lent_titles as select id from docs;
+            alter view lent_titles owner to authenticated;
+            create view plain_titles as select id from docs;
+            alter view plain_titles owner to mls_plain;
+            grant select on lent_titles, plain_titles to mls_outsider""")
+        paths = bypass_paths(h.conn, "public", ["docs"], ["authenticated"])["docs"]
+        assert "view plain_titles" not in {f["path"] for f in paths}
+        f = next(f for f in paths if f["path"] == "view lent_titles")
+        assert (f["kind"], f["owner"], f["outside"]) == ("delegation", "authenticated", ["mls_outsider"])
+        plain = specs.adopted_spec([{"rls": "not_forced"}])
+        res = drift(h.conn, plain, compile_spec(plain))
+        assert not any("lent_titles" in i.object for i in res.items), [str(i) for i in res.items]
+        assert any("view lent_titles runs as its owner authenticated, whom the policies bind" in n
+                   and '{"delegate": "view lent_titles as authenticated to mls_outsider"}' in n for n in res.notes)
+        spec = specs.adopted_spec([{"rls": "not_forced"},
+                                   {"delegate": "view lent_titles as authenticated to mls_outsider"}])
+        res = drift(h.conn, spec, compile_spec(spec))
+        assert ("view lent_titles lets mls_outsider (not roles of the spec) act as authenticated on table docs "
+                "(its owner is bound by the policies)") in [i.object for i in res.by_kind("assumed")]
+        assert not any("lent_titles" in n for n in res.notes), res.notes
+        assert ("assumed: `mls_outsider` reach `docs` through view lent_titles, which runs as its owner "
+                "`authenticated`; the policies bind `authenticated`") in to_markdown(spec, run_all(spec))
+        imported = import_schema(h.conn)
+        assert {"delegate": "view lent_titles as authenticated to mls_outsider"} in imported.spec["tables"]["docs"]["assume"]
+        assert not any("lent_titles" in n for n in imported.notes if n.startswith("bypass path: "))

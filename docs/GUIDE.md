@@ -1544,6 +1544,14 @@ Apply the fix, or, when the path is meant to be there (a reporting view only the
 reads, a helper whose body you have reviewed), assume it on the table: every proof report then
 says that what an app role reaches through it is not covered by the proofs.
 
+A path is reported whoever may use it, not only the roles the spec names: a login function
+callable by a role the spec never mentions reaches the table all the same, and the report names
+that role as one outside the spec.  A view is not a path when its owner is an app role the
+policies bind, as in PostgREST's layout, where the views of an `api` schema are owned by a role
+`api` and the policies are written `to api`: the policies decide what the view's users reach.
+They act as `api`, and import records that on the table (`assume ('delegate view api.todos as api
+to anonymous, webuser')`), so every proof report says whom the properties about `api` cover.
+
 The imported spec is a starting point.  It checks, compiles and proves as it is.  A lifted
 policy is proved, diffed and explained like one MLS wrote; a proof over a policy that stayed
 opaque is conditional on its block, which says little a reviewer can act on, so rewrite the

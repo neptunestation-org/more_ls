@@ -24,6 +24,7 @@ Terms are single-key objects: {"col": c}, {"ctx": name}, {"const": v}, {"old": c
 from __future__ import annotations
 
 import json
+import re
 
 from mls.errors import MlsError as MlsErrorRef
 from pathlib import Path
@@ -89,7 +90,7 @@ def _single_key(v: Any) -> str:
             return "?"
         return next(iter(v))
     for tag in ("col", "ctx", "const", "old", "new", "cmp", "in", "member", "in_group", "now_between",
-                "is_null", "has", "opaque", "and", "or", "not", "lit", "owner", "bypassrls", "rls", "bypass", "inlined"):
+                "is_null", "has", "opaque", "and", "or", "not", "lit", "owner", "bypassrls", "rls", "bypass", "inlined", "delegate"):
         if hasattr(v, tag) or hasattr(v, tag + "_"):
             return tag
     return "?"
@@ -241,6 +242,18 @@ class PathAssumed(Strict):
     bypass: str
 
 
+# #92: a delegation as drift spells it (`pg/catalog.py:delegation_text`)
+DELEGATION = re.compile(r'(?P<view>view [\w."$]+) as (?P<owner>[\w"$]+) to (?P<callers>[\w"$]+(?:, [\w"$]+)*)')
+
+
+class DelegateAssumed(Strict):
+    """#92: `view v as owner to r1, r2` (or `to public`): a view that is not `security_invoker`, over
+    the table, owned by the app role `owner`, whom the table's policies bind.  The roles named use it,
+    and so act as `owner` on the table: what is proved for `owner` holds for them.  Spelled as drift
+    and import report it; drift compares it with the catalog."""
+    delegate: str
+
+
 class InlinedAssumed(Strict):
     """A helper the import read inline (#52): `function f(argtypes) md5 <hex>`, a one-statement SQL
     function whose calls in the table's policies the spec reads as its body, assumed to keep the
@@ -261,6 +274,7 @@ Assumption = Annotated[
         Annotated[RlsAssumed, Tag("rls")],
         Annotated[PathAssumed, Tag("bypass")],
         Annotated[InlinedAssumed, Tag("inlined")],
+        Annotated[DelegateAssumed, Tag("delegate")],
     ],
     Discriminator(_single_key, custom_error_type="invalid_assumption",
                   custom_error_message="an assumption is one of {owner}, {bypassrls}, {rls}, {bypass}, {inlined}"),

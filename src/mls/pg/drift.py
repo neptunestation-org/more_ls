@@ -32,9 +32,9 @@ from mls.compile.plan import Script
 from mls.compile.sql import enum_ddl, q
 from mls.compile.table import table_ddl
 from mls.identity import get_adapter
-from mls.pg.catalog import Snapshot, bypass_paths, snapshot
+from mls.pg.catalog import Snapshot, bypass_paths, delegation_text, snapshot
 from mls.pg.lift import mls_type
-from mls.spec.model import BypassAssumed, InlinedAssumed, OwnerAssumed, PathAssumed, RlsAssumed, Spec
+from mls.spec.model import BypassAssumed, DelegateAssumed, InlinedAssumed, OwnerAssumed, PathAssumed, RlsAssumed, Spec
 
 FAILING = ("missing", "unexpected", "differs", "hardening")
 
@@ -164,33 +164,61 @@ def path_key(path: str) -> str:
     return " ".join(path.split()).replace("( ", "(").replace(" )", ")").replace(" ,", ",")
 
 
+def _who(f: dict) -> str:
+    """#91: who may use a path: the spec's roles, then the others (summed up as every other role when
+    the path is granted to PUBLIC)."""
+    parts = list(f["roles"])
+    if f.get("outside"):
+        parts.append("every other role (it is granted to public)" if f.get("public")
+                     else f"{', '.join(f['outside'])} (not roles of the spec)")
+    return ", ".join(parts)
+
+
 def bypass_report(spec: Spec, paths: dict[str, list[dict]]) -> tuple[list[DriftItem], list[str]]:
     """The bypass paths (D54, `catalog.bypass_paths`) of the governed tables as drift items:
     `hardening` with the fix, or `assumed` when the table assumes the path; an assumed path the
-    catalog no longer shows is a note.  `drift` and `mls status --dsn` both read this."""
+    catalog no longer shows is a note.  #92: a delegation is `assumed` when the table assumes it as
+    the catalog spells it, else a note (the policies bind the view's owner, so it opens nothing; the
+    assumption only makes the proof report say whom the owner's properties cover).  `drift` and
+    `mls status --dsn` both read this."""
     items: list[DriftItem] = []
     notes: list[str] = []
     for t, found in paths.items():
         assumed = {path_key(a.bypass): a.bypass for a in spec.tables[t].assume if isinstance(a, PathAssumed)}
+        delegated = {path_key(a.delegate): a.delegate for a in spec.tables[t].assume if isinstance(a, DelegateAssumed)}
         seen: set[str] = set()
         for f in found:
+            if f["kind"] == "delegation":
+                text = delegation_text(f)
+                seen.add(path_key(text))
+                if path_key(text) in delegated:
+                    items.append(DriftItem("assumed", f"{f['path']} lets {_who(f)} act as {f['owner']} on table {t} "
+                                                      f"(its owner is bound by the policies)"))
+                else:
+                    notes.append(f"table '{t}': {f['path']} runs as its owner {f['owner']}, whom the policies bind: "
+                                 f"{_who(f)} act as {f['owner']} through it; assume {{\"delegate\": \"{text}\"}} so "
+                                 f"that the proof report says whom {f['owner']}'s properties cover")
+                continue
             key = path_key(f["path"])
             seen.add(key)
-            who = ", ".join(f["roles"])
+            who = _who(f)
             if key in assumed:
                 items.append(DriftItem("assumed", f"{f['path']} reaches table {t} without its policies "
                                                   f"(used by {who}) and is trusted"))
                 continue
             name = f["path"].split(" ", 1)[1]
+            # a revoke names the roles granted it directly, and the spec's (a no-op where inherited)
+            revoke = list(dict.fromkeys([g for g in f.get("grantees", []) if g != "public"] + f["roles"]))
             if f["kind"] == "view":
                 what = "runs as its owner (it is not security_invoker)"
-                fix = f"alter view {name} set (security_invoker = true), or revoke its privileges from {who}"
+                fix = (f"alter view {name} set (security_invoker = true), or revoke its privileges from "
+                       f"{', '.join((['public'] if f.get('public') else []) + revoke)}")
             elif f["kind"] == "materialized view":
                 what = "holds rows its owner read"
-                fix = f"revoke its privileges from {who}"
+                fix = f"revoke its privileges from {', '.join((['public'] if f.get('public') else []) + revoke)}"
             else:
                 what = f"is SECURITY DEFINER, owned by {f['owner']}, who bypasses the policies"
-                fix = f"revoke execute on function {name} from public, {who}"
+                fix = f"revoke execute on function {name} from {', '.join(['public'] + revoke)}"
             trust = (f"; or assume {{\"bypass\": \"{f['path']}\"}} on {t}" if spec.tables[t].mode == "adopted"
                      else "")
             items.append(DriftItem("hardening", f"{f['path']} reaches table {t} without its policies: it {what}, "
@@ -200,6 +228,14 @@ def bypass_report(spec: Spec, paths: dict[str, list[dict]]) -> tuple[list[DriftI
                 notes.append(f"table '{t}': {written} is not a bypass path now; the assumption "
                              f"{{\"bypass\": \"{written}\"}} is no longer needed"
                              + (f" (found: {', '.join(f['path'] for f in found)})" if found else ""))
+        for key, written in delegated.items():
+            if key not in seen:
+                now = [delegation_text(f) for f in found if f["kind"] == "delegation"
+                       and path_key(f["path"]) == path_key(written.split(" as ")[0])]
+                notes.append(f"table '{t}': the assumption {{\"delegate\": \"{written}\"}} does not hold now"
+                             + (f": the catalog shows {now[0]} (set the assumption to it)" if now
+                                else ": the view no longer delegates to an app role bound by the policies "
+                                     "(remove the assumption)"))
     return items, notes
 
 

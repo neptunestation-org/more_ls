@@ -2077,3 +2077,27 @@ value had to be a column.
   alias; the lifter reads an uncorrelated EXISTS with one context-value filter and one constant
   filter as this membership.  The table assumes the function by md5, as for SQL helpers.
 
+
+**D102. Bypass paths are asked of every untrusted role; a view whose owner the policies bind is a delegation (#91, #92; amends D54).**
+The PostgREST starter kit exposes its tables through views owned by a role `api`; the policies are
+written `to api` and tell callers apart by JWT claims, and the callers (`anonymous`, `webuser`, and
+`authenticator`, the login role granted both) hold privileges on the views and on four
+superuser-owned SECURITY DEFINER functions over `user`.  The spec's only role is `api`.  D54 asked
+about the spec's roles only, so the four functions went unreported (status would have said `user`
+was proved and unbypassed: a wrong answer), and asking about every role would have reported the
+API view as a bypass path, which it is not.
+- *Who:* a path's users are every role not trusted with the table anyway (not a superuser,
+  BYPASSRLS, a member of the table's owner, `pg_*`, `mls_internal`), through PUBLIC, membership or
+  column grants.  Reports name the spec's roles, then the others, or "every other role" when the
+  path is granted to PUBLIC (the alternative, listing every role in a cluster, is noise on
+  Supabase); a revoke names the direct grantees and the spec's roles.
+- *Views:* a non-invoker view is a bypass path only when its owner bypasses the policies (the
+  function rule's condition, which D54 already applied to functions).  When its owner is an app
+  role, the view is a delegation: its users act as the owner, and the policies bind the owner, so
+  nothing is opened and the proofs about the owner hold for them.  What the spec cannot see is
+  whom the owner stands for, so import assumes `{"delegate": "view v as owner to r1, r2"}` and the
+  proof report states it; drift notes a delegation that is not assumed or has changed, never as
+  hardening (no enforcement depends on it).  A bound owner outside the spec reaches nothing the
+  spec grants and is not reported.
+- *Not done:* the view's own column grants (PostgREST's `select (id, todo)` for `anonymous`) are
+  outside the spec, as every object in the `api` schema is.

@@ -284,6 +284,7 @@ declared table depends on its mode:
 | `{"rls": "not_forced"}` | row-level security is not forced; the owner bypasses the policies and is trusted | `assumed` instead of `hardening: row level security is not forced` |
 | `{"bypassrls": "<app role>"}` | the role has `BYPASSRLS`, reads and writes the table unfiltered, and is trusted | `assumed` instead of `hardening: role has BYPASSRLS` (only when every governed table assumes it) |
 | `{"bypass": "view <v>"}` / `{"bypass": "function <f>(<types>)"}` | a bypass path (below) reaches the table without its policies and is trusted; what an app role reaches through it is not covered by the proofs | `assumed` instead of `hardening: <path> reaches table <t> without its policies` |
+| `{"delegate": "view <v> as <owner> to <roles>"}` | a view over the table that is not `security_invoker` and whose owner, an app role, the table's policies bind: the roles named use it, and so act as the owner on the table (`to public`: every role may use it); what is proved for the owner holds for them | `assumed` while the catalog shows the same view, owner and users; a note otherwise, and a note while an existing delegation is not assumed |
 | `{"inlined": "function <f>(<types>) md5 <hex>"}` | `mls import` read the calls of this SQL helper in the table's policies as its body (see `mls import` in section 15); the helper keeps the body whose md5 is given | `assumed` while the body is unchanged; `differs: <f> has a new body since the import` (or `is gone`) otherwise |
 
 Every assumption is repeated in the proof report, `mls explain`, `mls diff` and the compiled
@@ -293,24 +294,30 @@ assumption going away.  Refused at `check`: `assume` on an `owned` table (its ha
 emitted and verified, so an app-role owner is an error there, not an assumption; `mls check
 --dsn` reports it as such), on an `observed` table, naming a role that is not an app role of the
 spec, or an `rls` value other than `not_forced` (there is no assumption under which a policy on a
-table without row-level security enabled means anything), or a `bypass` value that is not
-`view <name>` or `function <name>(<argument types>)`.
+table without row-level security enabled means anything), a `bypass` value that is not
+`view <name>` or `function <name>(<argument types>)`, or a `delegate` value that is not
+`view <name> as <owner> to <role>, ...` with an app role as the owner.
 
 **Bypass paths**.  On an existing database the holes in row-level security are rarely
 `BYPASSRLS`; they are views and functions.  `mls drift`, `mls status --dsn` and `mls import`
 report, for every governed table:
 
 - a view over the table (directly or through other views) that is not `security_invoker`, on
-  which an app role holds any privilege: it runs as its owner, whom the policies of an adopted
-  table usually do not bind;
-- a materialized view over the table on which an app role holds a privilege (its rows were read
+  which a role holds any privilege (on the view or on one of its columns), and whose owner
+  bypasses the table's policies (a superuser, a `BYPASSRLS` role, or the table's owner while
+  row-level security is not forced): it runs as its owner;
+- a materialized view over the table on which a role holds a privilege (its rows were read
   by its owner);
-- a `SECURITY DEFINER` function an app role may execute, whose owner bypasses the table's
+- a `SECURITY DEFINER` function a role may execute, whose owner bypasses the table's
   policies (a superuser, a `BYPASSRLS` role, or the table's owner while row-level security is
   not forced) and whose body names the table (a text match, so a function that only mentions
   the name is reported too).
 
-An app role reaches a view or function only with `USAGE` on its schema: a helper in a schema
+The roles asked about are every role that is not trusted with the table anyway, named in the
+spec or not: not a superuser, a `BYPASSRLS` role, a member of the table's owner, a predefined
+`pg_*` role or MLS's internal role.  A report names the spec's roles first, then the others
+(`webuser (not roles of the spec)`), or, when the path is granted to `PUBLIC`, `every other
+role (it is granted to public)`.  A role reaches a view or function only with `USAGE` on its schema: a helper in a schema
 the app roles cannot use (`private`) is no path, even with the default `EXECUTE` for `PUBLIC`,
 unless the body of a `SECURITY DEFINER` function they do reach names it (that call runs as the
 other function's owner).  A policy calling such a helper is not a path either: the policy is
@@ -320,9 +327,19 @@ outside its trigger.
 The path is spelled `view <name>` or `function <name>(<argument types>)` (the types as
 Postgres prints them, `function is_team_member(bigint)`), schema-qualified outside `--schema`.
 Each is `hardening` with the fix (`alter view <v> set (security_invoker = true)` or revoking
-the app roles' privileges; for a function, `revoke execute on function <f> from public, <roles>`);
-on an adopted table `{"bypass": "<path>"}` assumes it instead.  An assumed path the catalog no
-longer shows is a note.  The trusted platform roles (`service_role` on Supabase) are not app
+the privileges of the roles it is granted to and the spec's; for a function, `revoke execute on
+function <f> from public, <roles>`); on an adopted table `{"bypass": "<path>"}` assumes it
+instead.  An assumed path the catalog no longer shows is a note.
+
+**Delegations**.  A view that is not `security_invoker` and whose owner is an app role the
+table's policies bind (PostgREST's layout: an `api` schema of views owned by a role `api`, the
+policies written `to api`, the callers' privileges on the views only) is not a bypass path: the
+policies decide what its owner, and so each of its users, reaches.  Its users act as the owner on
+the table, which the spec cannot see from the policies alone.  `mls import` writes the assumption
+`{"delegate": "view <v> as <owner> to <roles>"}` on the table, and every proof report then says
+that what is proved for the owner holds for them; drift compares it with the catalog and notes a
+change.  A view owned by a role the policies bind that is not an app role reaches nothing the
+spec grants and is neither.  The trusted platform roles (`service_role` on Supabase) are not app
 roles, so their privileges on a view or function are not a bypass path.
 
 ## 6. `relations`
@@ -994,7 +1011,8 @@ grammar:
     column     := NAME TYPE ['not null'] ['default' (term | 'fresh')]  (a bare column is nullable; TYPE 'enum' NAME for an enum,
                                                                    'text[]' or 'enum[]' NAME for an array)
     option     := 'primary_key' '(' names ')' | 'unique' '(' names ')' | 'tags' '(' names ')'
-                | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)' | 'inlined function f(t) md5 h')
+                | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)' | 'inlined function f(t) md5 h'
+                                                                   | 'delegate view v as r to r1, r2')
     relation   := 'relation' NAME '=' TABLE '(' KEY ',' VALUE ')' ['where' pred]
                 | 'relation' NAME '=' BASE ('.' TABLE '(' KEY ',' VALUE ')')+   (composed)
     hierarchy  := 'hierarchy' NAME '=' TABLE 'id' COL 'parent' COL 'depth' COL 'max_depth' INT 'members' REL
@@ -1372,7 +1390,9 @@ takes the result as it is.
 
 In either mode the bypass paths of the adopted tables (§5) are notes, `bypass path: <path>
 reaches table <t> without its policies: ... (fix: ...)`.  The import never assumes one: drift
-reports each as `hardening` until it is fixed or the spec assumes it.
+reports each as `hardening` until it is fixed or the spec assumes it.  A delegation (§5) is
+assumed, with a note: `table <t>: view <v> runs as its owner <owner>, whom the policies bind, so
+<roles> act as <owner> through it`.
 
 **The lifter** (`pg/lift.py`) parses the deparsed text of an expression and reads:
 

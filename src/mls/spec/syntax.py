@@ -372,11 +372,12 @@ class Parser:
                 t["assume"] = []
                 for s in items:
                     parts = s.split(" ", 1)
-                    if len(parts) != 2 or parts[0] not in ("owner", "bypassrls", "rls", "bypass", "inlined") \
+                    if len(parts) != 2 or parts[0] not in ("owner", "bypassrls", "rls", "bypass", "inlined", "delegate") \
                             or not parts[1]:
                         raise ParseError(f"an assumption is 'owner <role>', 'bypassrls <role>', 'rls not_forced', "
-                                         f"'bypass view <v>' / 'bypass function <f>(<types>)' or "
-                                         f"'inlined function <f>(<types>) md5 <hex>', "
+                                         f"'bypass view <v>' / 'bypass function <f>(<types>)', "
+                                         f"'inlined function <f>(<types>) md5 <hex>' or "
+                                         f"'delegate view <v> as <role> to <roles>', "
                                          f"not {s!r}", self.tok.line, self.tok.col, f"{self.path}.assume")
                     t["assume"].append({parts[0]: parts[1]})
             elif opt == "unique":

@@ -246,6 +246,11 @@ union member the renderer does not cover.
   `const_value`; `role_grants(@user_role, 'channels.delete')`); import reads Supabase's plpgsql
   `authorize()` (`lift.count_body`, uncorrelated EXISTS in `Lifter._member`); fixture
   `specs.grants_spec`, mutation `MEMBER_CONST_ANY_VALUE`.
+- D102 (#91, #92): `catalog.bypass_paths` asks every untrusted role (`_UNTRUSTED`), not only the spec's
+  (`roles`/`outside`/`grantees`/`public` per path; `drift._who`); a non-invoker view whose owner is a bound
+  app role is kind `delegation`, assumed by import as `{"delegate": "view v as o to r1, r2"}`
+  (`DelegateAssumed`, `catalog.delegation_text`), stated in the proof report, a drift note when it differs;
+  tests in `tests/templates/test_bypass.py`.
 - D99 (#86): on Supabase, import lifts a policy that reads `auth.role()` once per role (`Env.role`;
   `lift.fold`'s `_role_test` makes `auth.role() = 'x'` a constant); test in `tests/templates/test_adopt.py`.
 - D86 (#54): an inclusion into a relation with a condition (`restrict deferred` required) compiles to two

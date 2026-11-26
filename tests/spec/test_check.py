@@ -4,6 +4,8 @@ from __future__ import annotations
 import copy
 import json
 
+import warnings
+
 import pytest
 
 from mls.errors import SpecError
@@ -352,6 +354,19 @@ def test_assume_is_refused_where_the_proofs_cannot_state_it():
     errs = errors(d)
     assert has(errs, "$.tables.docs.assume[1].inlined", "is not an inlined helper")
     assert not any(e.path == "$.tables.docs.assume[0].inlined" for e in errs)
+    # #92: a delegation names the view, its owner (an app role) and its users
+    d["tables"]["docs"]["assume"] = [{"delegate": "view api.docs as authenticated to anonymous, webuser"},
+                                     {"delegate": "view api.notes as nobody to public"},
+                                     {"delegate": "view api.docs"}]
+    errs = errors(d)
+    assert has(errs, "$.tables.docs.assume[1].delegate", "'nobody' is not an app role")
+    assert has(errs, "$.tables.docs.assume[2].delegate", "is not a delegation")
+    assert not any(e.path == "$.tables.docs.assume[0].delegate" for e in errs)
+    d["tables"]["docs"]["assume"] = [{"delegate": "view api.docs as authenticated to anonymous, webuser"}]
+    with warnings.catch_warnings():  # a delegation serializes by its tag, like every assumption
+        warnings.simplefilter("error")
+        assert Spec.model_validate(d).model_dump(mode="json", exclude_none=True)["tables"]["docs"]["assume"] == \
+            d["tables"]["docs"]["assume"]
     d["tables"]["docs"]["mode"] = "observed"
     d["tables"]["docs"]["assume"] = [{"rls": "not_forced"}]
     d["rules"] = [r for r in d["rules"] if r["table"] != "docs"]

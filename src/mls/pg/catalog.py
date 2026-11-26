@@ -129,26 +129,51 @@ def snapshot(conn: psycopg.Connection, schema: str, tables: list[str], roles: li
     return out
 
 
-# D54: the views and functions through which an app role reaches a table without its policies
+# D54: the views and functions through which a role reaches a table without its policies
+# #91: who may use a path is every role that is not trusted with the table anyway (a superuser, a
+# BYPASSRLS role, a member of the table's owner, a predefined `pg_*` role, MLS's internal role), named
+# in the spec or not; `{owner}` is the table owner's oid column in the query that splices it.
+_UNTRUSTED = r"""not ro.rolsuper and not ro.rolbypassrls and ro.rolname !~ '^pg_' and ro.rolname <> 'mls_internal'
+                 and not pg_has_role(ro.oid, {owner}, 'USAGE')"""
+
+# the roles an object's ACL grants one of `privs` to directly ('public' for PUBLIC), untrusted ones only
+_GRANTEES = r"""array(select g from (select distinct case when x.grantee = 0 then 'public' else ro.rolname end g
+                      from ({acl}) x left join pg_roles ro on ro.oid = x.grantee
+                      where x.privilege_type in ({privs}) and x.grantee <> {obj_owner}
+                        and (x.grantee = 0 or ({untrusted}))) s
+                order by s.g <> 'public', s.g)"""
+
+_PUBLIC_USAGE = r"""exists (select from aclexplode(coalesce({nsp}.nspacl, acldefault('n', {nsp}.nspowner))) e
+                           where e.grantee = 0 and e.privilege_type = 'USAGE')"""
+
 _BYPASS_VIEWS = r"""
-with recursive dep(view, tbl) as (
-  select distinct r.ev_class, t.relname
+with recursive dep(view, tbl, towner, tforced) as (
+  select distinct r.ev_class, t.relname, t.relowner, t.relforcerowsecurity
   from pg_class t join pg_namespace tn on tn.oid = t.relnamespace
   join pg_depend d on d.refclassid = 'pg_class'::regclass and d.refobjid = t.oid
   join pg_rewrite r on d.classid = 'pg_rewrite'::regclass and r.oid = d.objid
   where tn.nspname = %(schema)s and t.relname = any(%(tables)s) and r.ev_class <> t.oid
   union
-  select r.ev_class, dep.tbl
+  select r.ev_class, dep.tbl, dep.towner, dep.tforced
   from dep join pg_depend d on d.refclassid = 'pg_class'::regclass and d.refobjid = dep.view
   join pg_rewrite r on d.classid = 'pg_rewrite'::regclass and r.oid = d.objid
   where r.ev_class <> dep.view
 )
-select dep.tbl, vn.nspname, v.relname, v.relkind,
+select dep.tbl, vn.nspname, v.relname, v.relkind, o.rolname,
+       o.rolsuper or o.rolbypassrls or (pg_has_role(o.oid, dep.towner, 'USAGE') and not dep.tforced),
        array(select ro.rolname from pg_roles ro
-             where ro.rolname = any(%(roles)s)
-               and has_table_privilege(ro.oid, v.oid, 'SELECT, INSERT, UPDATE, DELETE')
-               and has_schema_privilege(ro.oid, v.relnamespace, 'USAGE') order by 1)
+             where """ + _UNTRUSTED.format(owner="dep.towner") + r""" and ro.oid <> v.relowner
+               and (has_table_privilege(ro.oid, v.oid, 'SELECT, INSERT, UPDATE, DELETE')
+                    or has_any_column_privilege(ro.oid, v.oid, 'SELECT, INSERT, UPDATE'))
+               and has_schema_privilege(ro.oid, v.relnamespace, 'USAGE') order by 1),
+       """ + _GRANTEES.format(
+    acl="select * from aclexplode(coalesce(v.relacl, acldefault('r', v.relowner))) union all "
+        "select e.* from pg_attribute a, aclexplode(a.attacl) e where a.attrelid = v.oid and a.attacl is not null",
+    privs="'SELECT', 'INSERT', 'UPDATE', 'DELETE'", obj_owner="v.relowner",
+    untrusted=_UNTRUSTED.format(owner="dep.towner")) + r""",
+       """ + _PUBLIC_USAGE.format(nsp="vn") + r"""
 from dep join pg_class v on v.oid = dep.view join pg_namespace vn on vn.oid = v.relnamespace
+join pg_roles o on o.oid = v.relowner
 where v.relkind = 'm'
    or (v.relkind = 'v' and not coalesce((select o.option_value::boolean from pg_options_to_table(v.reloptions) o
                                          where o.option_name = 'security_invoker'), false))
@@ -157,14 +182,19 @@ order by 1, 2, 3"""
 _BYPASS_FUNCTIONS = r"""
 select t.relname, n.nspname, p.proname, oidvectortypes(p.proargtypes), pg_get_userbyid(p.proowner),
        array(select ro.rolname from pg_roles ro
-             where ro.rolname = any(%(roles)s) and has_function_privilege(ro.oid, p.oid, 'EXECUTE')
+             where """ + _UNTRUSTED.format(owner="t.relowner") + r"""
+               and has_function_privilege(ro.oid, p.oid, 'EXECUTE')
                and (has_schema_privilege(ro.oid, n.oid, 'USAGE')
                     or exists (select from pg_proc w join pg_namespace wn on wn.oid = w.pronamespace
                                where w.prosecdef and w.oid <> p.oid
                                  and has_schema_privilege(ro.oid, wn.oid, 'USAGE')
                                  and has_function_privilege(ro.oid, w.oid, 'EXECUTE')
                                  and w.prosrc ~* ('\m' || p.proname || '\M')))
-             order by 1)
+             order by 1),
+       """ + _GRANTEES.format(acl="select * from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner)))",
+                              privs="'EXECUTE'", obj_owner="p.proowner",
+                              untrusted=_UNTRUSTED.format(owner="t.relowner")) + r""",
+       """ + _PUBLIC_USAGE.format(nsp="n") + r"""
 from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_roles o on o.oid = p.proowner,
      pg_class t join pg_namespace tn on tn.oid = t.relnamespace
 where p.prosecdef and n.nspname not in ('pg_catalog', 'information_schema')
@@ -176,19 +206,23 @@ order by 1, 2, 3, 4"""
 
 
 def bypass_paths(conn: psycopg.Connection, schema: str, tables: list[str], roles: list[str]) -> dict[str, list[dict]]:
-    """Per table, the bypass paths (D54) the app roles `roles` may use: every view over the table
-    (directly or through other views) that is not `security_invoker`, and every materialized view,
-    on which an app role holds a privilege (a view runs as its owner, whom the table's policies
-    usually do not bind; a materialized view was filled by its owner); and every SECURITY DEFINER
-    function an app role may execute whose owner bypasses the table's policies (a superuser, a
-    BYPASSRLS role, or the table's owner while row level security is not forced) and whose body
-    names the table (a conservative text match, as for D47's setters).  A role reaches a view or
-    function only with USAGE on its schema, except a function that the body of another SECURITY
-    DEFINER function it reaches names (that call runs as the other's owner; one level, by text
-    match); a trigger function is never one, since nobody calls it outside its trigger (#44).  Each is `{"path": "view v"
-    | "function f(types)", "kind", "roles", "owner"?}`; a name outside `schema` is qualified."""
+    """Per table, the bypass paths (D54) a role may use: every view over the table (directly or
+    through other views) that is not `security_invoker` and whose owner the table's policies do not
+    bind, every materialized view, and every SECURITY DEFINER function whose owner bypasses the
+    table's policies (a superuser, a BYPASSRLS role, or the table's owner while row level security
+    is not forced) and whose body names the table (a conservative text match, as for D47's setters).
+    A role reaches a view or function only with USAGE on its schema, except a function that the body
+    of another SECURITY DEFINER function it reaches names (that call runs as the other's owner; one
+    level, by text match); a trigger function is never one, since nobody calls it outside its
+    trigger (#44).  #91: the roles asked about are every role not trusted with the table anyway,
+    not only the spec's `roles`.  Each is `{"path": "view v" | "function f(types)", "kind", "roles"
+    (the spec's roles that may use it), "outside" (the others), "grantees" (the untrusted roles, or
+    'public', it is granted to directly: what a revoke names), "public" (granted to PUBLIC, in a
+    schema PUBLIC may use), "owner"?}`; a name outside `schema` is qualified.  #92: a view whose
+    owner is one of `roles` and is bound by the policies is no bypass path but kind "delegation":
+    its users act as its owner on the table."""
     out: dict[str, list[dict]] = {t: [] for t in tables}
-    args = {"schema": schema, "tables": list(tables), "roles": list(roles)}
+    args = {"schema": schema, "tables": list(tables)}
 
     def part(n: str) -> str:  # as SQL spells it, so the fix in the drift report runs as printed
         return n if re.fullmatch(r"[a-z_][a-z0-9_$]*", n) else '"' + n.replace('"', '""') + '"'
@@ -196,12 +230,22 @@ def bypass_paths(conn: psycopg.Connection, schema: str, tables: list[str], roles
     def name(nsp: str, rel: str) -> str:
         return part(rel) if nsp == schema else f"{part(nsp)}.{part(rel)}"
 
+    def who(users, grantees, public) -> dict:
+        return {"roles": [r for r in users if r in roles], "outside": [r for r in users if r not in roles],
+                "grantees": list(grantees), "public": bool(public and "public" in grantees)}
+
     with conn.cursor() as cur:
         cur.execute(_BYPASS_VIEWS, args)
-        for tbl, nsp, rel, kind, using in cur.fetchall():
-            if using:
-                out[tbl].append({"path": f"view {name(nsp, rel)}", "roles": list(using),
-                                 "kind": "materialized view" if kind == "m" else "view"})
+        for tbl, nsp, rel, kind, owner, owner_bypasses, users, grantees, public in cur.fetchall():
+            if not users:
+                continue
+            if kind == "v" and not owner_bypasses:
+                if owner in roles:  # #92: the policies bind the owner, so its users act as it
+                    out[tbl].append({"path": f"view {name(nsp, rel)}", "kind": "delegation", "owner": owner,
+                                     **who(users, grantees, public)})
+                continue
+            out[tbl].append({"path": f"view {name(nsp, rel)}", **who(users, grantees, public),
+                             "kind": "materialized view" if kind == "m" else "view"})
         # the argument types print as the search path has them: fix it to the deploy's (`<schema>, public`), so
         # that import and drift (inside its snapshot's path) spell one function alike, and restore the caller's
         prev = cur.execute("select current_setting('search_path')").fetchone()[0]
@@ -209,11 +253,18 @@ def bypass_paths(conn: psycopg.Connection, schema: str, tables: list[str], roles
         cur.execute(_BYPASS_FUNCTIONS, args)
         rows = cur.fetchall()
         cur.execute("select set_config('search_path', %s, true)", (prev,))
-        for tbl, nsp, fn, types, owner, executing in rows:
-            if executing:
-                out[tbl].append({"path": f"function {name(nsp, fn)}({types})", "roles": list(executing),
+        for tbl, nsp, fn, types, owner, users, grantees, public in rows:
+            if users:
+                out[tbl].append({"path": f"function {name(nsp, fn)}({types})", **who(users, grantees, public),
                                  "kind": "function", "owner": owner})
     return out
+
+
+def delegation_text(f: dict) -> str:
+    """#92: a delegation as its assumption spells it: `view v as owner to r1, r2` (`public` when
+    every role may use the view)."""
+    callers = "public" if f["public"] else ", ".join(f["roles"] + f["outside"])
+    return f"{f['path']} as {f['owner']} to {callers}"
 
 
 FOREIGN_KEYS = """
