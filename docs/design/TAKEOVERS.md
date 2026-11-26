@@ -83,12 +83,22 @@ were assigned after the fact.
 | midday (11-25) | Supabase JWT, L, teams, helpers in another schema | 49, 110 | — / 0 | 3 (#81 #83 #84) | 2 (#80 #82) | 1 (#79) | run 1, first try | 221 | deployed, drift none, 49 proved |
 | nextbase (11-25) | Supabase JWT, S, `to public` policies, `auth.role()` | 3, 12 | — / — | 1 (#85) | 1 (#86) | 2 (#87 #88) | first try | 43 | deployed, drift none, 3 proved |
 | slack-clone (11-25) | Supabase JWT, S, RBAC through a role claim and `authorize()` | 5, 13 | — / 0 | 0 | 2 (#89 #90) | 1 (b3e95f4) | 1 repair round | 34 | deployed, drift none, 5 proved |
+| postgrest-starter-kit (11-25) | session settings (PostgREST claims, read through helper functions), S, views as the API | 2, 1 | 0 / 0 | 1 (#91) | 1 (#92) | 0 | first try | 12 | deployed, drift none, 2 proved |
+
+postgrest-starter-kit, the first row chosen by the program (empty identity cell, unexercised
+pattern), loaded unchanged as the superuser its Docker setup uses.  Its claims come through helper
+functions, so the existing trusted-function identity read them with no new construct.  The wrong
+answer was in the bypass paths: the callers are roles the spec never names, because the policies
+bind only the view owner.  Today's policy let a signed-in user delete or take over another user's
+public todo; the deployed rules refuse both through the real API (checked as `webuser` on
+`api.todos`).
 
 What the backfill shows: class B and C fixes fall over the last four rows (8, 6, 4, 3), but those
 projects also got smaller.  Class A did not fall steadily: midday had three.  Five of the six class
 A fixes concern callers without a full identity (signed-out visitors, `to public` policies, the
 anonymous role), which is where the next takeovers should press.  The provisional count stands at
-1 (slack-clone).
+0: postgrest-starter-kit (class A, #91) reset it after slack-clone.  Its class A fix is of a new
+kind: roles outside the spec.
 
 ## Coverage
 
@@ -107,11 +117,11 @@ fill one no row has filled.
 |---|---|---|---|
 | Supabase JWT | rbac, nextbase, slack-clone | scarpar, aural-oss, basejump | chatbot-ui, midday |
 | Trusted function | | graphile/starter | |
-| Session settings | | | |
+| Session settings | postgrest-starter-kit | | |
 | Database roles | | | |
 
 Patterns not yet exercised by any row: hierarchies, signed-out reads of public content at scale,
-views as the API, the session-settings and database-role identities.
+the database-role identity, session settings read directly in policies (not through helpers).
 
 ## Choosing the next project
 
@@ -127,9 +137,9 @@ views as the API, the session-settings and database-role identities.
 
 To vet before choosing: each must have RLS policies in its migrations and load on a stock image.
 
-- **PostgREST with JWT claims in session settings** (a PostgREST starter kit, e.g.
-  subzero-cloud/postgrest-starter-kit): fills session settings; `request.jwt.claims` is not
-  the `app.*` shape the session-setting identity reads today, so expect a class B finding.
+- **A project whose policies read `current_setting(..)` directly** (newer PostgREST apps read
+  `current_setting('request.jwt.claims', true)::json ->> 'sub'`): session settings, M or L; not the
+  `app.*` shape the session-setting identity reads, so expect a class B finding.
 - **An application with per-user database roles**: fills database roles.
 - **A Supabase project with folders or nested organizations**: exercises hierarchies.
 - **A large Supabase project as the regression check** (rule 3).
