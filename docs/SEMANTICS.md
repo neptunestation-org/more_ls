@@ -14,8 +14,10 @@ how to write them, and `docs/design/DECISIONS.md` why each choice was made.
   (a visitor with no current user) and is then like a NULL column: comparisons with it are
   UNKNOWN and `IS NULL` tests it.  A context value may be of an enum type (a claim cast to one of
   the schema's enums): it is then one of that type's labels (or NULL, if optional), as an enum
-  column is.  For an anonymous role of the identity adapter (Supabase's
-  `anon`, whose key carries no claims) every context value is NULL.
+  column is.  A context value may also be declared never set in the sessions of some roles
+  (NULL there: the role a request without a user's token is served as has no user) or possibly
+  unset in theirs; the proofs read each role's sessions so, and state the declaration as an
+  assumption, since the database does not record how sessions are started.
 - Predicates evaluate to TRUE, FALSE or UNKNOWN with SQL semantics:
   - comparison with a NULL operand → UNKNOWN; `IS NULL` is two-valued;
   - AND: FALSE dominates, then UNKNOWN; OR: TRUE dominates, then UNKNOWN; NOT swaps TRUE/FALSE.

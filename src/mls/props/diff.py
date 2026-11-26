@@ -23,8 +23,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from mls.compile.column import privileges
-from mls.logic.term import FALSE, Term, and_, forall, iff, implies, int_var, not_
-from mls.logic.tvl import Encoder, ctx_null_var
+from mls.logic.term import FALSE, TRUE, Term, forall, iff, implies, int_var
+from mls.logic.tvl import Encoder
 from mls.props.effective import effective, row_constraints, transition_constraints
 from mls.props.obligations import (
     Obligation, _relations_of, _rows_for, net_terms as _net_terms, relation_axioms,
@@ -141,11 +141,44 @@ def changed_opaques(old: Spec, new: Spec) -> set[str]:
 
 def encoders(old: Spec, new: Spec, role: str | None = None) -> tuple[Encoder, Encoder]:
     consts: dict[str, int] = {}
-    e_old = Encoder(old, consts=consts, role=role)
+    nulls = common_ctx_nulls(old, new, role)
+    e_old = Encoder(old, consts=consts, role=role, ctx_nulls=nulls)
     e_new = Encoder(new, {r: "new" for r in changed_relations(old, new)},
                     opaque_tags={o: "new" for o in changed_opaques(old, new)},
-                    hier_tags={h: "new" for h in changed_hierarchies(old, new)}, consts=consts, role=role)
+                    hier_tags={h: "new" for h in changed_hierarchies(old, new)}, consts=consts, role=role,
+                    ctx_nulls=nulls)
     return e_old, e_new
+
+
+def common_ctx_nulls(old: Spec, new: Spec, role: str | None) -> dict[str, Term]:
+    """#75, #98: a value optional for `role` in one version only is compared for the callers the
+    other version has in mind (who have it, or whose sessions never do): the optional version's free
+    flag would otherwise describe a caller only it knows.  A value one version never sets and the
+    other always does keeps each version's own flag: each is read for the callers it describes."""
+    out: dict[str, Term] = {}
+    for n, cv in new.identity.context.items():
+        o = old.identity.context.get(n)
+        if o is None:
+            continue
+        both = {o.availability(role), cv.availability(role)}
+        if len(both) == 2 and "optional" in both:
+            out[n] = TRUE if "unset" in both else FALSE
+    return out
+
+
+def _callers_differ(old: Spec, new: Spec, role: str | None) -> bool:
+    """#98: one version never sets a context value for the role and the other always does, so the
+    same predicate reads differently in the two."""
+    return any({o.availability(role), cv.availability(role)} == {"set", "unset"}
+               for n, cv in new.identity.context.items() if (o := old.identity.context.get(n)) is not None)
+
+
+def availability_changed(old: Spec, new: Spec) -> list[str]:
+    """The context values both versions declare that some role's sessions have differently."""
+    roles = sorted({*old.roles, *new.roles})
+    return sorted(n for n, cv in new.identity.context.items()
+                  if (o := old.identity.context.get(n)) is not None
+                  and any(o.availability(r) != cv.availability(r) for r in [None, *roles]))
 
 
 def _symbols(p: Pred | None, rels: set[str], opaques: set[str], spec: Spec | None = None) -> None:
@@ -207,12 +240,6 @@ def _rels(old: Spec, new: Spec, *preds: Pred | None) -> list[tuple[str, str | No
     return out
 
 
-def one_sided_optional(old: Spec, new: Spec) -> list[str]:
-    """The context values both versions declare, optional in exactly one of them."""
-    return sorted(n for n, cv in new.identity.context.items()
-                  if n in old.identity.context and old.identity.context[n].optional != cv.optional)
-
-
 def both_axioms(old: Spec, new: Spec, e_old: Encoder, e_new: Encoder) -> list[Term]:
     """Each version's relation axioms, and what ties a relation of one version to a relation of the
     other: both are projections of the same database, so two base relations over the same table,
@@ -221,10 +248,6 @@ def both_axioms(old: Spec, new: Spec, e_old: Encoder, e_new: Encoder) -> list[Te
     base relation and the shared hop functions.  Without this a renamed relation (an import names
     it after its table, the loop after its meaning) is reported as a change of access."""
     out = [*relation_axioms(old, e_old), *relation_axioms(new, e_new)]
-    # #75: a value only one version declares optional is compared for callers who have it; the
-    # other version says nothing about a caller without it
-    for n in one_sided_optional(old, new):
-        out.append(not_(ctx_null_var(n)))
     x, y = int_var("ax.k"), int_var("ax.v")
     for aname, a in old.base_relations().items():
         for bname, b in new.base_relations().items():
@@ -261,7 +284,7 @@ def _access_pair(old: Spec, new: Spec, view: Spec, table: str, role: str, cmd: s
                  timeout_ms: int) -> list[AccessChange]:
     p_old = effective(old, table, role, cmd, which) if table in old.tables else Lit(lit=False)
     p_new = effective(new, table, role, cmd, which) if table in new.tables else Lit(lit=False)
-    if _same(old, new, p_old, p_new):
+    if _same(old, new, p_old, p_new) and not _callers_differ(old, new, role):
         return [AccessChange(table, role, cmd, which, d, None, "PROVED") for d in ("granted", "denied")]
     e_old, e_new = encoders(old, new, role)
     img = {"select": "r", "insert": "new", "delete": "old"}.get(cmd, "old" if which == "using" else "new")
@@ -340,7 +363,8 @@ def _net_pair(old: Spec, new: Spec, view: Spec, table: str, role: str, cmd: str,
     in_old, in_new = table in old.tables, table in new.tables
     ps_old, t_old = _net_terms(old, table, role, cmd, e_old) if in_old else ([], FALSE)
     ps_new, t_new = _net_terms(new, table, role, cmd, e_new) if in_new else ([], FALSE)
-    if in_old and in_new and all(_same(old, new, a, b) for a, b in zip(ps_old, ps_new)):
+    if in_old and in_new and all(_same(old, new, a, b) for a, b in zip(ps_old, ps_new)) \
+            and not _callers_differ(old, new, role):
         return [AccessChange(table, role, cmd, "net", d, None, "PROVED") for d in ("granted", "denied")]
     rows = _rows_for(cmd, table)
     common: list[Term] = both_axioms(old, new, e_old, e_new)
@@ -400,9 +424,13 @@ def diff(old: Spec, new: Spec, timeout_ms: int = 20000) -> DiffResult:
                      f"context values are compared by name")
     for n, cv in new.identity.context.items():
         o = old.identity.context.get(n)
+        avail = {"optional": cv.optional, "optional_for": cv.optional_for, "unset_for": cv.unset_for}
         if o is not None and o.optional != cv.optional and o.model_copy(update={"optional": cv.optional}) == cv:
             notes.append(f"context value '{n}' may be unset in the {'new' if cv.optional else 'old'} version only; "
                          f"compared for callers who have it")
+        elif o is not None and n in availability_changed(old, new) and o.model_copy(update=avail) == cv:
+            notes.append(f"context value '{n}' is set for different callers in the two versions; compared "
+                         f"for the callers both versions describe")
         elif o is not None and o != cv:
             notes.append(f"context value '{n}' changed ({o.source}:{o.type} → {cv.source}:{cv.type}); "
                          f"treated as the same value")

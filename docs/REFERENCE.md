@@ -155,14 +155,16 @@ fix: declare the column bigint).  A string compared with a
 `uuid` column must be a UUID literal.  There are no NULL constants; use `is_null`.  There are no
 timestamp constants.
 
-**Context values** are always set unless declared `optional` (§3).  Column values may be NULL when
+**Context values** are always set unless declared `optional`, or unset or optional for some
+roles (§3).  Column values may be NULL when
 the column is nullable.
 
 ## 3. `identity`
 
     "identity": {
       "adapter": "supabase" | "pg_roles" | "session_setting" | "trusted_function",
-      "context": { "<name>": {"source": "<source>", "type": "<column type>", "md5": "<hex>"?, "optional": true?}, ... }
+      "context": { "<name>": {"source": "<source>", "type": "<column type>", "md5": "<hex>"?, "optional": true?,
+                   "optional_for": ["<role>", ...]?, "unset_for": ["<role>", ...]?}, ... }
     }
 
 A context value is a per-session value the policies may read as `{"ctx": "<name>"}`.  The
@@ -199,13 +201,25 @@ function may return NULL); a `pg_roles` value is `current_user`, always set, and
 When one version of a spec declares a value optional and the other does not, `mls diff` compares
 the callers who have it and says so.
 
-**Anonymous roles.**  `supabase`'s `anon` is the signed-out caller: the anon key carries no claims,
-so `auth.uid()` and every claim are NULL for it.  The proofs, the diff and the differential tests
-take every context value of `anon` as unset, whether or not it is optional: a policy for `anon`
-that compares with `@uid` admits nothing, and a property about `anon` reads `@uid` as NULL.  Every
-proof report states it.  A spec that names `anon` may test a context value with `is_null` (TRUE
-for `anon`, FALSE for a signed-in caller), and `mls import` keeps `auth.uid() IS [NOT] NULL` as
-that test.
+**Per role.**  Whether a session has a value can depend on its role: a request without a user's
+token reaches the database as whichever role the API is configured to use for it, and that role's
+sessions have no user.  `"unset_for": ["visitor"]` (terse: `uid: auth.uid uuid unset for visitor`)
+says the value is never set (NULL) in sessions of those roles; `"optional_for": ["member"]`
+(`optional for member`) says it may be unset in theirs; `optional` is the same for every role, and
+a role in neither list has the value.  The proofs, the diff and the differential tests read each
+role's sessions so: a policy for `visitor` that compares with `@uid` admits nothing, and a property
+about `visitor` reads `@uid` as NULL (a scenario shows it `not set`).  A value with either list may
+be tested with `is_null`, and `mls import` keeps `IS [NOT] NULL` of it.  The database does not record
+how sessions are started, so the proof report states each declaration as an assumption.  The roles
+are the spec's, each listed once and in one list; `optional` and `optional_for` do not combine; a
+`pg_roles` value has neither.  When a role's sessions never have a value in one version of a spec
+and always have it in the other, `mls diff` reads each version for the callers it describes.
+
+`supabase` starts the sessions of `anon` with its anon key, which has no user and carries only its
+own claims (`iss`, `ref`, `role`, `iat`, `exp`).  A spec that names `anon` says, for `@uid` and
+every other claim, whether `anon`'s sessions have it (`unset for anon` or `optional for anon`); one
+that does not is refused.  `mls import` declares `unset for anon`, with a note naming the
+assumption.
 
 An adapter may declare its platform's roles.  `supabase` declares `anon`, `authenticated`
 and `service_role`, which Supabase's default privileges grant every new table and function in
@@ -1017,7 +1031,7 @@ grammar:
     spec       := 'mls' VERSION [comment] identity roles enum* table* relation* hierarchy* opaque*
                   'rules' '{' rule* '}' 'properties' '{' property* '}'
     comment    := 'comment' STRING                               (the spec's $comment)
-    identity   := 'identity' ADAPTER '{' [ctx (';' ctx)*] '}'    ctx := NAME ':' SOURCE TYPE ['md5' STRING] ['optional']
+    identity   := 'identity' ADAPTER '{' [ctx (';' ctx)*] '}'    ctx := NAME ':' SOURCE TYPE [ENUM] ['md5' STRING] ['optional' ['for' NAME (',' NAME)*]] ['unset' 'for' NAME (',' NAME)*]
     roles      := 'roles' NAME (',' NAME)*
     table      := 'table' NAME MODE '{' [column (',' column)* [';']] [option (';' option)*] '}'
     enum       := 'enum' NAME '(' STRING (',' STRING)* ')'        (a Postgres enum type and its labels, in order)

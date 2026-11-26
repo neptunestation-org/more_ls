@@ -381,18 +381,16 @@ class Checker:
             self.pred(p.not_, scope, f"{path}.not", not negated)
             return
         if isinstance(p, IsNull):
-            from mls.identity.base import adapter_anonymous_roles
-
             ty = self.term_type(p.is_null, scope, f"{path}.is_null")
             if isinstance(p.is_null, Const):
                 self.err(f"{path}.is_null", "is_null applies to a column or an optional context value "
                                             "(a constant is never NULL)", "use {\"col\": name}")
-            elif isinstance(p.is_null, CtxRef) and not getattr(self.spec.identity.context.get(p.is_null.ctx),
-                                                               "optional", False) \
-                    and not adapter_anonymous_roles(self.spec.identity.adapter, self.spec.roles):  # #85
+            elif isinstance(p.is_null, CtxRef) and (cv := self.spec.identity.context.get(p.is_null.ctx)) \
+                    is not None and cv.availability(None) == "set":  # #98: some role's sessions may lack it
                 self.err(f"{path}.is_null", f"context value '{p.is_null.ctx}' is always set, so is_null of it is "
                                             f"constant", f"if a caller may lack it (a visitor with no current "
-                                            f"user), declare it optional in identity.context.{p.is_null.ctx}; "
+                                            f"user), declare it optional in identity.context.{p.is_null.ctx}, or "
+                                            f"unset_for / optional_for the roles whose sessions lack it; "
                                             f"else remove the test")
             return
         if isinstance(p, Has):
@@ -642,6 +640,7 @@ class Checker:
             if cv.optional and ident.adapter == "pg_roles":
                 self.err(path + ".optional", "a pg_roles context value is current_user, which is always set",
                          "remove optional")
+            self.check_availability(name, cv, path)
             if cv.md5 is not None and ident.adapter != "trusted_function":
                 self.err(path + ".md5", f"only a trusted_function source has an md5 (this is {ident.adapter})",
                          "remove md5")
@@ -677,6 +676,32 @@ class Checker:
                              "use 'current_user'")
                 elif cv.type != "text":
                     self.err(path + ".type", "current_user is text", "set type to \"text\"")
+
+    def check_availability(self, name: str, cv, path: str) -> None:
+        """#98: the roles whose sessions never have a context value, or may lack it."""
+        for field in ("unset_for", "optional_for"):
+            for i, r in enumerate(getattr(cv, field)):
+                if r not in self.spec.roles:
+                    self.err(f"{path}.{field}[{i}]", f"unknown role '{r}'",
+                             f"use one of the spec's roles: {', '.join(self.spec.roles)}")
+                elif getattr(cv, field)[:i].count(r):
+                    self.err(f"{path}.{field}[{i}]", f"role '{r}' is listed twice", "remove the repetition")
+            if getattr(cv, field) and self.spec.identity.adapter == "pg_roles":
+                self.err(f"{path}.{field}", "a pg_roles context value is current_user, which is always set",
+                         f"remove {field}")
+        for i, r in enumerate(cv.unset_for):
+            if r in cv.optional_for:
+                self.err(f"{path}.unset_for[{i}]", f"role '{r}' is both never set and optional for '{name}'",
+                         "keep it in unset_for if its sessions never have the value, else in optional_for")
+        if cv.optional and cv.optional_for:
+            self.err(f"{path}.optional_for", f"'{name}' is optional for every role already",
+                     "remove optional_for, or optional to limit it to those roles")
+        from mls.identity.base import adapter_class
+
+        for role, why in adapter_class(self.spec.identity.adapter).unstated_availability(self.spec.roles, cv):
+            self.err(path, f"{why}, and the spec does not say whether sessions of '{role}' have '{name}'",
+                     f"add \"unset_for\": [\"{role}\"] (terse: `unset for {role}`) if they never do, or "
+                     f"\"optional_for\": [\"{role}\"] (`optional for {role}`) if some do")
 
     def check_tables(self) -> None:
         for tname, t in self.spec.tables.items():

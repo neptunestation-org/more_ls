@@ -187,14 +187,12 @@ class ValueGen:
         return r
 
     def context(self, role: str) -> dict[str, Any]:
-        from mls.identity.base import anonymous_roles
-
         ctx: dict[str, Any] = {CONTEXT_NOW: self.now}
-        anonymous = role in anonymous_roles(self.spec)
         for name, cv in self.spec.identity.context.items():
-            if anonymous:
-                ctx[name] = None  # #83: an anonymous caller (Supabase's anon key) has no claims
-            elif cv.optional and self.rnd.random() < 0.25:
+            a = cv.availability(role)
+            if a == "unset":
+                ctx[name] = None  # #98: the role's sessions never have it (Supabase's anon key has no claims)
+            elif a == "optional" and self.rnd.random() < 0.25:
                 ctx[name] = None  # #75: a caller who lacks it (a signed-out visitor)
             elif name == self.user_ctx:
                 ctx[name] = self.rnd.choice(self.users)

@@ -207,6 +207,11 @@ def test_import_of_the_brownfield_fixture(brownfield):
     assert spec.identity.adapter == "supabase" and set(spec.identity.context) == {"uid", "role"}
     assert spec.identity.context["role"].model_dump(exclude_defaults=True) == {"source": "jwt.claims.role", "type": "text"}
     assert spec.roles == ["anon", "authenticated"]
+    # #98: the anon key has no user, so uid is declared never set for anon, as an assumption the note
+    # names; `role` is a claim the anon key carries
+    assert spec.identity.context["uid"].unset_for == ["anon"]
+    assert any("declared uid never set in sessions of anon" in n and "if it serves them as another role" in n
+               for n in res.notes), res.notes
     modes = {t: tb.mode for t, tb in spec.tables.items()}
     assert modes == {"profiles": "adopted", "projects": "adopted", "project_members": "adopted",
                      "tasks": "adopted", "audit_log": "observed"}
@@ -1156,7 +1161,7 @@ def test_supabases_authorize_helper_reads_as_a_role_grant(brownfield):
               using (authorize('channels.delete'));""")
         res = import_schema(brownfield)
     assert res.spec["identity"]["context"]["user_role"] == {
-        "source": "jwt.claims.user_role", "type": "enum", "enum": "app_role", "optional": True}
+        "source": "jwt.claims.user_role", "type": "enum", "enum": "app_role", "optional": True, "unset_for": ["anon"]}
     rule = next(r for r in res.spec["rules"] if r.get("name") == "authorized_delete")
     member = rule["using"]["member"]
     assert member["key"] == {"ctx": "user_role"} and member["value"] == {"const": "channels.delete"}, rule

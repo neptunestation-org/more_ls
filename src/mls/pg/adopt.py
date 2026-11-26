@@ -495,9 +495,28 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
         tb = spec_tables[table]
         return ([tb["primary_key"]] if tb.get("primary_key") else []) + tb.get("unique", [])
 
+    # #98: the roles whose sessions the platform starts without a value (Supabase's anon) are declared,
+    # as an assumption the note names
+    from mls.identity.base import adapter_class
+    from mls.spec.model import ContextVar
+
+    unset: dict[str, list[str]] = {}
+    for n, cv in context.items():
+        plain = ContextVar.model_validate({**cv, "optional": False})
+        for role, why in adapter_class(adapter).unstated_availability(roles, plain):
+            cv.setdefault("unset_for", []).append(role)
+            unset.setdefault(role, []).append((n, why))
+    for role, found in unset.items():
+        notes.append(f"identity: {'; '.join(why for _, why in found)}: declared {', '.join(n for n, _ in found)} "
+                     f"never set in sessions of {role} (`unset for {role}`).  This assumes {role} is the role "
+                     f"the API serves requests without a user's token as; if it serves them as another role, "
+                     f"declare that role instead")
+
     # --- the lifter's view of the spec so far
     env = Env(adapter=adapter, context={n: (cv["source"], cv["type"]) for n, cv in context.items()},
-              optional={n for n, cv in context.items() if cv.get("optional")},
+              optional={n for n, cv in context.items() if ContextVar.model_validate(cv).availability(None) != "set"},
+              availability={n: {k: cv[k] for k in ("optional", "unset_for", "optional_for") if cv.get(k)}
+                            for n, cv in context.items()},
               context_enums={n: cv["enum"] for n, cv in context.items() if cv.get("enum")},
               tables={t: {c: (col["type"], col["nullable"]) for c, col in tb["columns"].items()}
                       for t, tb in spec_tables.items()},

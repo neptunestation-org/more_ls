@@ -874,6 +874,8 @@ def storefront_spec() -> Spec:
     and anon reads no task.  Without the example's comment isolation (P3), which anon now crosses.  The mutation drops the helper's key: anon reads every comment."""
     d = composed_spec().model_dump(mode="json", by_alias=True, exclude_none=True)
     d["roles"] = ["anon", *d["roles"]]
+    for cv in d["identity"]["context"].values():  # the anon key carries no user
+        cv["unset_for"] = ["anon"]
     d["properties"] = [p for p in d["properties"] if p["id"] != "P3"]  # isolation, which anon's reads now cross
     d["relations"]["done_task"] = {"table": "tasks", "key": "done", "value": "id"}
     done = {"member": {"relation": "done_task", "key": {"const": True}, "value": {"col": "task_id"}}}

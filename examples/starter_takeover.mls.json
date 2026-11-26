@@ -6,7 +6,10 @@
   "context": {
    "uid": {
     "source": "auth.uid",
-    "type": "uuid"
+    "type": "uuid",
+    "unset_for": [
+     "anon"
+    ]
    }
   }
  },

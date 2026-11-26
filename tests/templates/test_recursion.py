@@ -21,7 +21,7 @@ from mls.spec.syntax import parse
 pytestmark = pytest.mark.pg
 
 SCHEMA = """mls 0.1
-identity supabase { uid: auth.uid uuid }
+identity supabase { uid: auth.uid uuid unset for anon }
 roles anon, authenticated
 
 table a owned {

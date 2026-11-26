@@ -245,3 +245,19 @@ def test_dropping_a_signed_out_callers_user_policy_is_no_change():
         "using owner_id = @uid\n}", "using false\n}")))
     changes = {(a.role, a.direction) for a in diff(old, new).access_changes}
     assert changes == {("authenticated", "denied")}, changes
+
+
+def test_a_role_whose_sessions_gain_a_value_is_compared_for_the_callers_each_version_describes():
+    """#98: with `uid` never set for visitor in the old version and always set in the new, the same
+    policy reads differently: each version is read for the callers it describes, so the visitor's
+    own notes are a new grant, and the diff says why.  Optional in the new version, it is compared
+    for the caller the old version describes, who lacks it: no change."""
+    from tests.props.test_properties import PUBLIC_NOTES
+    from mls.spec.syntax import parse
+
+    rules = lambda decl: check_spec(parse(PUBLIC_NOTES.split("properties")[0] % ("supabase", "auth.uid", decl)))
+    res = diff(rules(" unset for visitor"), rules(""))
+    assert {(a.role, a.direction) for a in res.access_changes} == {("visitor", "granted")}, res.access_changes
+    assert any("set for different callers" in n for n in res.notes), res.notes
+    res = diff(rules(" unset for visitor"), rules(" optional for visitor"))  # the old caller is the new one who lacks it
+    assert not res.access_changes, res.access_changes

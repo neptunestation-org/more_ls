@@ -928,3 +928,41 @@ def test_a_composite_field_is_read_by_predicates_and_refused_where_postgres_need
                        "columns": ["id", "metadata.workspace"], "access": "read"})
     e = next(e for e in errors(d) if e.path == "$.rules[6].columns[1]")
     assert "privileges are granted per column, never per field" in e.message
+
+
+def test_which_roles_sessions_lack_a_context_value_is_checked():
+    """#98: `unset_for` and `optional_for` name the spec's roles, each once and in one of the two
+    lists; `optional` already covers every role; a pg_roles value (current_user) is always set."""
+    d = base()
+    uid = d["identity"]["context"]["uid"]
+    uid["unset_for"] = ["visitor", "authenticated", "authenticated"]
+    errs = errors(d)
+    assert has(errs, "$.identity.context.uid.unset_for[0]", "unknown role 'visitor'")
+    assert has(errs, "$.identity.context.uid.unset_for[2]", "listed twice")
+    uid["unset_for"], uid["optional_for"] = ["authenticated"], ["authenticated"]
+    assert has(errors(d), "$.identity.context.uid.unset_for[0]", "both never set and optional")
+    del uid["unset_for"]
+    uid["optional"] = True
+    assert has(errors(d), "$.identity.context.uid.optional_for", "optional for every role already")
+    del uid["optional"]
+    assert not errors(d)
+    d = base()
+    d["identity"] = {"adapter": "pg_roles", "context": {"me": {"source": "current_user", "type": "text",
+                                                               "unset_for": ["authenticated"]}}}
+    assert has(errors(d), "$.identity.context.me.unset_for", "always set")
+
+
+def test_a_supabase_spec_says_whether_anons_sessions_have_each_value():
+    """#98: Supabase starts anon's sessions with the anon key, which has no user and carries only its
+    own claims; a spec naming anon says what that means for every other value (no default is taken
+    from the role's name)."""
+    d = base()
+    d["roles"] = ["anon", *d["roles"]]
+    errs = errors(d)
+    assert has(errs, "$.identity.context.uid", "auth.uid() is NULL there")
+    assert has(errs, "$.identity.context.clearance", "carries no 'clearance' claim")
+    assert any('"unset_for": ["anon"]' in e.fix for e in errs)
+    d["identity"]["context"]["uid"]["unset_for"] = ["anon"]
+    d["identity"]["context"]["clearance"]["optional_for"] = ["anon"]
+    d["identity"]["context"]["role"] = {"source": "jwt.claims.role", "type": "text"}  # the anon key's own claim
+    assert not errors(d)

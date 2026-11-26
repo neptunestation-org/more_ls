@@ -2159,3 +2159,32 @@ context value, in `Obligation.finish` (so the diff too) and the lint, as `enum_r
 enums, and is constrained only where every encoder's spec declares the column bool.  A sort of its
 own for bools was the alternative; it would touch every comparison and the shared constant table
 for a value set of two.  Lean: a known gap, as for the enum axiom.
+
+**D106. Whether a session has a context value is declared per role in the spec (#98; amends D98).**
+MLS is for generic Postgres, which has no anonymous role: which role serves a request without a
+user's token is the API's configuration (PostgREST's `db-anon-role` has no default; Supabase sets
+`anon`, neutree `anonymous`).  D98 tied the fact to a role name in one adapter
+(`Adapter.anonymous_roles`), so the same database proved or refuted "a signed-out caller reads only
+public notes" according to what its role was called and which adapter read the claims.
+- *Construct:* `ContextVar.unset_for` (never set in those roles' sessions) and `optional_for` (may
+  be unset there); `optional` stays, the same for every role.  `ContextVar.availability(role)` is
+  `set` / `optional` / `unset`, and for no one role `optional` when any role may lack it (#85's
+  role-less formula).  Two lists, not one per-role map: each fact is stated and printed as itself.
+  Terse `optional [for r, ..]`, `unset for r, ..`.
+- *Encoding:* `Encoder.ctx_null` reads the availability (TRUE / free / FALSE).  Insert defaults,
+  the harness (`Harness.context`), scenarios (an unset value shows `not set`) and the checker's
+  `is_null` rule read it too.
+- *Diff:* a value optional for the role in one version only is compared for the callers the other
+  version has in mind (`common_ctx_nulls`: FALSE against `set`, TRUE against `unset`; #75's rule,
+  generalized).  Never set in one version and always set in the other keeps each version's own
+  flag (they are constants, so nothing contradicts): each version is read for the callers it
+  describes, and `_callers_differ` turns off the shortcut for textually equal policies.
+- *Supabase:* `Adapter.anonymous_roles` and `anonymous_note` are gone.  What stays is
+  `Adapter.unstated_availability(roles, cv)`: Supabase reports `anon` for `auth.uid` and every claim
+  the anon key does not carry (`ANON_KEY_CLAIMS`).  The checker refuses those (no default is taken
+  from a role's name, so a spec written for D98 fails loudly once, with the line to add), and import
+  declares `unset for anon` with a note naming the assumption and how to move it.
+- *Output:* `english.optional_line` states every declaration; an `unset_for` one as an assumption
+  the database does not record.
+- *Lean:* `Env.ctxUnset` is already a function of the value: the encoder gives it per obligation,
+  so nothing to transcribe.

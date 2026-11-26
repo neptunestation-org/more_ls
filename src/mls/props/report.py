@@ -68,7 +68,7 @@ def assumptions(spec: Spec, results: list[PropertyResult]) -> list[str]:
                           f"{', '.join(observed)}")
     return [
         f"identity adapter '{adapter.name}': {adapter.assumption}",
-        *filter(None, [english.optional_line(spec), english.anonymous_line(spec)]),
+        *filter(None, [english.optional_line(spec)]),
         trusted,
         *english.assumption_lines(spec),
         *brownfield,

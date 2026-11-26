@@ -271,31 +271,37 @@ def identity_lines(spec: Spec) -> list[str]:
                      "is denied (no context set: denied).")
     if (line := optional_line(spec)) is not None:
         lines.append(f"- {line}")
-    if (line := anonymous_line(spec)) is not None:
-        lines.append(f"- {line}")
     return lines
 
 
-def anonymous_line(spec: Spec) -> str | None:
-    """#83: the roles whose callers have no context values, when the spec names one."""
-    from mls.identity import get_adapter
-    from mls.identity.base import anonymous_roles
-
-    if not anonymous_roles(spec):
-        return None
-    return (f"{get_adapter(spec).anonymous_note}: the proofs take every context value as unset (NULL) for "
-            f"{', '.join(sorted(anonymous_roles(spec)))}")
-
-
 def optional_line(spec: Spec) -> str | None:
-    """#75: which context values the proofs take as possibly unset, and which as always set."""
-    optional = [n for n, cv in spec.identity.context.items() if cv.optional]
-    if not optional:
+    """#75, #98: which context values the proofs take as possibly or never set, for which roles,
+    and which as always set.  A value never set in some role's sessions is an assumption about how
+    the deployment starts them, which the database does not record."""
+    ctx = spec.identity.context
+    names = lambda ns: ", ".join(f"@{n}" for n in ns)
+    roles = lambda rs: ", ".join(rs)
+    clauses = []
+    optional = [n for n, cv in ctx.items() if cv.optional]
+    if optional:
+        clauses.append(f"{names(optional)} may be unset (NULL for a caller who lacks it): the proofs cover "
+                       f"that caller too")
+    for n, cv in ctx.items():
+        if cv.optional_for:
+            clauses.append(f"@{n} may be unset (NULL) in sessions of {roles(cv.optional_for)}")
+    unset: dict[tuple[str, ...], list[str]] = {}
+    for n, cv in ctx.items():
+        if cv.unset_for:
+            unset.setdefault(tuple(cv.unset_for), []).append(n)
+    for rs, ns in unset.items():
+        clauses.append(f"{names(ns)} {'is' if len(ns) == 1 else 'are'} never set (NULL) in sessions of "
+                       f"{roles(rs)} (an assumption about how the deployment starts those sessions, which the "
+                       f"database does not record)")
+    if not clauses:
         return None
-    rest = [n for n in spec.identity.context if n not in optional]
-    return (f"{', '.join(f'@{n}' for n in optional)} may be unset (NULL for a caller who lacks it): "
-            f"the proofs cover that caller too" + (f"; {', '.join(f'@{n}' for n in rest)} "
-            f"{'is' if len(rest) == 1 else 'are'} taken as always set" if rest else ""))
+    rest = [n for n, cv in ctx.items() if cv.availability(None) == "set"]
+    return "; ".join(clauses) + (f"; {names(rest)} {'is' if len(rest) == 1 else 'are'} taken as always set"
+                                 if rest else "")
 
 
 def assumption(table: str, a) -> str:

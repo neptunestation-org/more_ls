@@ -234,11 +234,12 @@ union member the renderer does not cover.
   `trusted_function` values optional and keeps their `IS NULL` (`Env.optional`); diff compares a
   one-sided optional value for callers who have it (`diff.one_sided_optional`); harness draws it unset;
   fixture `specs.optional_spec`, mutation `CTX_IS_NULL_FOLDED`; Lean `Env.ctxUnset`.
-- D98 (#83): `Adapter.anonymous_roles` (Supabase: `anon`): every context value is NULL for them
-  (`Encoder(role=..)`, `ctx_null` TRUE; per-role obligations and the diff pass the role, a role-less
-  encoder takes the flag free when the spec names one, #85); harness gives anon no claims;
-  `english.anonymous_line`; with anon a role, import keeps `auth.uid() IS NULL` and the checker
-  accepts `is_null` of a context value.
+- D98 (#83), amended by D106 (#98): per-role obligations and the diff pass the role (`Encoder(role=..)`);
+  whether a session has a context value is the spec's `ContextVar.unset_for` / `optional_for`
+  (`availability(role)`; `ctx_null` TRUE / free / FALSE, role-less free when any role may lack it, #85),
+  never a role's name; the diff pins a one-sided optional flag (`diff.common_ctx_nulls`); Supabase's
+  `unstated_availability` makes the checker refuse an undeclared `anon` and import declare `unset for anon`
+  (note); harness and scenarios read it; import keeps `IS NULL` of such a value.
 - D100 (#89): `ContextVar.enum` (a claim of an enum type); `check.enum_name` answers for it,
   `enum_row_axioms` bounds it to its labels, `identity.base.ctx_type_sql` casts it; import reads
   the cast (optional); fixture `specs.role_claim_spec`, mutation `IN_DROP_LAST`; Lean known gap.

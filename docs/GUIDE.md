@@ -195,7 +195,7 @@ Import the schema as it is, policies included, before you change anything:
 
     $ uv run mls import --dsn "$DATABASE_URL" --out before.mls
     ...
-    before.mls: imported 5 table(s), 49 note(s)
+    before.mls: imported 5 table(s), 50 note(s)
 
 `before.mls` is a spec of today's behaviour: the hand-written policies are lifted into rules
 where MLS can read them and kept as `opaque` blocks where it cannot (here it reads them all).
@@ -208,13 +208,13 @@ Now import again, keeping the tables and discarding the policies:
 
     $ uv run mls import --dsn "$DATABASE_URL" --policies discard --out skeleton.mls
     ...
-    skeleton.mls: imported 5 table(s), 28 note(s)
+    skeleton.mls: imported 5 table(s), 29 note(s)
 
 `skeleton.mls` is the starting point of the new spec.  Keep it as it is: every run of
 `mls generate` (step 6) starts from it and writes the spec to another file.  Every table is `adopted`: MLS did not create
 it, describes its columns and keys as the catalog has them, and will add rules to it.  The
-identity adapter is `supabase` (`@uid` is `auth.uid()`), the app roles are `anon` and
-`authenticated` (`service_role` bypasses row-level security on Supabase and is a trusted role,
+identity adapter is `supabase` (`@uid` is `auth.uid()`, declared never set in `anon`'s sessions:
+`uid: auth.uid uuid unset for anon`), the app roles are `anon` and `authenticated` (`service_role` bypasses row-level security on Supabase and is a trusted role,
 which every proof report says), the membership table is a relation, and the two readable CHECKs
 are rules:
 
@@ -230,6 +230,7 @@ The import prints its notes on stderr; read every one.  They say what the skelet
 and what the deploy will change:
 
     note: roles not taken as app roles: postgres, service_role (owners, superusers, public, MLS's internal role, or the platform's trusted roles)
+    note: identity: Supabase starts anon's sessions with its anon key, which has no user, so auth.uid() is NULL there: declared uid never set in sessions of anon (`unset for anon`).  This assumes anon is the role the API serves requests without a user's token as; if it serves them as another role, declare that role instead
     note: column projects.settings has type jsonb, not an MLS type: left out of the spec (drift lists it as foreign)
     note: table team_members has row level security disabled today: the deploy enables it, and until then every app role with a grant reads every row
     note: relation team_members proposed: (user_id, team_id) of team_members (membership table: (user_id, team_id) is a key, user_id refers to auth.users, team_id to teams)
@@ -238,6 +239,12 @@ and what the deploy will change:
     note: bypass path: view project_overview reaches table projects without its policies
     note: bypass path: function is_team_member(bigint) reaches table team_members without its policies
 
+- **Signed-out callers**: Postgres has no notion of a signed-out caller.  A request without a
+  user's token reaches the database as whichever role the API is configured to use for it
+  (Supabase's is `anon`), and in that role's sessions `auth.uid()` is NULL.  The skeleton says so
+  (`unset for anon`), every proof report states it as an assumption, and the proofs about `anon`
+  read `@uid` as NULL.  If your API serves those requests as another role, move the declaration
+  to that role.
 - **Discarded policies** are what the old rules said.  Each is quoted with its SQL, so the
   requirements you write in step 5 can say what should stay.
 - **Assumptions**: none of the tables forces row-level security, so their owner bypasses every
@@ -278,8 +285,8 @@ later step checks the spec against them.  Start from what the old policies allow
     ...
 
 Keep what is right, fix what is wrong, add what is missing.  Here the two reads of `profiles`
-stay.  R3 is the old update policy, written `to public` so it also named `anon`; an anonymous
-caller has no user id, so it goes.  The rest is new: today `teams`, `projects` and `tasks` are
+stay.  R3 is the old update policy, written `to public` so it also named `anon`; `@uid` is
+never set in `anon`'s sessions, so it goes.  The rest is new: today `teams`, `projects` and `tasks` are
 closed to app roles, and `team_members` is open to all.  Write one sentence per grant, each
 saying who, which rows and what they may do, in `requirements.txt`:
 
@@ -399,9 +406,8 @@ the conditions under which the proofs say anything.
 Every change in effect, with an example.  Go through them with whoever owns the requirements;
 each one should be a sentence of step 5 or a mistake.  Here they are what was intended: the
 new grants.  The old update policy on `profiles` was `to public`, so it also named `anon`, and
-the new rules give `anon` no update; that is no change, since Supabase's anon key carries no
-claims, `auth.uid()` is NULL for `anon` and the old policy admitted nothing for it (every proof
-and diff on Supabase takes `anon`'s context values as unset).  The exit code is 2 when
+the new rules give `anon` no update; that is no change, since `@uid` is never set in `anon`'s
+sessions (the skeleton's `unset for anon`) and the old policy admitted nothing for it.  The exit code is 2 when
 anything changed, so a CI job can require a reviewed diff.
 
 `team_members` is not compared: today it has no row-level security, so every app role with a

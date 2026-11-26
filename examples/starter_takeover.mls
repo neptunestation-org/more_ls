@@ -1,7 +1,7 @@
 mls 0.1
 comment 'The Supabase starter (tests/brownfield/starter_schema.sql) after the takeover of docs/GUIDE.md section 3: the skeleton that mls import --policies discard writes, the composed relation in_project, and the rules and properties the guide writes. Every table is adopted; the old policies are gone.'
 
-identity supabase { uid: auth.uid uuid }
+identity supabase { uid: auth.uid uuid unset for anon }
 roles anon, authenticated
 
 table profiles adopted {

@@ -119,8 +119,10 @@ class Encoder:
     ups_used: set[tuple[str, int]] = field(default_factory=set)  # (relation, upward hop) read (#43)
     # (table, array column) -> the labels a `has` tested on it (D88): what a scenario lists
     array_labels: dict[tuple[str, str], set[str]] = field(default_factory=dict)
-    # #83: the role the formula speaks for; an anonymous one (Supabase's anon) has no context values
+    # #83: the role the formula speaks for (#98: a context value says per role whether it is set)
     role: str | None = None
+    # #98: the diff's common null flag of a context value whose availability differs between the versions
+    ctx_nulls: dict[str, Term] = field(default_factory=dict)
 
     # ------------------------------------------------------------------ symbols
     def rel(self, name: str) -> FunDecl:
@@ -161,18 +163,15 @@ class Encoder:
         raise TypeError(t)
 
     def ctx_null(self, name: str) -> Term:
-        """The null flag of a context value: TRUE for an anonymous role's caller (#83), free for an
-        optional one (#75), else FALSE."""
+        """The null flag of a context value: TRUE where the role's sessions never have it, free where
+        they may lack it (#75), else FALSE (#98; a formula for no one role covers both states, #85)."""
+        if name in self.ctx_nulls:
+            return self.ctx_nulls[name]
         cv = self.spec.identity.context.get(name)
         if cv is None:
             return FALSE
-        from mls.identity.base import anonymous_roles
-
-        anonymous = anonymous_roles(self.spec)
-        if self.role is not None and self.role in anonymous:
-            return TRUE
-        # #85: a formula for no one role, in a spec with an anonymous role, covers both states
-        return ctx_null_var(name) if cv.optional or (self.role is None and anonymous) else FALSE
+        a = cv.availability(self.role)
+        return TRUE if a == "unset" else ctx_null_var(name) if a == "optional" else FALSE
 
     def _type_of(self, t, table: str) -> str | None:
         cols = self.spec.tables[table].columns

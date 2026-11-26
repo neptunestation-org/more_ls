@@ -10,6 +10,10 @@ from mls.sqltext import q
 from mls.spec.model import Spec
 
 
+# the claims of Supabase's anon key (its own JWT, signed by the project)
+ANON_KEY_CLAIMS = frozenset({"iss", "ref", "role", "iat", "exp"})
+
+
 class SupabaseAdapter(Adapter):
     name = "supabase"
     platform_roles = ("anon", "authenticated", "service_role")
@@ -17,9 +21,6 @@ class SupabaseAdapter(Adapter):
     trusted_note = ("service_role has BYPASSRLS (Supabase's backend key) and is trusted: it reads and "
                     "writes every row whatever the policies say")
     service_roles = ("authenticator", "supabase_auth_admin")
-    anonymous_roles = ("anon",)
-    anonymous_note = ("anon is the signed-out caller: its key carries no claims, so auth.uid() and every "
-                      "claim are NULL for it")
     service_note = ("authenticator (the API's login, which can become service_role) and "
                     "supabase_auth_admin (the auth service, which can create roles) are the platform's "
                     "service roles and are trusted: their own rules are deployed and what they must be "
@@ -28,6 +29,22 @@ class SupabaseAdapter(Adapter):
     assumption = ("Clients reach the database only through Supabase's API layer, which verifies "
                   "the JWT before setting request.jwt.claims; direct database connections by "
                   "untrusted clients are out of scope.")
+
+    @classmethod
+    def unstated_availability(cls, roles, cv) -> list[tuple[str, str]]:
+        """#98: Supabase's API serves a request without a user's token as `anon` (PostgREST's anonymous
+        role, as Supabase configures it), whose key carries only its own claims: no `sub`, so
+        auth.uid() is NULL, and no claim the auth service adds."""
+        if "anon" not in roles or cv.optional or "anon" in cv.unset_for or "anon" in cv.optional_for:
+            return []
+        if cv.source == "auth.uid":
+            return [("anon", "Supabase starts anon's sessions with its anon key, which has no user, so "
+                             "auth.uid() is NULL there")]
+        claim = cv.source[len("jwt.claims."):]
+        if cv.source.startswith("jwt.claims.") and claim not in ANON_KEY_CLAIMS:
+            return [("anon", f"Supabase starts anon's sessions with its anon key, which carries no "
+                             f"'{claim}' claim")]
+        return []
 
     def _ctx_sql(self, name: str, source: str, sql_type: str) -> str:
         if source == "auth.uid":

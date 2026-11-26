@@ -966,7 +966,7 @@ properties {
 
 
 ANON = """mls 0.1
-identity supabase { uid: auth.uid uuid }
+identity supabase { uid: auth.uid uuid unset for anon }
 roles anon, authenticated
 
 table notes adopted {
@@ -1042,7 +1042,7 @@ def test_a_scenario_lists_a_relation_over_its_own_types_only():
 
 
 SIGNED_IN_ONLY = """mls 0.1
-identity supabase { uid: auth.uid uuid }
+identity supabase { uid: auth.uid uuid unset for anon }
 roles anon, authenticated
 
 table items adopted {
@@ -1078,7 +1078,7 @@ def test_a_user_null_test_reads_anon_as_signed_out():
 
 
 PUBLISHED = """mls 0.1
-identity supabase { uid: auth.uid uuid }
+identity supabase { uid: auth.uid uuid unset for anon }
 roles anon, authenticated
 
 table posts adopted {
@@ -1250,3 +1250,61 @@ def test_a_boolean_holds_true_false_or_null_and_nothing_else():
     bad = next(o for o in results["P2"].obligations if o.verdict == "REFUTED")
     assert bad.scenario.rows["r"]["values"]["is_public"] is False
     assert [o.verdict for o in results["P3"].obligations if "some row meets the condition" in o.name] == ["REFUTED"]
+
+
+PUBLIC_NOTES = """mls 0.1
+identity %s { uid: %s uuid%s }
+roles visitor, member
+
+table notes owned {
+  id int not null,
+  owner_id uuid,
+  visibility text not null;
+  primary_key (id)
+}
+
+rules {
+  R1 policy read_own_or_public on notes: visitor select permissive using owner_id = @uid or visibility = 'public'
+  R2 policy member_reads on notes: member select permissive using owner_id = @uid or visibility = 'public'
+}
+
+properties {
+  P1 custom notes visitor select new: visibility = 'public' description 'a signed-out caller reads only public notes'
+  P2 custom notes member select new: visibility = 'public'
+}
+"""
+
+
+@pytest.mark.parametrize("adapter, source", [("supabase", "auth.uid"), ("session_setting", "app.uid")])
+def test_whether_a_roles_sessions_have_a_context_value_is_the_specs_to_say(adapter, source):
+    """#98: the same database proves or refutes "a signed-out caller reads only public notes"
+    according to what the spec says about the signed-out role's sessions, whatever the role is
+    called and whichever adapter reads the value.  Never set: proved, and only for that role (P2);
+    may be unset or always set: refuted, the first with a caller who lacks it or has it."""
+    from mls.spec.syntax import parse
+
+    def run(decl: str) -> dict:
+        return {r.id: r for r in run_all(check_spec(parse(PUBLIC_NOTES % (adapter, source, decl))))}
+
+    unset = run(" unset for visitor")
+    assert (unset["P1"].verdict, unset["P2"].verdict) == ("PROVED", "REFUTED")
+    for decl in ("", " optional for visitor"):
+        r = run(decl)["P1"]
+        assert r.verdict == "REFUTED", decl
+        bad = next(o for o in r.obligations if o.verdict == "REFUTED")
+        assert bad.scenario.context["uid"] is not None  # the counterexample is a caller who has it
+    from mls.props.report import assumptions
+
+    report = assumptions(check_spec(parse(PUBLIC_NOTES % (adapter, source, " unset for visitor"))), [])
+    assert any("@uid is never set (NULL) in sessions of visitor" in a for a in report), report
+
+
+def test_a_value_never_set_for_a_role_shows_as_null_in_its_scenarios():
+    """#98: a counterexample for a role whose sessions never have the value shows it NULL."""
+    from mls.spec.syntax import parse
+
+    text = (PUBLIC_NOTES % ("supabase", "auth.uid", " unset for visitor")).replace(
+        "P1 custom notes visitor select new: visibility = 'public'", "P1 custom notes visitor select new: false")
+    r = {x.id: x for x in run_all(check_spec(parse(text)))}["P1"]
+    bad = next(o for o in r.obligations if o.verdict == "REFUTED")
+    assert "uid" in bad.scenario.context and bad.scenario.context["uid"] is None

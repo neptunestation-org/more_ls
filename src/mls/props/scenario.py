@@ -5,7 +5,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Any
 
 from mls.logic.solve import Model
-from mls.logic.term import Sort
+from mls.logic.term import FALSE, TRUE, Sort
 from mls.logic.tvl import ARRAY_HAS, ARRAY_HAS_NULL, has_parent_fun, hop_exists_fun, hop_key_fun, parent_fun, rel_fun
 from mls.props.obligations import Obligation
 from mls.spec.model import ARRAY_TYPES, CONTEXT_NOW, MAX_HOPS, ComposedRelation, Spec
@@ -82,9 +82,9 @@ def render_scenario(spec: Spec, ob: Obligation, model: Model) -> Scenario:
             ty = spec.context_type(name)
             universe.setdefault(ty, set()).add(v)
             sc.context[name] = _render(spec, ty, v, consts, now)
-        cv = spec.identity.context.get(name)
-        if cv is not None and cv.optional and model.var(f"ctx.{name}.null", Sort.BOOL):
-            sc.context[name] = None  # #78: a caller who lacks the value
+        null = ob.encoders[0].ctx_null(name) if ob.encoders and name in spec.identity.context else FALSE
+        if null == TRUE or (null not in (TRUE, FALSE) and model.var(f"ctx.{name}.null", Sort.BOOL)):
+            sc.context[name] = None  # #78: a caller who lacks the value (#98: or whose sessions never have it)
     tested: dict[tuple[str, str], set[str]] = {}  # D88: per array column, the labels the obligation tested
     for e in ob.encoders:
         for k, xs in e.array_labels.items():

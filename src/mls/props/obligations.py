@@ -345,7 +345,7 @@ def insert_written(spec: Spec, table: str, role: str, lower: bool = False) -> Pr
             continue
         same = {"cmp": [{"col": c}, "=", d.model_dump(by_alias=True)]}
         cv = spec.identity.context.get(getattr(d, "ctx", ""))
-        if cv is not None and cv.optional:  # #75: a caller who lacks the value writes NULL
+        if cv is not None and cv.availability(role) != "set":  # #75: a caller who lacks the value writes NULL
             same = {"or": [same, {"and": [{"is_null": d.model_dump(by_alias=True)}, {"is_null": {"col": c}}]}]}
         parts.append(Or.model_validate(same) if "or" in same else Cmp.model_validate(same))
     return And.model_validate({"and": [p.model_dump(by_alias=True) for p in parts]}) if parts else Lit(lit=True)

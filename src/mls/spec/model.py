@@ -375,6 +375,20 @@ class ContextVar(Strict):
     # #75: a caller may lack the value (a visitor with no current user): NULL, which policies read
     # as UNKNOWN and properties may test with `is null`.  Otherwise the value is always set.
     optional: bool = False
+    # #98: per role, in place of an adapter's anonymous roles (D98): in sessions of an `unset_for`
+    # role the value is never set (NULL); in those of an `optional_for` one it may be unset.
+    # `optional` is the same for every role.
+    unset_for: list[str] = Field(default_factory=list)
+    optional_for: list[str] = Field(default_factory=list)
+
+    def availability(self, role: str | None) -> Literal["set", "optional", "unset"]:
+        """Whether the value is set in sessions of `role`; for no one role (a formula about every
+        caller), optional when some role's sessions may lack it."""
+        if role is None:
+            return "optional" if self.optional or self.unset_for or self.optional_for else "set"
+        if role in self.unset_for:
+            return "unset"
+        return "optional" if self.optional or role in self.optional_for else "set"
 
 
 class Identity(Strict):

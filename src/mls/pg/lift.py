@@ -672,7 +672,8 @@ class Env:
     caller_reads: list[str] = field(default_factory=list)
     hidden: set[str] = field(default_factory=set)
     # #75: the context values a caller may lack (NULL): their IS [NOT] NULL is kept, not folded
-    optional: set[str] = field(default_factory=set)
+    optional: set[str] = field(default_factory=set)  # #98: the values some role's sessions may lack
+    availability: dict[str, dict] = field(default_factory=dict)  # their optional / unset_for / optional_for
     # #89: the enum type of each enum context value
     context_enums: dict[str, str] = field(default_factory=dict)
     # #95: while a text is read again with its helper calls as written, each inlined helper whose
@@ -686,7 +687,10 @@ class Env:
     def of_spec(cls, spec: Spec) -> "Env":
         return cls(adapter=spec.identity.adapter,
                    context={n: (cv.source, cv.type) for n, cv in spec.identity.context.items()},
-                   optional={n for n, cv in spec.identity.context.items() if cv.optional},
+                   optional={n for n, cv in spec.identity.context.items() if cv.availability(None) != "set"},
+                   availability={n: cv.model_dump(include={"optional", "unset_for", "optional_for"},
+                                                  exclude_defaults=True)
+                                 for n, cv in spec.identity.context.items()},
                    context_enums={n: cv.enum for n, cv in spec.identity.context.items() if cv.enum},
                    tables={t: {c: (col.type, col.nullable) for c, col in tb.columns.items()}
                            for t, tb in spec.tables.items()},
@@ -722,7 +726,8 @@ class Env:
                                                     "context": {n: {"source": s, "type": t,
                                                                     **({"enum": self.context_enums[n]}
                                                                        if n in self.context_enums else {}),
-                                                                    **({"optional": True} if n in self.optional else {})}
+                                                                    **(self.availability.get(n) or (
+                                                                        {"optional": True} if n in self.optional else {}))}
                                                                 for n, (s, t) in self.context.items()}},
                  "roles": self.roles or ["r"], "enums": self.enums,
                  "tables": {t: {"columns": {c: {"type": ty, "nullable": nu,
@@ -892,13 +897,9 @@ class Lifter:
     def never_null(self, node: Node) -> bool:
         """#66: a context value is never NULL in the model (the identity adapter's assumption), so its
         `IS [NOT] NULL` is TRUE or FALSE; the import says so."""
-        from mls.identity.base import adapter_anonymous_roles
-
         found = self.context(node)
-        if found is None or found[0] in self.env.optional:  # #75: an optional value's test is kept
+        if found is None or found[0] in self.env.optional:  # #75, #98: a value some sessions lack: the test is kept
             return False
-        if found[0] != CONTEXT_NOW and adapter_anonymous_roles(self.env.adapter, self.env.roles):
-            return False  # #85: anon (no claims) lacks it, a signed-in caller has it: the test is kept
         self.hint(f"`{self.src(node)} IS [NOT] NULL` is read as constant: the identity adapter's "
                   "assumption is that a context value is always set")
         return True

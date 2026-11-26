@@ -197,6 +197,15 @@ class Parser:
             raise self.fail(what)
         return int(self.advance().text)
 
+    def role_list(self) -> list[str]:
+        """'for' NAME (',' NAME)*: the roles of a context value's availability."""
+        self.advance()
+        out = [self.name("a role")]
+        while self.at(","):
+            self.advance()
+            out.append(self.name("a role"))
+        return out
+
     def names(self, close: str = ")") -> list[str]:
         out: list[str] = []
         if self.at(close):
@@ -295,15 +304,25 @@ class Parser:
             source = self.dotted("a source (auth.uid, jwt.claims.<name>, current_user, app.<name>, "
                                  "<schema>.<function>)")
             ctx[n] = {"source": source, "type": self.word(*TYPES)}
-            if self.tok.kind in ("ident", "qident") and not self.at_word("md5", "optional"):  # #89
+            if self.tok.kind in ("ident", "qident") and not self.at_word("md5", "optional", "unset"):  # #89
                 self.mark(f"$.identity.context.{n}.enum")
                 ctx[n]["enum"] = self.name("the enum type's name")
             if self.at_word("md5"):
                 self.advance()
                 ctx[n]["md5"] = self.string("the md5 of the function's body")
-            if self.at_word("optional"):  # #75
+            while self.at_word("optional"):  # #75
                 self.advance()
-                ctx[n]["optional"] = True
+                if self.at_word("for"):  # #98
+                    self.mark(f"$.identity.context.{n}.optional_for")
+                    ctx[n]["optional_for"] = self.role_list()
+                else:
+                    ctx[n]["optional"] = True
+            if self.at_word("unset"):  # #98
+                self.advance()
+                if not self.at_word("for"):
+                    raise self.fail("'for' and the roles whose sessions never have the value")
+                self.mark(f"$.identity.context.{n}.unset_for")
+                ctx[n]["unset_for"] = self.role_list()
             if not self.at("}"):
                 self.eat(";")
         self.eat("}")

@@ -33,11 +33,6 @@ class Adapter(ABC):
     # or create roles), so no upper bound holds for them and the deploy never alters them.
     service_roles: tuple[str, ...] = ()
     service_note: str = ""
-    # #83: roles whose callers carry no identity (Supabase's anon key has no claims): every context
-    # value is NULL for them
-    anonymous_roles: tuple[str, ...] = ()
-    anonymous_note: str = ""
-
     def __init__(self, spec: Spec):
         self.spec = spec
 
@@ -47,6 +42,13 @@ class Adapter(ABC):
             return "(select now())"
         cv = self.spec.identity.context[name]
         return self._ctx_sql(name, cv.source, ctx_type_sql(cv))
+
+    @classmethod
+    def unstated_availability(cls, roles, cv) -> list[tuple[str, str]]:
+        """#98: (role, why) for each role of the spec whose sessions the platform starts without the
+        context value by default, where the value does not say whether that role's sessions have it.
+        The checker refuses those, and import declares them, as an assumption it names."""
+        return []
 
     @abstractmethod
     def _ctx_sql(self, name: str, source: str, sql_type: str) -> str: ...
@@ -73,16 +75,6 @@ def bounded_roles(spec: Spec) -> list[str]:
     """The roles an upper bound speaks for (#68): the spec's roles but the platform's service roles."""
     service = get_adapter(spec).service_roles
     return [r for r in spec.roles if r not in service]
-
-
-def anonymous_roles(spec: Spec) -> frozenset[str]:
-    """#83: the spec's roles whose callers have no context values (every one is NULL for them)."""
-    return frozenset(r for r in get_adapter(spec).anonymous_roles if r in spec.roles)
-
-
-def adapter_anonymous_roles(adapter: str, roles) -> frozenset[str]:
-    """#85: `anonymous_roles` from an adapter's name and a list of roles (the import's view)."""
-    return frozenset(r for r in adapter_class(adapter).anonymous_roles if r in roles)
 
 
 def adapter_class(name: str) -> type[Adapter]:
