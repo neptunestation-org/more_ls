@@ -602,6 +602,7 @@ class Checker:
         self.check_hierarchies()
         self.check_opaques()
         self.check_rules()
+        self.check_field_uses()
         if not self.sink.errors:
             self.check_fk_cycles()
         self.check_properties()
@@ -685,7 +686,9 @@ class Checker:
             if not t.columns:
                 self.err(path + ".columns", "a table needs at least one column")
             for cname, col in t.columns.items():
-                if not CATALOG_IDENT.match(cname):
+                if col.composite is not None:
+                    self.check_field(tname, t, cname, col, f"{path}.columns.{cname}")
+                elif not CATALOG_IDENT.match(cname):
                     self.err(f"{path}.columns.{cname}", f"'{cname}' is not a valid column identifier",
                              CATALOG_IDENT_FIX)
                 self.check_enum_column(tname, t, cname, col, f"{path}.columns.{cname}")
@@ -705,6 +708,100 @@ class Checker:
                 if not tag.strip():
                     self.err(f"{path}.tags[{i}]", "empty tag")
             self.check_assumptions(tname, t, path)
+
+    def check_field(self, tname: str, t, cname: str, col, path: str) -> None:
+        """#94: a field `c.f` of the composite column `c`, of the composite type `col.composite`: on an
+        adopted table, nullable (it is NULL when the composite is), with no default of its own, and of
+        the same type wherever the spec declares that type's field."""
+        parts = col.field_parts(cname)
+        if parts is None:
+            self.err(path + ".composite", f"'{cname}' names a composite type but is not a field: a field of a "
+                                          f"composite column is named 'column.field'",
+                     "name it 'column.field', or remove \"composite\"")
+            return
+        if not all(CATALOG_IDENT.match(x) for x in (*parts, col.composite)):
+            self.err(path, f"'{cname}' (composite type '{col.composite}') is not a column and a field, each a "
+                           f"valid identifier", CATALOG_IDENT_FIX)
+            return
+        if t.mode != "adopted":
+            self.err(path, f"table '{tname}' is {t.mode}, and MLS creates its tables without composite columns",
+                     "adopt the table if the database already has it, or make the field a column of its own")
+        if parts[0] in t.columns:
+            self.err(path, f"'{parts[0]}' is both a column and the composite column of '{cname}'",
+                     f"declare only the fields of '{parts[0]}'")
+        if not col.nullable:
+            self.err(path + ".nullable", f"field '{cname}' is NULL whenever its composite column is",
+                     "declare it nullable (a CHECK rule can refuse the NULL)")
+        if col.default is not None:
+            self.err(path + ".default", f"field '{cname}' takes its default from its composite column's, "
+                                        f"which MLS does not read", "remove the default")
+        for t2name, t2 in self.spec.tables.items():
+            for c2, col2 in t2.columns.items():
+                p2 = col2.field_parts(c2)
+                if p2 is None or (t2name, c2) == (tname, cname):
+                    continue
+                if t2name == tname and p2[0] == parts[0] and col2.composite != col.composite:
+                    self.err(path + ".composite", f"the fields of '{parts[0]}' name two composite types, "
+                                                  f"'{col.composite}' and '{col2.composite}'",
+                             "name the column's one type in each of its fields")
+                    return
+                if col2.composite == col.composite and p2[1] == parts[1] \
+                        and (col2.type, col2.enum) != (col.type, col.enum):
+                    self.err(path + ".type", f"field '{parts[1]}' of composite type '{col.composite}' is "
+                                             f"{col.type} here and {col2.type} on {t2name}.{c2}",
+                             "declare the field's one type everywhere")
+                    return
+
+    def check_field_uses(self) -> None:
+        """#94: a field is read by predicates only.  Keys, foreign keys, relations, hierarchies,
+        cardinality groups and column privileges are per column in Postgres, so they refuse one."""
+        def field(table: str, c) -> bool:
+            t = self.spec.tables.get(table)
+            return (t is not None and isinstance(c, str) and c in t.columns
+                    and t.columns[c].field_parts(c) is not None)
+
+        fix = "use a column of the table (or leave the rule to the composite column's own constraints)"
+
+        def refuse(path: str, table: str, c: str, what: str) -> None:
+            self.err(path, f"'{c}' is a field of a composite column, and {what} needs a column", fix)
+
+        for tname, t in self.spec.tables.items():
+            for i, c in enumerate(t.primary_key or []):
+                if field(tname, c):
+                    refuse(f"$.tables.{tname}.primary_key[{i}]", tname, c, "a primary key")
+            for i, u in enumerate(t.unique):
+                for j, c in enumerate(u):
+                    if field(tname, c):
+                        refuse(f"$.tables.{tname}.unique[{i}][{j}]", tname, c, "a unique constraint")
+        from mls.spec.chain import read_columns
+        for rname, rel in self.spec.relations.items():
+            try:
+                reads = read_columns(self.spec, rname)
+            except (KeyError, IndexError, AttributeError):
+                continue  # an unknown table or relation: reported where it is named
+            for table, cols in reads:
+                for c in sorted(cols):
+                    if field(table, c):
+                        refuse(f"$.relations.{rname}", table, c, "a relation")
+        for hname, h in self.spec.hierarchies.items():
+            for fld in ("id", "parent", "depth"):
+                if field(h.table, getattr(h, fld)):
+                    refuse(f"$.hierarchies.{hname}.{fld}", h.table, getattr(h, fld), "a hierarchy")
+        for i, r in enumerate(self.spec.rules):
+            path = self.rule_paths[i]
+            if isinstance(r, InclusionRule):
+                for j, c in enumerate(r.columns):
+                    if field(r.table, c):
+                        refuse(f"{path}.columns[{j}]", r.table, c, "an inclusion rule (a foreign key)")
+            elif isinstance(r, CardinalityRule) and field(r.table, r.group):
+                refuse(path + ".group", r.table, r.group, "a cardinality rule's group")
+            elif isinstance(r, ColumnRule):
+                for j, c in enumerate(r.columns):
+                    if field(r.table, c):
+                        self.err(f"{path}.columns[{j}]", f"'{c}' is a field of a composite column, and "
+                                 f"privileges are granted per column, never per field",
+                                 "leave the field out: a role with a column rule on the table then neither "
+                                 "reads nor writes its composite column")
 
     def check_enums(self) -> None:
         """An enum is a Postgres enum type the database already has (D59): its name is a catalog

@@ -426,6 +426,18 @@ def _ident(name: str) -> psql.Identifier:
     return psql.Identifier(name)
 
 
+def _col(name: str) -> psql.Composable:
+    """#94: a column read in a select list (a field column `c.f` reads as `("c")."f"`)."""
+    from mls.sqltext import col
+    return psql.SQL(col(name))
+
+
+def _target(name: str) -> psql.Composable:
+    """#94: a column of an insert's column list or an update's SET (a field column is `"c"."f"`)."""
+    from mls.sqltext import target
+    return psql.SQL(target(name))
+
+
 def classify_error(e: psycopg.Error) -> Outcome:
     code = e.sqlstate or ""
     if any(code.startswith(p) for p in EXPECTED_SQLSTATES):
@@ -495,11 +507,12 @@ class Harness:
         insert; and one under the name of a policy the spec declares.  Each check rule on the
         table finds a weaker constraint under its name (`check (true)`, D52).  The compiled script
         never creates the tables and must replace the policies and the constraints."""
-        from mls.compile.sql import enum_ddl, q
+        from mls.compile.sql import composite_ddl, enum_ddl, q
         from mls.compile.table import table_ddl
         from mls.props.effective import all_policies
 
         out = [enum_ddl(name, labels) for name, labels in self.spec.enums.items()]  # D59: the database has them
+        out += composite_ddl(self.spec)  # #94: and the types of the composite columns
         if any(c.type == "citext" for t in self.spec.tables.values() for c in t.columns.values()):
             out.insert(0, "create extension if not exists citext")  # #73
         for name, t in self.spec.tables.items():
@@ -572,7 +585,7 @@ class Harness:
     def _insert(self, cur, table: str, row: Row) -> None:
         cols = list(row)
         cur.execute(psql.SQL("insert into {} ({}) values ({})").format(
-            _ident(table), psql.SQL(", ").join(map(_ident, cols)),
+            _ident(table), psql.SQL(", ").join(map(_target, cols)),
             psql.SQL(", ").join(self._ph(table, c) for c in cols)), [row[c] for c in cols])
 
     # --- one statement under a context, state restored afterwards
@@ -603,8 +616,8 @@ class Harness:
         self._begin_ctx(cur, role, ctx)
         try:
             cur.execute(psql.SQL("select {} from {}").format(psql.SQL(", ").join(
-                psql.SQL("{}::text[]").format(_ident(c)) if self.spec.tables[table].columns[c].type in ARRAY_TYPES
-                else _ident(c) for c in cols), _ident(table)))  # an enum array is read as text[] (D88)
+                psql.SQL("{}::text[]").format(_col(c)) if self.spec.tables[table].columns[c].type in ARRAY_TYPES
+                else _col(c) for c in cols), _ident(table)))  # an enum array is read as text[] (D88)
             pg = sorted((tuple(_norm(v) for v in r) for r in cur.fetchall()), key=_row_key)
             got = "ok"
         except psycopg.Error as e:
@@ -655,7 +668,7 @@ class Harness:
         try:
             cur.execute(psql.SQL("update {} set {} where {}").format(
                 _ident(table),
-                psql.SQL(", ").join(psql.SQL("{} = {}").format(_ident(c), self._ph(table, c)) for c in set_cols),
+                psql.SQL(", ").join(psql.SQL("{} = {}").format(_target(c), self._ph(table, c)) for c in set_cols),
                 psql.SQL(" and ").join(psql.SQL("{} = {}").format(_ident(c), self._ph(table, c)) for c in pk)),
                 [new[c] for c in set_cols] + [old[c] for c in pk])
             got = "ok" if cur.rowcount == 1 else "filtered"

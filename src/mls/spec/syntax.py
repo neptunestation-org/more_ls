@@ -339,9 +339,13 @@ class Parser:
                 self.eat("]")
                 col["type"] += "[]"
             # an enum column's type name (missing, or on another type: the checker's error at its path)
-            if self.tok.kind in ("ident", "qident") and not self.at_word("not", "default"):
+            if self.tok.kind in ("ident", "qident") and not self.at_word("not", "default", "composite"):
                 self.mark(f"{self.path}.columns.{c}.enum")
                 col["enum"] = self.name("the enum type's name")
+            if self.at_word("composite"):  # #94: a field of a composite column names its type
+                self.advance()
+                self.mark(f"{self.path}.columns.{c}.composite")
+                col["composite"] = self.name("the composite type's name")
             if self.at_word("not"):
                 self.advance()
                 self.word("null")

@@ -29,7 +29,7 @@ from psycopg import sql as psql
 
 from mls.compile.internal import INTERNAL_ROLE, needs_internal_role
 from mls.compile.plan import Script
-from mls.compile.sql import enum_ddl, q
+from mls.compile.sql import composite_ddl, enum_ddl, q
 from mls.compile.table import table_ddl
 from mls.identity import get_adapter
 from mls.pg.catalog import Snapshot, bypass_paths, delegation_text, snapshot
@@ -117,6 +117,8 @@ def shadow_snapshot(conn: psycopg.Connection, spec: Spec, script: Script,
             if live_labels is not None and list(live_labels[0]) == list(labels):
                 continue  # the live type itself: an opaque block's call of a function over it must still resolve
             cur.execute(enum_ddl(name, labels))
+        for s in composite_ddl(spec):  # #94: the composite columns' types, with the spec's fields
+            cur.execute(s)
         for name, t in spec.tables.items():
             if t.mode == "adopted":  # the script does not create it: stand in for the existing table
                 for s in table_ddl(name, t):

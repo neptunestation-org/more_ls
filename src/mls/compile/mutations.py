@@ -46,5 +46,6 @@ class Mutation(str, Enum):
     CTX_IS_NULL_FOLDED = "ctx_is_null_folded"        # #75: an optional context value's IS NULL read as FALSE
     GUARD_ANY_ROW = "guard_any_row"                  # a column guard that limits every row, its condition ignored
     GUARD_SORTS_LAST = "guard_sorts_last"            # #58: a guard trigger named to fire after the table's own
+    FIELD_OTHER = "field_other"                      # #94: a field read as another field of its composite column
     IDENT_UNQUOTED = "ident_unquoted"                # a predicate's column unquoted, so a mixed-case name folds
     MEMBER_CONST_ANY_VALUE = "member_const_any_value"  # #90: a constant-value membership met by any value

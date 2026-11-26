@@ -882,3 +882,57 @@ def test_the_counting_helper_is_its_exists():
     for other in (AUTHORIZE.replace("> 0", "> 1"), AUTHORIZE.replace("return bind_permissions", "return other"),
                   AUTHORIZE.replace("begin", "begin perform 1;"), "begin return true; end;"):
         assert count_body(other) is None, other
+
+
+def test_a_field_of_a_composite_column_is_read_as_the_field_column():
+    """#94: `(metadata).owner`, as the compiler writes it and as a hand-written policy does (also
+    qualified, `(docs.metadata).owner`), is the field column `metadata.owner`; a field of anything
+    but a column stays opaque with a note that says so."""
+    from tests.templates.specs import composite_spec
+
+    env = Env.of_spec(composite_spec())
+    want = {"cmp": [{"col": "metadata.owner"}, "=", {"ctx": "uid"}]}
+    for text in ('(("metadata")."owner" = ( SELECT auth.uid() AS uid))', "((metadata).owner = auth.uid())",
+                 "((endpoints.metadata).owner = auth.uid())"):
+        r, sink = do(text, env=env, table="endpoints")
+        assert (r.kind, r.pred) == ("lifted", want), text
+    r, sink = do("((metadata).workspace IS NOT NULL)", env=env, table="endpoints")
+    assert r.pred == {"not": {"is_null": {"col": "metadata.workspace"}}}
+    # #96: what was not read, and why, named in the note
+    for text, note in [("((row(1, 2)).f1 = 1)", "reads field f1 of `(row(1, 2))`, which is not a column"),
+                       ("((metadata).owner.x = auth.uid())", "reads field x of `(metadata).owner`, which is not a column"),
+                       ("((metadata).labels = auth.uid())", "field labels of composite column metadata is not modelled"),
+                       ("(metadata IS NULL)", "column metadata is a composite column of endpoints: MLS reads its fields")]:
+        r, sink = do(text, env=env, table="endpoints")
+        assert r.kind == "opaque" and any(note in x for x in r.reasons), (text, r.reasons)
+
+
+def test_a_plpgsql_body_of_guards_and_one_return_is_its_expression():
+    """#95: guards fold from the end, `false` as `is not true and`, `true` as `is true or`; anything
+    else in the body (a declaration, an assignment, a CASE) is not read."""
+    from mls.pg.lift import plpgsql_body
+
+    assert plpgsql_body("BEGIN\n  RETURN TRUE;\nEND;") == "TRUE"
+    assert plpgsql_body("""begin
+        if a is null then return false; end if;  -- no user
+        if b then return true; end if;
+        return c = 1;
+    end""") == "((a is null) is not true and (((b) is true or (c = 1))))"
+    for body in ("declare x int; begin return true; end", "begin x := 1; return x = 1; end",
+                 "begin return case when a then b end; end", "begin if a then return null; end if; return b; end",
+                 "begin return a; return b; end"):
+        assert plpgsql_body(body) is None, body
+
+
+def test_is_true_reads_only_over_a_test_that_is_never_unknown():
+    """#95: `(x is null) is not true` is `not (x is null)` (IS NULL is never UNKNOWN); over a
+    comparison, which may be UNKNOWN, IS [NOT] TRUE stays out of the fragment."""
+    owner_null = {"is_null": {"col": "owner_id"}}
+    for text, want in [("((owner_id IS NULL) IS NOT TRUE)", {"not": owner_null}),
+                       ("((owner_id IS NULL) IS TRUE)", owner_null),
+                       ("((owner_id IS NULL) IS FALSE)", {"not": owner_null}),
+                       ("(((owner_id IS NULL) IS NOT TRUE) IS NOT FALSE)", {"not": owner_null})]:
+        r, _ = do(text)
+        assert (r.kind, r.pred) == ("lifted", want), (text, r.reasons)
+    r, _ = do("((level > 1) IS NOT TRUE)")
+    assert r.kind == "opaque" and any("IS TRUE / IS FALSE inside an expression" in x for x in r.reasons)

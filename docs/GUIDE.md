@@ -1791,7 +1791,8 @@ These are decisions, not gaps; `docs/design/DECISIONS.md` has the reasoning.
   when the lifter reads it and adopted as an opaque block otherwise.  A function of yours in a
   policy is read as its body only when it is a one-statement SQL helper returning a boolean
   (`is_member(team_id)`, its arguments' defaults filled in when the call leaves them out), or
-  one returning a set of values that a policy selects from (`id in (select my_team_ids())`), or
+  one returning a set of values that a policy selects from (`id in (select my_team_ids())`), or a
+  plpgsql one made of `if .. then return false; end if;` guards and one `return`, or
   Supabase's documented `authorize(permission)` (plpgsql: it counts the caller's role's rows of
   `role_permissions` and returns whether there are any, read as `role_grants(@user_role,
   'channels.delete')`), in any schema (`private.my_team_ids()` keeps its schema in the spec); the

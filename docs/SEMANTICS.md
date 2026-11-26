@@ -337,6 +337,9 @@ All are "assumptions ∧ ¬goal is UNSAT"; SAT yields a counterexample rendered 
   that meets A's condition meets B's (B has none, or the solver proves `T(a(row)) → T(b(row))`
   under the table's row constraints): `∀x,y: A(x,y) → B(x,y)`.  The owners among a shop's admins,
   `role = 'owner'` within `role = 'owner' or role = 'admin'`.
+- **Fields of composite columns:** a field `c.f` is a column of the row like any other, NULL
+  whenever `c` is (`(c).f` in SQL); nothing relates two fields of one composite, as nothing
+  relates two columns.
 - **citext constants:** a string constant compared with a `citext` column is encoded as its
   lower-case value (the checker admits only ASCII constants, whose case Postgres and the encoder
   fold alike), so two constants equal up to case are one value there.

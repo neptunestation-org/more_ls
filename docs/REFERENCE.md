@@ -125,6 +125,19 @@ another column, a context value or by an ordering operator, and it cannot be a m
 inclusion, cardinality or hierarchy column; its keys, privileges and column rules are as for any
 column.  MLS creates no `citext` column, so an owned table has none: declare it `text`.
 
+**Fields of composite columns.**  A column of an adopted table whose type is a composite type of
+the schema (as in `metadata api.metadata`, with fields `name`, `workspace`, ...) is declared by its
+fields: each field of an MLS type is a column named `column.field` that names its composite type
+(`{"type": "text", "nullable": true, "composite": "metadata"}`; terse `"metadata.workspace" text
+composite metadata`).  Predicates read it as any column; the compiler writes `("metadata")."workspace"`.
+A field is nullable (it is NULL when its composite is) and declares no default.  Keys, privileges and
+foreign keys are per column in Postgres, so a field cannot be in a primary key, a unique
+constraint, an inclusion, a relation, a hierarchy, a cardinality group or a column rule.  A role with
+a column rule on the table reads and writes no field.  `mls import` reads the fields of every composite
+column whose type is the schema's, and leaves out (with a note) the fields of other types;
+`check --dsn` looks each field up in its column's type.  MLS creates no composite type, so an owned
+table has no fields.
+
 **Defaults.**  A column of an adopted table may declare the default the database writes when an
 insert leaves it out: `"default": {"const": false}`, `{"ctx": "uid"}` (a context value of the
 column's type, `{"ctx": "now"}` for `now()`), or `"fresh"` for a value the database generates
@@ -1008,8 +1021,9 @@ grammar:
     roles      := 'roles' NAME (',' NAME)*
     table      := 'table' NAME MODE '{' [column (',' column)* [';']] [option (';' option)*] '}'
     enum       := 'enum' NAME '(' STRING (',' STRING)* ')'        (a Postgres enum type and its labels, in order)
-    column     := NAME TYPE ['not null'] ['default' (term | 'fresh')]  (a bare column is nullable; TYPE 'enum' NAME for an enum,
-                                                                   'text[]' or 'enum[]' NAME for an array)
+    column     := NAME TYPE ['composite' NAME] ['not null'] ['default' (term | 'fresh')]  (a bare column is nullable; TYPE 'enum' NAME
+                                                                   for an enum, 'text[]' or 'enum[]' NAME for an array; a field of a
+                                                                   composite column is named "c.f" and names its composite type)
     option     := 'primary_key' '(' names ')' | 'unique' '(' names ')' | 'tags' '(' names ')'
                 | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)' | 'inlined function f(t) md5 h'
                                                                    | 'delegate view v as r to r1, r2')
@@ -1431,7 +1445,13 @@ reads as the membership its `exists` holds).  A helper that is one `select` stat
 set of uuid, integer, bigint or text values is read the same way where a policy selects from it,
 `x in (select f(..))` or `x = any(array(select f(..)))`: the subquery becomes the helper's
 `select`, so `id in (select current_user_member_organization_ids())` reads as the membership its
-body selects.  A call that leaves out arguments takes their
+body selects.  A plpgsql helper returning a boolean is read the same way when its body is guards
+and one `return`: `begin if c then return false; end if; ... return e; end` reads as
+`(c) is not true and ... and (e)`, and a guard returning `true` as `(c) is true or ...`.  `(c) is
+not true` is in the fragment only where `c` is never UNKNOWN (an `is null` test, or a constant once
+the arguments are in place: `user_uuid is null` with `auth.uid()` passed); a declaration, an
+assignment or any other statement keeps the call opaque.  When a helper's body holds a part the
+lifter cannot read, the note on the call quotes that part.  A call that leaves out arguments takes their
 declared defaults.  Once the arguments are in place, what they leave constant is folded:
 `'owner' is null` is false and `null is null` true, and an `and` or `or` drops or is decided by its
 constant parts.  So is a test of a context value: the identity adapter takes it as always set, so

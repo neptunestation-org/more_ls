@@ -411,6 +411,47 @@ def citext_spec() -> Spec:
     return make(parse(CITEXT).model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
+COMPOSITE = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated
+
+table endpoints adopted {
+  id int not null,
+  "metadata.editor" uuid composite resource_meta,
+  "metadata.owner" uuid composite resource_meta,
+  "metadata.workspace" text composite resource_meta,
+  "spec.replicas" int composite endpoint_spec;
+  primary_key (id);
+  assume ('rls not_forced')
+}
+
+rules {
+  R1 policy editor_read on endpoints: authenticated select permissive using "metadata.editor" = @uid
+  R2 policy owner_read on endpoints: authenticated select permissive using "metadata.owner" = @uid
+  R3 policy owner_insert on endpoints: authenticated insert permissive check "metadata.owner" = @uid and not "metadata.workspace" is null
+  R4 policy owner_update on endpoints: authenticated update permissive using "metadata.owner" = @uid check "metadata.owner" = @uid
+  R5 check replicas_range on endpoints: "spec.replicas" is null or "spec.replicas" >= 0
+  R6 transition owner_fixed on endpoints: new."metadata.owner" = old."metadata.owner"
+}
+
+properties {
+  P1 must_allow endpoints authenticated select: "metadata.editor" = @uid description 'an editor reads the endpoint'
+  P2 column_immutable endpoints: "metadata.owner" description 'an endpoint never changes owner'
+}
+"""
+
+
+def composite_spec() -> Spec:
+    """#94: `endpoints` adopted with two composite columns (Kubernetes-style `metadata` and `spec`),
+    whose fields the rules read: a policy on each of two uuid fields of one composite, a check on a
+    field of the other, a transition on the old and new field.  Rows are written field by field (a
+    NULL composite reads NULL in every field).  The mutation reads another field of the same
+    composite (the owner for the editor, and back)."""
+    from mls.spec.syntax import parse
+
+    return make(parse(COMPOSITE).model_dump(mode="json", by_alias=True, exclude_none=True))
+
+
 DEFAULTS = """mls 0.1
 identity supabase { uid: auth.uid uuid }
 roles authenticated

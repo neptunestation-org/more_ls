@@ -403,10 +403,20 @@ class Parser:
     def postfix(self) -> Node:
         start = self.peek().pos
         e = self.primary()
-        while self.is_op("::"):
-            self.take()
-            e = self.span(Cast(e, self.typename()), start)
-        return e
+        while True:
+            if self.is_op("::"):
+                self.take()
+                e = self.span(Cast(e, self.typename()), start)
+            elif self.is_op(".") and self.peek(1).kind in ("ident", "qident"):
+                # #94: `(c).f`, a field of a composite column, is the field column `c.f`
+                dot = self.take().pos
+                f = self.name()
+                if not isinstance(e, Col) or "." in e.name:
+                    raise Unreadable(f"reads field {f} of `{self.text[start:dot].strip()}`, which is not "
+                                     f"a column: MLS reads a field of a composite column only")
+                e = self.span(Col(e.qual, f"{e.name}.{f}"), start)
+            else:
+                return e
 
     def typename(self) -> str:
         words = [self.name()]
@@ -652,6 +662,8 @@ class Env:
     # D59: the enum types (name -> labels) and each enum column's type (table -> column -> name)
     enums: dict[str, list[str]] = field(default_factory=dict)
     enum_cols: dict[str, dict[str, str]] = field(default_factory=dict)
+    # #94: each field column's composite type (table -> `c.f` -> type name)
+    composite_cols: dict[str, dict[str, str]] = field(default_factory=dict)
     # D61: the condition of each relation that has one (name -> its JSON predicate)
     conditions: dict[str, dict] = field(default_factory=dict)
     # #41: the memberships read from a subquery that runs as the caller (under the relation
@@ -663,6 +675,9 @@ class Env:
     optional: set[str] = field(default_factory=set)
     # #89: the enum type of each enum context value
     context_enums: dict[str, str] = field(default_factory=dict)
+    # #95: while a text is read again with its helper calls as written, each inlined helper whose
+    # body held a part the lifter could not read, with that part (the note on its call quotes it)
+    unread_bodies: dict[str, str] = field(default_factory=dict)
     # #45: the names of the functions in pg_catalog, so a note on a call says built-in or user function
     builtins: frozenset[str] = frozenset()
     _spec: Spec | None = field(default=None, repr=False)
@@ -686,6 +701,8 @@ class Env:
                    enums={n: list(x) for n, x in spec.enums.items()},
                    enum_cols={t: {c: col.enum for c, col in tb.columns.items() if col.enum is not None}
                               for t, tb in spec.tables.items()},
+                   composite_cols={t: {c: col.composite for c, col in tb.columns.items() if col.composite}
+                                   for t, tb in spec.tables.items()},
                    conditions={n: r.where.model_dump(mode="json", by_alias=True, exclude_none=True)
                                for n, r in spec.base_relations().items() if r.where is not None})
 
@@ -709,7 +726,9 @@ class Env:
                                                                 for n, (s, t) in self.context.items()}},
                  "roles": self.roles or ["r"], "enums": self.enums,
                  "tables": {t: {"columns": {c: {"type": ty, "nullable": nu,
-                                                **({"enum": self.enum_cols[t][c]} if ty in ("enum", "enum[]") else {})}
+                                                **({"enum": self.enum_cols[t][c]} if ty in ("enum", "enum[]") else {}),
+                                                **({"composite": self.composite_cols[t][c]}
+                                                   if c in self.composite_cols.get(t, {}) else {})}
                                             for c, (ty, nu) in cols.items()},
                                 "mode": "adopted" if t in self.governed else "observed"}
                             for t, cols in self.tables.items()},
@@ -805,6 +824,11 @@ def fold(node: Node, never_null: Callable[[Node], bool] = lambda _: False, role:
         if never_null(node.x):
             return Bool(node.negated, start=node.start, end=node.end)
         return node
+    if isinstance(node, IsTrue):  # #95: a guard `(c) is not true` whose condition folds to a constant
+        x = fold(node.x, never_null, role)
+        if isinstance(x, Bool):
+            return Bool((x.value == node.value) != node.negated, start=node.start, end=node.end)
+        return IsTrue(x, node.value, node.negated, start=node.start, end=node.end) if x is not node.x else node
     if isinstance(node, (And, Or)):
         items = [fold(x, never_null, role) for x in node.items]
         absorb = isinstance(node, Or)  # TRUE absorbs an or, FALSE an and
@@ -920,6 +944,12 @@ class Lifter:
             # #71: a NOT NULL boolean is never UNKNOWN, so `b IS FALSE` is `b = false`
             p = self.part(Cmp(node.x, "=", Bool(node.value)), negated)
             return {"not": p} if node.negated else p
+        if isinstance(node, IsTrue) and isinstance(node.x, (IsNull, IsTrue)):
+            # #95: an IS [NOT] NULL, or an IS [NOT] TRUE, is never UNKNOWN, so testing it for TRUE or
+            # FALSE is the test itself or its negation (a plpgsql guard's `(c) is not true`)
+            if node.value != node.negated:
+                return self.part(node.x, negated)
+            return {"not": self.part(node.x, not negated)}
         if isinstance(node, IsTrue):
             raise Unreadable("IS TRUE / IS FALSE inside an expression (the fragment is three-valued; only a CHECK's "
                              "outer `(p) IS TRUE` is read)")
@@ -1403,6 +1433,18 @@ class Lifter:
         self.env.invalidate()
         return name
 
+    def unmodelled(self, name: str) -> str:
+        """#96: why a column the text reads is not in the spec, a field of a composite named as one."""
+        c, dot, f = name.partition(".")
+        cols = self.env.tables[self.table]
+        if dot:
+            return (f"field {f} of composite column {c} is not modelled on {self.table} (a field is read only when "
+                    f"its type is an MLS type and its column's composite type is the schema's)")
+        if any(x.partition(".")[0] == c for x in cols if "." in x):
+            return (f"column {c} is a composite column of {self.table}: MLS reads its fields, `({c}).field`, "
+                    f"not the whole value")
+        return f"column {name} is not modelled on {self.table}"
+
     # --- terms
     def term(self, node: Node) -> tuple[dict, ColType | None]:
         """A term of the fragment: a column of the table, a context value or a constant."""
@@ -1410,12 +1452,12 @@ class Lifter:
             cols = self.env.tables[self.table]
             if self.scope == "transition" and node.qual in ("old", "new"):
                 if node.name not in cols:
-                    raise Unreadable(f"column {node.name} is not modelled on {self.table}")
+                    raise Unreadable(self.unmodelled(node.name))
                 return {node.qual: node.name}, cols[node.name][0]
             if node.qual is not None and node.qual != self.table:
                 raise Unreadable(f"column {node.qual}.{node.name} is not of table {self.table}")
             if node.name not in cols:
-                raise Unreadable(f"column {node.name} is not modelled on {self.table}")
+                raise Unreadable(self.unmodelled(node.name))
             return {"col": node.name}, cols[node.name][0]
         if isinstance(node, Cast) and isinstance(node.x, Col) and CAST_TO_MLS.get(node.type) == "text":
             # a varchar column compared as text deparses as (col)::text (D53): the column itself
@@ -1568,8 +1610,14 @@ class Lifter:
         if base in self.env.builtins and schema in ("", "pg_catalog"):
             return (f"calls {base}(), a Postgres built-in function: MLS predicates compare columns with constants "
                     f"and context values and call no functions such as string, date or arithmetic ones")
+        part = self.env.unread_bodies.get(node.name) or self.env.unread_bodies.get(base)
+        if part is not None:
+            part = " ".join(part.split())
+            return (f"calls {node.name}(), whose body is read inline but holds `"
+                    f"{part if len(part) <= 160 else part[:157] + '...'}`, which is not in the fragment")
         return (f"calls {node.name}(), a function the lifter does not read: only a "
-                f"one-statement SQL function returning boolean is read as its body (a SECURITY DEFINER one only "
+                f"one-statement SQL function returning boolean, or a plpgsql one made of `if c then return "
+                f"true|false; end if;` guards and one `return`, is read as its body (a SECURITY DEFINER one only "
                 f"when its owner bypasses the policies of the tables it reads), with arguments that are the "
                 f"row's columns or constants")
 
@@ -1694,6 +1742,7 @@ _FUNC_SELECT = re.compile(r"^\s*select\s+(.*?)\s*;?\s*$", re.IGNORECASE | re.DOT
 _FUNC_FROM = re.compile(r'\b(from|join)\s+((?:"?[a-z_][a-z0-9_]*"?\.)?"?[a-z_][a-z0-9_]*"?)(?=\s*(?:where\b|\)|$))',
                         re.IGNORECASE)
 _ARG_COL = re.compile(r'^"?([a-z_][a-z0-9_]*)"?$')
+_ARG_FIELD = re.compile(r'^\(\s*"?([a-z_][a-z0-9_]*)"?\s*\)\s*\.\s*"?([a-z_][a-z0-9_]*)"?$')
 _ARG_INERT = re.compile(r"'(?:[^']|'')*'|::[a-z_ ]+(?:\[\])?|\bARRAY\b|\bauth\.[a-z_]+\(\)|\b(?:true|false|null)\b|"
                         r"\d+(?:\.\d+)?", re.IGNORECASE)
 
@@ -1725,6 +1774,51 @@ def count_body(src: str) -> str | None:
     if into != var or m.group("r").lower() != var or ";" in rest or re.search(r"\b(group|having|limit)\b", rest, re.I):
         return None
     return f"exists (select 1 from {rest.strip()})"
+
+
+_PLPGSQL_GUARD = re.compile(r"\s*if\s+(?P<c>.+?)\s+then\s+return\s+(?P<v>true|false)\s*;\s*end\s+if\s*;",
+                            re.IGNORECASE | re.DOTALL)
+_PLPGSQL_RETURN = re.compile(r"\s*return\s+(?P<e>.+?)\s*;\s*end\s*;?\s*$", re.IGNORECASE | re.DOTALL)
+
+
+def _balanced(text: str) -> bool:
+    depth, quote = 0, False
+    for ch in text:
+        if ch == "'":
+            quote = not quote
+        elif not quote and ch == "(":
+            depth += 1
+        elif not quote and ch == ")":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0 and not quote
+
+
+def plpgsql_body(src: str) -> str | None:
+    """#95: a plpgsql body made of guards `if c then return true|false; end if;` and one final
+    `return e;` is the expression it returns: from the end, a guard returning false is
+    `(c) is not true and (rest)`, one returning true `(c) is true or (rest)` (an IF whose condition is
+    UNKNOWN is not taken, and a NULL `e` is returned as NULL, as the connectives keep it).  Anything
+    else in the body (a declaration, an assignment, another statement) is None."""
+    src = re.sub(r"--[^\n]*", "", src)
+    m = re.match(r"\s*begin\b", src, re.IGNORECASE)
+    if m is None:
+        return None
+    i, guards = m.end(), []
+    while (g := _PLPGSQL_GUARD.match(src, i)) is not None:
+        if not _balanced(g.group("c")) or re.search(r"\b(case|then|return)\b", g.group("c"), re.IGNORECASE):
+            return None
+        guards.append((g.group("c"), g.group("v").lower() == "true"))
+        i = g.end()
+    r = _PLPGSQL_RETURN.match(src, i)
+    if r is None or ";" in r.group("e") or not _balanced(r.group("e")) \
+            or re.search(r"\b(case|then|return)\b", r.group("e"), re.IGNORECASE):
+        return None
+    expr = r.group("e")
+    for c, value in reversed(guards):
+        expr = f"(({c}) is true or ({expr}))" if value else f"(({c}) is not true and ({expr}))"
+    return expr
 
 
 def split_args(text: str) -> list[str]:
@@ -1848,8 +1942,11 @@ def _function_args(args: list[str], table: str, columns: set[str]) -> list[str] 
     out = []
     for a in args:
         c = _ARG_COL.match(a)
+        fld = _ARG_FIELD.match(a)
         if c is not None and c.group(1) in columns:
             out.append(f'"{table}"."{c.group(1)}"')
+        elif fld is not None and f"{fld.group(1)}.{fld.group(2)}" in columns:  # #94: `(c).f`
+            out.append(f'("{table}"."{fld.group(1)}")."{fld.group(2)}"')
         elif re.search(r"[a-z_]", _ARG_INERT.sub(" ", a), re.IGNORECASE) is None:
             out.append(a)
         else:

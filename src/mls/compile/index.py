@@ -3,7 +3,7 @@
 and a key-leading index on every relation table."""
 from __future__ import annotations
 
-from mls.compile.sql import q
+from mls.compile.sql import col, q
 from mls.spec.chain import levels
 from mls.spec.model import (
     And, ColRef, Cmp, InGroup, Member, NowBetween, Or, Pred, Spec, Not, IsNull,
@@ -108,7 +108,7 @@ def index_specs(spec: Spec) -> list[tuple[str, str, tuple[str, ...]]]:
                 continue
             if any(tuple(u)[:len(cols)] == cols for u in t.unique):
                 continue
-            out.append((f"mls_ix_{table}_{'_'.join(cols)}", table, cols))
+            out.append((f"mls_ix_{table}_{'_'.join(cols)}".replace(".", "_"), table, cols))
     return out
 
 
@@ -116,7 +116,9 @@ def index_sql(name: str, table: str, cols: tuple[str, ...], concurrently: bool =
               if_not_exists: bool = False) -> str:
     conc = " concurrently" if concurrently else ""
     ine = " if not exists" if if_not_exists else ""
-    return f"create index{conc}{ine} {q(name)} on {q(table)} ({', '.join(q(c) for c in cols)})"
+    # #94: a field column is indexed as the expression that reads it
+    return (f"create index{conc}{ine} {q(name)} on {q(table)} "
+            f"({', '.join(f'({col(c)})' if '.' in c else q(c) for c in cols)})")
 
 
 def index_ddl(spec: Spec) -> list[str]:

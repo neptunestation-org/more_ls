@@ -2101,3 +2101,50 @@ API view as a bypass path, which it is not.
   spec grants and is not reported.
 - *Not done:* the view's own column grants (PostgREST's `select (id, todo)` for `anonymous`) are
   outside the spec, as every object in the `api` schema is.
+
+
+**D103. Fields of composite columns are columns (#94).**
+Neutree stores Kubernetes-style resources: 65 columns on 23 of its 31 tables are composites
+(`metadata api.metadata`, `spec api.<kind>_spec`, `status ...`), and 50 of its 93 policies read a
+field (`(metadata).workspace`).  Import left every composite out and every such policy opaque.
+- *Construct:* a field `c.f` of an adopted table's composite column `c`, declared as a column named
+  `c.f` with `composite: <type>` (terse `"c.f" text composite T`).  A catalog name has no dot
+  (`CATALOG_IDENT`), so the dot is unambiguous.  For the proofs it is a column: NULL when the
+  composite is, unrelated to its sibling fields (a NULL composite and one whose fields are all NULL
+  read alike, so nothing is lost).  Decidability unchanged.
+- *Where it is refused:* primary and unique keys, inclusions (foreign keys), relations (keys, values,
+  conditions: their grants are column lists), hierarchies, cardinality groups and column rules.  A
+  privilege is per column, so a column rule naming one field would grant its siblings unseen; a
+  role with a column rule on the table gets no grant on the composite, which the proofs already
+  model (the field is not in its list).  No default (a field takes its composite's, which MLS does
+  not read) and always nullable.
+- *Rendering:* `sqltext.col` reads `("c")."f"` (`(old."c")."f"` in triggers), `sqltext.target`
+  writes `"c"."f"` (an INSERT column list and an UPDATE SET name a field without parentheses, and
+  Postgres builds the row); a generated index on a field is the expression index
+  `((("c")."f"))`, named with `_` for the dot.  The harness and drift's shadow create the types from
+  the fields the spec declares (`sql.composite_ddl`); `check --dsn` looks each field up in its
+  column's live type (`adopt._field_errors`).
+- *Mutation:* `FIELD_OTHER` reads another field of the same composite (the fixture's two uuid
+  fields, editor and owner); fixture `specs.composite_spec`, also in the lift round trip.
+- *Import:* `adopt` reads the fields of every composite column whose type is in the schema
+  (`catalog.composite_fields_sql`); a field of a type MLS does not model is left out with a note.  The
+  lifter reads `(expr).f` where `expr` is a column (`Parser.postfix`), and says so when it is not.
+
+
+**D104. Import reads plpgsql helpers of guards and one return (#95, #96).**
+Neutree's 87 permission policies call plpgsql SECURITY DEFINER helpers written as guards and one
+`return` (`if user_uuid is null then return false; end if; ... return x is true;`).
+- *Reading:* `lift.plpgsql_body` folds the guards from the end, `(c) is not true and (rest)` for a
+  guard returning false and `(c) is true or (rest)` for one returning true: an IF whose condition is
+  UNKNOWN is not taken, and a NULL `return` stays NULL under the connectives, so this is exact.
+  Anything else (DECLARE, assignments, other statements, CASE) is None, as before.
+- *IS TRUE:* the fragment is three-valued and has no IS TRUE, so the lifter reads `(c) is [not]
+  true|false` only where `c` is never UNKNOWN: an IS [NOT] NULL test or another IS TRUE (it is then
+  `c` or `not c`), and `fold` decides it when `c` folds to a constant (a context value's `is null`).
+  Over a comparison it stays out of the fragment, as before.
+- *Neutree's outcome:* no policy becomes readable: every chain ends in a body that selects FROM the
+  set-returning `user_role_assignments()`, a UNION over groups with `unnest` and lateral joins.  The
+  note on such a call now quotes the part of the inlined body the lifter could not read
+  (`Env.unread_bodies`, set while the text is read again with its calls as written), instead of
+  saying that only one-statement SQL helpers are read (#96, which also names a composite field and a
+  whole composite column in the notes on what was not read).

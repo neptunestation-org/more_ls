@@ -8,7 +8,7 @@ from mls.spec.chain import condition, levels
 from mls.spec.recursion import is_routed
 from mls.spec.expand import as_in_list
 from mls.identity.base import SQL_TYPE, Adapter
-from mls.sqltext import q  # noqa: F401  (re-exported: the templates import it from here)
+from mls.sqltext import col, q  # noqa: F401  (re-exported: the templates import them from here)
 from mls.spec.model import (
     And, ColRef, ColType, Const, CtxRef, Cmp, Has, InGroup, IsNull, Lit, Member, NewRef, Not, NowBetween,
     OldRef, OpaqueRef, Or, Pred, Spec,
@@ -43,15 +43,21 @@ class SqlCompiler:
             return self.spec.context_type(t.ctx)
         return None
 
+    def column(self, name: str, table: str, row: str | None = None) -> str:
+        if Mutation.FIELD_OTHER in self.mutations and "." in name:
+            c = name.partition(".")[0]
+            name = next((o for o in self.spec.tables[table].columns if o != name and o.partition(".")[0] == c), name)
+        return col(name, row)
+
     def term(self, t, table: str, type_hint: ColType | None = None) -> str:
         if isinstance(t, ColRef):
             if Mutation.IDENT_UNQUOTED in self.mutations:
                 return t.col  # Postgres folds it: "ownerId" is read as ownerid
-            return q(t.col)
+            return self.column(t.col, table)
         if isinstance(t, OldRef):
-            return "old." + q(t.old)
+            return self.column(t.old, table, "old")
         if isinstance(t, NewRef):
-            return "new." + q(t.new)
+            return self.column(t.new, table, "new")
         if isinstance(t, CtxRef):
             return self.adapter.ctx_sql(t.ctx)
         if isinstance(t, Const):
@@ -159,6 +165,24 @@ def sql_type(col) -> str:
 
 def column_ddl(name: str, col) -> str:
     return f"{q(name)} {sql_type(col)}" + ("" if col.nullable else " not null")
+
+
+def composite_types(spec: Spec) -> dict[str, dict[str, object]]:
+    """#94: the composite types the field columns name, each with its fields (name -> a Column)."""
+    out: dict[str, dict[str, object]] = {}
+    for t in spec.tables.values():
+        for c, c_ in t.columns.items():
+            parts = c_.field_parts(c)
+            if parts is not None and c_.composite is not None:
+                out.setdefault(c_.composite, {}).setdefault(parts[1], c_)
+    return out
+
+
+def composite_ddl(spec: Spec) -> list[str]:
+    """#94: the types of the adopted composite columns: the harness and drift's shadow create them
+    with the fields the spec declares (MLS never creates one in a deployed database)."""
+    return [f"create type {q(name)} as ({', '.join(f'{q(f)} {sql_type(c)}' for f, c in fields.items())})"
+            for name, fields in composite_types(spec).items()]
 
 
 def enum_ddl(name: str, labels: list[str]) -> str:

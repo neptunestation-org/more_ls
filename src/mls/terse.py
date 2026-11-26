@@ -13,8 +13,9 @@ approval artifact (D10, D33).  The grammar:
     roles      := 'roles' NAME (',' NAME)*
     table      := 'table' NAME MODE '{' [column (',' column)* [';']] [option (';' option)*] '}'
     enum       := 'enum' NAME '(' STRING (',' STRING)* ')'        (a Postgres enum type and its labels, in order)
-    column     := NAME TYPE ['not null'] ['default' (term | 'fresh')]                          (a bare column is nullable; TYPE 'enum' NAME for an enum,
-                                                                   'text[]' or 'enum[]' NAME for an array)
+    column     := NAME TYPE ['composite' NAME] ['not null'] ['default' (term | 'fresh')]  (a bare column is nullable; TYPE 'enum' NAME for an enum,
+                                                                   'text[]' or 'enum[]' NAME for an array; a field of a composite column
+                                                                   is named "c.f" and names its composite type)
     option     := 'primary_key' '(' names ')' | 'unique' '(' names ')' | 'tags' '(' names ')'
                 | 'assume' '(' STRING (',' STRING)* ')'           ('owner r' | 'bypassrls r' | 'rls not_forced' | 'bypass view v' | 'bypass function f(t)' | 'inlined function f(t) md5 h'
                                                                    | 'delegate view v as r to r1, r2')
@@ -62,7 +63,7 @@ RESERVED = frozenset("""
 mls comment identity roles enum table relation hierarchy opaque rules properties
 on applies_to from requirement description using check for max min on_delete restrict cascade set_null deferred max_depth where when
 and or not is null true false in in_group now_between old new
-primary_key unique tags assume sql relations has_column named tagged all
+primary_key unique tags assume composite sql relations has_column named tagged all
 owned adopted observed select insert update delete permissive restrictive read write
 policy inclusion transition cardinality column_rule
 tenant_isolation column_immutable monotone_in write_subset_read least_privilege invariant_preserved always_on_update changes_only custom
@@ -78,7 +79,7 @@ RENDERED_FIELDS: dict[type, set[str]] = {
     Spec: {"comment", "mls_version", "identity", "roles", "enums", "tables", "relations", "hierarchies", "opaques",
            "rules", "properties"},
     Identity: {"adapter", "context"}, ContextVar: {"source", "type", "enum", "md5", "optional"},
-    Table: {"columns", "primary_key", "unique", "mode", "assume", "tags"}, Column: {"type", "nullable", "enum", "default"},
+    Table: {"columns", "primary_key", "unique", "mode", "assume", "tags"}, Column: {"type", "nullable", "enum", "default", "composite"},
     Relation: {"table", "key", "value", "where"}, ComposedRelation: {"of", "through"},
     Hop: {"table", "key", "value"},
     Hierarchy: {"table", "id", "parent", "depth", "max_depth", "members"},
@@ -336,6 +337,7 @@ def assumption(a) -> str:
 
 def table(name: str, t: Table) -> list[str]:
     cols = [f"{ident(c)} {col.type}" + (f" {ident(col.enum)}" if col.enum is not None else "")
+            + (f" composite {ident(col.composite)}" if col.composite is not None else "")
             + ("" if col.nullable else " not null")
             + ("" if col.default is None else " default " + ("fresh" if col.default == "fresh" else term(col.default)))
             for c, col in t.columns.items()]

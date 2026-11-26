@@ -251,6 +251,13 @@ union member the renderer does not cover.
   app role is kind `delegation`, assumed by import as `{"delegate": "view v as o to r1, r2"}`
   (`DelegateAssumed`, `catalog.delegation_text`), stated in the proof report, a drift note when it differs;
   tests in `tests/templates/test_bypass.py`.
+- D103 (#94): a field of an adopted composite column is the column `c.f` with `Column.composite` (its type);
+  rendered `sqltext.col` / `sqltext.target`, types from `sql.composite_ddl` (harness, drift's shadow), refused in keys,
+  relations, inclusions, hierarchies, cardinality groups and column rules (`check.check_field_uses`); import reads
+  `(c).f` (`Parser.postfix`); fixture `specs.composite_spec`, mutation `FIELD_OTHER`.
+- D104 (#95): import inlines plpgsql helpers of guards and one `return` (`lift.plpgsql_body`); the lifter reads
+  `(c) is [not] true` only over a test never UNKNOWN (IS NULL, IS TRUE, or a folded constant); a call whose inlined
+  body holds an unreadable part quotes it in its note (`Env.unread_bodies`).
 - D99 (#86): on Supabase, import lifts a policy that reads `auth.role()` once per role (`Env.role`;
   `lift.fold`'s `_role_test` makes `auth.role() = 'x'` a constant); test in `tests/templates/test_adopt.py`.
 - D86 (#54): an inclusion into a relation with a condition (`restrict deferred` required) compiles to two

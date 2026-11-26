@@ -43,9 +43,9 @@ from psycopg import sql as psql
 
 from mls.compile.internal import INTERNAL_ROLE
 from mls.errors import MlsError, SpecError
-from mls.pg.catalog import _strip_schema, bypass_paths
+from mls.pg.catalog import _strip_schema, bypass_paths, composite_fields_sql
 from mls.pg.lift import (
-    CAST_TO_MLS, Env, Unreadable, read_default, function_body, count_body, inline_functions, split_args, inline_lookups, restore_calls, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr, guard_parts, inclusion_parts,
+    CAST_TO_MLS, Env, Unreadable, read_default, function_body, count_body, plpgsql_body, inline_functions, split_args, inline_lookups, restore_calls, lift, lookup_calls, nullable_columns, parse, strip_check, transition_expr, guard_parts, inclusion_parts,
     mls_type,
 )
 from mls.pg.lift import IsTrue as _IsTrue
@@ -177,8 +177,10 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
         cat["functions"] = {}
         for fname, argnames, nargs, src, types, digest, definer, volatile, ndefaults, defaults, retset, lang \
                 in cur.fetchall():
-            # #64: `basejump.account_user` is the table; #90: a plpgsql one only as the counting helper
-            expr = (function_body if lang == "sql" else count_body)(_strip_schema(src, schema))
+            # #64: `basejump.account_user` is the table; #90: a plpgsql one as the counting helper, #95: or
+            # as guards and one return
+            body = _strip_schema(src, schema)
+            expr = function_body(body) if lang == "sql" else (count_body(body) or plpgsql_body(body))
             if expr is not None:
                 expr = _qualified_params(expr, fname, (list(argnames) + [""] * nargs)[:nargs])
                 given = split_args(_strip_schema(defaults, schema)) if defaults else []
@@ -227,16 +229,21 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
             cur.execute("""select a.attnum, a.attname, format_type(a.atttypid, a.atttypmod), a.attnotnull,
                                   case when et.typtype = 'e' and tn.nspname = %s then et.typname end,
                                   case when a.attidentity <> '' then 'fresh'
-                                       when a.attgenerated = '' then pg_get_expr(ad.adbin, ad.adrelid) end
+                                       when a.attgenerated = '' then pg_get_expr(ad.adbin, ad.adrelid) end,
+                                  case when ty.typtype = 'c' and tn.nspname = %s then ty.typname end
                            from pg_attribute a join pg_type ty on ty.oid = a.atttypid
                                 left join pg_attrdef ad on ad.adrelid = a.attrelid and ad.adnum = a.attnum
                                 join pg_type et on et.oid = case when ty.typelem <> 0 and ty.typlen = -1
                                                                  then ty.typelem else ty.oid end
                                 join pg_namespace tn on tn.oid = et.typnamespace
                            where a.attrelid = %s and a.attnum > 0 and not a.attisdropped
-                           order by a.attnum""", (schema, oid))
+                           order by a.attnum""", (schema, schema, oid))
             t["columns"] = [{"num": r[0], "name": r[1], "type": r[2], "notnull": r[3], "enum": r[4],
-                             "default": r[5]} for r in cur.fetchall()]
+                             "default": r[5], "composite": r[6]} for r in cur.fetchall()]
+            for c in t["columns"]:  # #94: a composite column's fields, each with its type and enum type
+                if c["composite"] is not None:
+                    cur.execute(composite_fields_sql(), (schema, schema, c["composite"]))
+                    c["fields"] = [{"name": r[0], "type": r[1], "enum": r[2]} for r in cur.fetchall()]
             cur.execute("""select conname, contype, pg_get_constraintdef(oid), conkey, confrelid, confkey,
                                   confupdtype, confdeltype, confmatchtype, convalidated,
                                   case when confrelid <> 0 then confrelid::regclass::text end,
@@ -409,6 +416,24 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
     for name, t in tables.items():
         cols: dict[str, dict] = {}
         for c in t["columns"]:
+            if c.get("fields") is not None and CATALOG_IDENT.match(c["composite"]):
+                # #94: a composite column of the schema's type: its fields are the columns `c.f`
+                left = []
+                for f in c["fields"]:
+                    fty = ("enum[]" if f["type"].endswith("[]") else "enum") if f["enum"] is not None \
+                        else mls_type(f["type"])
+                    if fty is None or (f["enum"] is not None and not CATALOG_IDENT.match(f["enum"])):
+                        left.append(f"{f['name']} ({f['type']})")
+                        continue
+                    col: dict[str, Any] = {"type": fty, "nullable": True, "composite": c["composite"]}
+                    if f["enum"] is not None:
+                        enums[f["enum"]] = cat["enums"][f["enum"]]
+                        col["enum"] = f["enum"]
+                    cols[f"{c['name']}.{f['name']}"] = col
+                if left:
+                    notes.append(f"column {name}.{c['name']} has composite type {c['composite']}; its fields "
+                                 f"{', '.join(left)} are not of MLS types: left out of the spec")
+                continue
             if c["enum"] is not None and CATALOG_IDENT.match(c["enum"]):  # an enum type of the schema (D59)
                 enums[c["enum"]] = cat["enums"][c["enum"]]
                 cols[c["name"]] = {"type": "enum[]" if c["type"].endswith("[]") else "enum", "enum": c["enum"],
@@ -478,6 +503,8 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                       for t, tb in spec_tables.items()},
               enums=enums, enum_cols={t: {c: col["enum"] for c, col in tb["columns"].items() if "enum" in col}
                                       for t, tb in spec_tables.items()},
+              composite_cols={t: {c: col["composite"] for c, col in tb["columns"].items() if "composite" in col}
+                              for t, tb in spec_tables.items()},
               governed=set(governed), roles=list(roles), builtins=cat.get("builtins", frozenset()),
               keys={t: [frozenset(k) for k in key_sets(t)] for t in spec_tables})
 
@@ -692,6 +719,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
     def lift_expr(table: str, text: str, base: str, scope: str, depcols: list[str], top_is_true: bool = False):
         parts = 0
         calls: list[tuple[str, str]] = []  # #52: the inlined helpers, put back in an opaque block
+        unread: list[str] = []  # #95: the part of an inlined body the lifter could not read
 
         class Retry(Exception):
             pass
@@ -701,6 +729,7 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
             if calls:
                 restored = restore_calls(sql, calls)
                 if restored is None:
+                    unread.append(sql)
                     raise Retry
                 sql = restored
             parts += 1
@@ -728,9 +757,14 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                 volatile_by.setdefault(table, set()).update(n for n in used if cat["functions"][n]["volatile"])
                 return r
             except Retry:  # an opaque part inside a helper's body: read the text with the calls as written
+                # every helper inlined in the text: the part lies in the chain of their bodies
+                env.unread_bodies = {re.search(r"([\w.]+)\s*\(", c).group(1): unread[-1] for _, c in calls}
                 calls.clear()
-        return lift(inline_lookups(text, cat["lookups"]), table, env, scope, make_opaque, make_relation,
-                    top_is_true=top_is_true)
+        try:
+            return lift(inline_lookups(text, cat["lookups"]), table, env, scope, make_opaque, make_relation,
+                        top_is_true=top_is_true)
+        finally:
+            env.unread_bodies = {}
 
     for name, t in tables.items():
         if name not in governed:
@@ -1201,6 +1235,10 @@ def verify_adopted(conn: psycopg.Connection, spec: Spec, schema: str = "public")
             continue
         live_cols = {c["name"]: c for c in live["columns"]}
         for c, col in t.columns.items():
+            parts = col.field_parts(c)
+            if parts is not None:  # #94: a field, looked up in its composite column's type
+                errors += _field_errors(f"{path}.columns.{c}", name, parts, col, live_cols.get(parts[0]))
+                continue
             lc = live_cols.get(c)
             if lc is None:
                 errors.append(MlsError(f"{path}.columns.{c}", f"adopted table '{name}' has no column '{c}'",
@@ -1220,6 +1258,31 @@ def verify_adopted(conn: psycopg.Connection, spec: Spec, schema: str = "public")
                                        f"declare it as {mls_type(lc['type']) or 'a type MLS does not model'}",
                                        "check"))
     return errors + role_escalation_errors(conn, spec)
+
+
+def _field_errors(path: str, table: str, parts: tuple[str, str], col, lc: dict | None) -> list[MlsError]:
+    """#94: `check --dsn` on a field `c.f`: the table has the composite column `c` of the declared type,
+    and the type has the field `f` of the declared type."""
+    c, f = parts
+    if lc is None or lc.get("fields") is None:
+        return [MlsError(path, f"adopted table '{table}' has no composite column '{c}'" +
+                         ("" if lc is None else f" (it is {lc['type']})"),
+                         "remove the field from the spec, or declare the column's own type", "check")]
+    if lc["composite"] != col.composite:
+        return [MlsError(path + ".composite", f"column '{table}.{c}' is of composite type {lc['composite']}, "
+                                              f"declared {col.composite}", f"declare it {lc['composite']}", "check")]
+    lf = next((x for x in lc["fields"] if x["name"] == f), None)
+    if lf is None:
+        return [MlsError(path, f"composite type {col.composite} has no field '{f}'",
+                         f"remove it from the spec; the type has: {', '.join(x['name'] for x in lc['fields'])}", "check")]
+    live_type = (("enum[]" if lf["type"].endswith("[]") else "enum") if lf["enum"] is not None
+                 else mls_type(lf["type"]))
+    if (live_type, lf["enum"]) != (col.type, col.enum if col.type in ("enum", "enum[]") else None):
+        return [MlsError(path + ".type", f"field '{table}.{c}.{f}' is {lf['type']} in the catalog, declared "
+                                         f"{col.type} {col.enum or ''}".rstrip(),
+                         f"declare it as {live_type or 'a type MLS does not model'}" +
+                         (f" {lf['enum']}" if lf["enum"] else ""), "check")]
+    return []
 
 
 def role_escalation_errors(conn: psycopg.Connection, spec: Spec) -> list[MlsError]:

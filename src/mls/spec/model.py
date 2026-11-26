@@ -218,6 +218,15 @@ class Column(Strict):
     # #76: what the database writes when an insert leaves the column out (adopted tables): a
     # constant, a context value (`now` included), or "fresh" (a value it generates)
     default: Const | CtxRef | Literal["fresh"] | None = None
+    # #94: a field of a composite-type column (adopted tables): the column is named `c.f` (`c` the
+    # table's column, `f` the field) and this is the composite type's name
+    composite: str | None = None
+
+    @staticmethod
+    def field_parts(name: str) -> tuple[str, str] | None:
+        """#94: (column, field) of a field column's name `c.f`, else None."""
+        c, dot, f = name.partition(".")
+        return (c, f) if dot else None
 
 
 TableMode = Literal["owned", "adopted", "observed"]

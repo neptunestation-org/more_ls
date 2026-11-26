@@ -888,3 +888,43 @@ def test_an_enum_context_value_names_its_enum_type():
         with pytest.raises(SpecError) as e:
             check_spec(parse(ENUM_CTX % (decl, label)))
         assert any(x.path == f"$.{where}" for x in e.value.errors), (decl, e.value.errors)
+
+
+def test_a_composite_field_is_read_by_predicates_and_refused_where_postgres_needs_a_column():
+    """#94: a field `c.f` of an adopted table's composite column, nullable, without a default, of one
+    type per composite type's field; keys, foreign keys, relations, cardinality groups and column
+    privileges refuse it (Postgres has them per column)."""
+    from tests.templates.specs import composite_spec
+
+    def comp() -> dict:
+        return composite_spec().model_dump(mode="json", by_alias=True, exclude_none=True)
+
+    assert errors(comp()) == []
+    cols = "$.tables.endpoints.columns"
+    d = comp()
+    d["tables"]["endpoints"]["mode"] = "owned"
+    d["tables"]["endpoints"].pop("assume")
+    assert has(errors(d), f"{cols}.metadata.owner", "table 'endpoints' is owned")
+    d = comp()
+    d["tables"]["endpoints"]["columns"]["metadata.owner"]["nullable"] = False
+    assert has(errors(d), f"{cols}.metadata.owner.nullable", "NULL whenever its composite column is")
+    d = comp()
+    d["tables"]["endpoints"]["columns"]["metadata.editor"]["composite"] = "other_meta"
+    assert has(errors(d), f"{cols}.metadata.editor.composite", "name two composite types")
+    d = comp()
+    d["tables"]["endpoints"]["columns"]["metadata"] = {"type": "text", "nullable": True}
+    assert has(errors(d), f"{cols}.metadata.editor", "'metadata' is both a column and the composite column")
+    d = comp()
+    d["tables"]["endpoints"]["columns"]["id2"] = {"type": "int", "nullable": True, "composite": "x"}
+    assert has(errors(d), f"{cols}.id2.composite", "names a composite type but is not a field")
+    d = comp()
+    d["tables"]["endpoints"]["unique"] = [["metadata.workspace"]]
+    assert has(errors(d), "$.tables.endpoints.unique[0][0]", "a unique constraint needs a column")
+    d = comp()
+    d["relations"] = {"owns": {"table": "endpoints", "key": "metadata.owner", "value": "id"}}
+    assert has(errors(d), "$.relations.owns", "a relation needs a column")
+    d = comp()
+    d["rules"].append({"id": "R7", "kind": "column_rule", "table": "endpoints", "role": "authenticated",
+                       "columns": ["id", "metadata.workspace"], "access": "read"})
+    e = next(e for e in errors(d) if e.path == "$.rules[6].columns[1]")
+    assert "privileges are granted per column, never per field" in e.message

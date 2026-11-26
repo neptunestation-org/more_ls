@@ -722,7 +722,8 @@ alter table members enable row level security;
 alter table docs enable row level security;
 create policy team_read on members for select to app using (
   team_id in (select m.team_id from members m where m.user_id = nullif(current_setting('app.uid', true), '')::bigint));
-create function may_read(d bigint) returns boolean language plpgsql stable as $f$ begin return d > 0; end $f$;
+create function may_read(d bigint) returns boolean language plpgsql stable as $f$
+  declare n bigint; begin n := d; return n > 0; end $f$;
 create policy doc_read on docs for select to app using (may_read(id));
 """
 
@@ -1189,3 +1190,54 @@ def test_a_helper_in_another_schema_is_read_inline(helpers):
         assert "function private.my_teams()" in assumed, assumed
         items = [str(i) for i in drift(helpers, spec, compile_spec(spec)).items if "my_teams" in i.object]
         assert items == ["assumed: function private.my_teams() keeps the body the policies on tickets are read as"], items
+
+
+def test_check_dsn_looks_a_field_up_in_its_composite_type(pg_dsn):
+    """#94: `check --dsn` finds a declared field in its composite column's type, of its type."""
+    spec = specs.composite_spec()
+    h = Harness(spec, compile_spec(spec), pg_dsn, "mls_adopt_composite")
+    h.deploy()
+    try:
+        assert verify_adopted(h.conn, spec) == []
+        wrong = spec.model_copy(deep=True)
+        cols = wrong.tables["endpoints"].columns
+        cols["metadata.name"] = cols["metadata.workspace"]  # no such field
+        cols["metadata.workspace"] = cols["metadata.workspace"].model_copy(update={"type": "int"})
+        cols["status.phase"] = cols["metadata.workspace"]  # no such composite column
+        paths = {e.path: e for e in verify_adopted(h.conn, wrong)}
+        assert "composite type resource_meta has no field 'name'" in paths["$.tables.endpoints.columns.metadata.name"].message
+        assert "is text in the catalog, declared int" in paths["$.tables.endpoints.columns.metadata.workspace.type"].message
+        assert "has no composite column 'status'" in paths["$.tables.endpoints.columns.status.phase"].message
+    finally:
+        h.close()
+
+
+def test_a_plpgsql_helper_of_guards_and_one_return_reads_inline(brownfield):
+    """#95 (neutree): a plpgsql SECURITY DEFINER helper whose body is guards (`if c then return
+    false; end if;`) and one `return e` reads as `(c) is not true and (e)`: here the membership its
+    EXISTS selects, the table assuming the function by md5."""
+    with brownfield.transaction(force_rollback=True):
+        brownfield.execute("""
+            create table crew (user_id uuid not null, team_id bigint not null, primary key (user_id, team_id));
+            create table team_docs (id bigint primary key, team_id bigint not null);
+            alter table crew enable row level security;
+            alter table team_docs enable row level security;
+            grant select on team_docs to authenticated;
+            create function can_read_team(user_uuid uuid, t bigint) returns boolean
+              language plpgsql stable security definer as $f$
+            begin
+                if user_uuid is null then
+                    return false;
+                end if;
+                -- a member of the team
+                return exists (select 1 from crew m where m.user_id = user_uuid and m.team_id = t);
+            end;
+            $f$;
+            create policy team_read on team_docs for select to authenticated
+              using (can_read_team(auth.uid(), team_id));""")
+        res = import_schema(brownfield)
+    rule = next(r for r in res.spec["rules"] if r.get("name") == "team_read" and r.get("role") == "authenticated")
+    assert "member" in json.dumps(rule["using"]) and "opaque" not in json.dumps(rule["using"]), "\n".join(n for n in res.notes if "team_read" in n)
+    assert any("can_read_team(uuid, bigint)" in a.get("inlined", "")
+               for a in res.spec["tables"]["team_docs"].get("assume", [])), res.spec["tables"]["team_docs"]
+    check_spec(Spec.model_validate(res.spec))

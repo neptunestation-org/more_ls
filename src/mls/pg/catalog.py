@@ -346,3 +346,19 @@ def schema_mismatch(conn: psycopg.Connection, schema: str, tables: dict[str, str
              else "they are in no schema of this database: check the connection string")
     return f"none of the spec's tables ({names}) is in schema '{schema}'; {where}"
 
+
+
+def composite_fields_sql() -> str:
+    """#94: the fields of a composite type of the schema, in order: (name, type, the enum type of
+    an enum field or of an enum array's elements, if it is the schema's).  Parameters: the schema,
+    the type's name, the schema."""
+    return """select a.attname, format_type(a.atttypid, a.atttypmod),
+                     case when et.typtype = 'e' and en.nspname = %s then et.typname end
+              from pg_type ct join pg_namespace cn on cn.oid = ct.typnamespace
+                   join pg_attribute a on a.attrelid = ct.typrelid
+                   join pg_type ft on ft.oid = a.atttypid
+                   join pg_type et on et.oid = case when ft.typelem <> 0 and ft.typlen = -1
+                                                    then ft.typelem else ft.oid end
+                   join pg_namespace en on en.oid = et.typnamespace
+              where cn.nspname = %s and ct.typname = %s and a.attnum > 0 and not a.attisdropped
+              order by a.attnum"""

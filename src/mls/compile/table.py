@@ -47,7 +47,14 @@ def implied_key_ddl(table: str, name: str, cols: tuple[str, str], adopted: bool)
 
 
 def table_ddl(name: str, t: Table) -> list[str]:
-    cols = [column_ddl(c, col) for c, col in t.columns.items()]
+    cols, seen = [], set()
+    for c, col in t.columns.items():
+        parts = col.field_parts(c)
+        if parts is None:
+            cols.append(column_ddl(c, col))
+        elif parts[0] not in seen:  # #94: the composite column, once, of its type
+            seen.add(parts[0])
+            cols.append(f"{q(parts[0])} {q(col.composite)}")
     if t.primary_key:
         cols.append(f"constraint {q(pk_name(name))} primary key ({', '.join(q(c) for c in t.primary_key)})")
     for u in t.unique:

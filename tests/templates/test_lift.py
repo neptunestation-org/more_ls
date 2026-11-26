@@ -37,6 +37,7 @@ ROUND_TRIP = {
     "session_setting": specs.session_spec,
     "trusted_function": specs.function_spec,  # #72: the calls read back as the context values, the md5 pins
     "optional": specs.optional_spec,  # #75: an optional value's `IS NULL` reads back, not folded
+    "composite": specs.composite_spec,  # #94: fields of composite columns read back as `(c).f`
     "citext": specs.citext_spec,  # #73: citext columns and their constants (`'x'::citext`) read back
     "role_claim": specs.role_claim_spec,  # #89: a claim cast to an enum type reads back as an enum value
     "grants": specs.grants_spec,  # #90: a membership with a constant value reads back
