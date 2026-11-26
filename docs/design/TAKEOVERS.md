@@ -84,6 +84,7 @@ were assigned after the fact.
 | nextbase (11-25) | Supabase JWT, S, `to public` policies, `auth.role()` | 3, 12 | — / — | 1 (#85) | 1 (#86) | 2 (#87 #88) | first try | 43 | deployed, drift none, 3 proved |
 | slack-clone (11-25) | Supabase JWT, S, RBAC through a role claim and `authorize()` | 5, 13 | — / 0 | 0 | 2 (#89 #90) | 1 (b3e95f4) | 1 repair round | 34 | deployed, drift none, 5 proved |
 | postgrest-starter-kit (11-25) | session settings (PostgREST claims, read through helper functions), S, views as the API | 2, 1 | 0 / 0 | 1 (#91) | 1 (#92) | 1 (#93) | first try | 12 | deployed, drift none, 2 proved |
+| neutree (11-26) | plain PG with GoTrue's `auth.uid()` (read as the Supabase identity), L, Kubernetes-style composite columns, RBAC through plpgsql definer helpers | 31, 93 | 119 / 147 | 0 | 2 (#94 #95; #97 open) | 1 (#96) | not run | — | import only |
 
 postgrest-starter-kit, the first row chosen by the program (empty identity cell, unexercised
 pattern), loaded unchanged as the superuser its Docker setup uses.  Its claims come through helper
@@ -92,6 +93,19 @@ answer was in the bypass paths: the callers are roles the spec never names, beca
 bind only the view owner.  Today's policy let a signed-in user delete or take over another user's
 public todo; the deployed rules refuse both through the real API (checked as `webuser` on
 `api.todos`).
+
+neutree was chosen for session settings at size L and turned out not to fill that cell: its
+policies read the user through GoTrue's `auth.uid()`, which import takes as the Supabase identity,
+and read `request.jwt.claims` directly only inside triggers.  It was loaded unchanged (GoTrue's
+own migrations run by its image, then 141 migrations and the seed, as superuser).  The first import
+failed at every composite field (`(metadata).workspace`); after #94 it reads them, and after #95 it
+reads plpgsql helpers of guards and one return, but every permission check ends in
+`user_role_assignments()`, a set-returning UNION over groups, teams, org units and service
+accounts, so the policies stay opaque, now in finer parts (147 blocks for 119).  Rewriting the RBAC
+in MLS would need relations over composite fields (#97, open), so the row closes import-only and
+does not count toward convergence.  An open question for a later takeover on plain PostgREST: the
+anonymous role there is `anonymous`, which the Supabase identity does not know is signed out
+(it knows `anon`), so the proofs would let it carry a user id.
 
 What the backfill shows: class B and C fixes fall over the last four rows (8, 6, 4, 3), but those
 projects also got smaller.  Class A did not fall steadily: midday had three.  Five of the six class
@@ -115,13 +129,14 @@ fill one no row has filled.
 
 | Identity | S | M | L |
 |---|---|---|---|
-| Supabase JWT | rbac, nextbase, slack-clone | scarpar, aural-oss, basejump | chatbot-ui, midday |
+| Supabase JWT | rbac, nextbase, slack-clone | scarpar, aural-oss, basejump | chatbot-ui, midday, neutree (plain PG, import only) |
 | Trusted function | | graphile/starter | |
 | Session settings | postgrest-starter-kit | | |
 | Database roles | | | |
 
 Patterns not yet exercised by any row: hierarchies, signed-out reads of public content at scale,
 the database-role identity, session settings read directly in policies (not through helpers).
+Exercised at import only: composite columns, plpgsql permission helpers (neutree).
 
 ## Choosing the next project
 
@@ -139,7 +154,8 @@ To vet before choosing: each must have RLS policies in its migrations and load o
 
 - **A project whose policies read `current_setting(..)` directly** (newer PostgREST apps read
   `current_setting('request.jwt.claims', true)::json ->> 'sub'`): session settings, M or L; not the
-  `app.*` shape the session-setting identity reads, so expect a class B finding.
+  `app.*` shape the session-setting identity reads, so expect a class B finding.  Vet the policies
+  themselves, not the docs: neutree's guide shows this shape, but its policies call `auth.uid()`.
 - **An application with per-user database roles**: fills database roles.
 - **A Supabase project with folders or nested organizations**: exercises hierarchies.
 - **A large Supabase project as the regression check** (rule 3).
