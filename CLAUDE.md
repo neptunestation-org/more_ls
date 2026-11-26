@@ -23,7 +23,8 @@ The milestones that built all of this are in `docs/design/archive/ROADMAP.md` (a
 `docs/` is for users: `docs/GUIDE.md` (user guide; §3 is the takeover, step by step),
 `docs/REFERENCE.md` (language and CLI reference) and `docs/SEMANTICS.md`.
 `docs/design/` is for contributors: DECISIONS, FINDINGS, LLM (the LLM loop's internals,
-corpus and measured runs), BACKGROUND and `archive/`. The user docs state the current behaviour without its
+corpus and measured runs), TAKEOVERS (the program of open-source takeovers: protocol, log, coverage;
+a takeover follows it and adds its row), BACKGROUND and `archive/`. The user docs state the current behaviour without its
 history (invariant 8); the reasoning goes in DECISIONS. When you add or change a construct, a property template, a CLI flag, an exit
 code or a generated object name, update them in the same change. A construct lives in both
 syntaxes (D50): give it its terse form in `terse.py` and its parse in `spec/syntax.py`
