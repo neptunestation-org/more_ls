@@ -293,7 +293,7 @@ def optional_line(spec: Spec) -> str | None:
     if not optional:
         return None
     rest = [n for n in spec.identity.context if n not in optional]
-    return (f"{', '.join(f'@{n}' for n in optional)} may be unset (a caller with no current user, NULL): "
+    return (f"{', '.join(f'@{n}' for n in optional)} may be unset (NULL for a caller who lacks it): "
             f"the proofs cover that caller too" + (f"; {', '.join(f'@{n}' for n in rest)} "
             f"{'is' if len(rest) == 1 else 'are'} taken as always set" if rest else ""))
 
