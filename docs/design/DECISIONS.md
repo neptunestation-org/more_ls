@@ -2148,3 +2148,14 @@ Neutree's 87 permission policies call plpgsql SECURITY DEFINER helpers written a
   (`Env.unread_bodies`, set while the text is read again with its calls as written), instead of
   saying that only one-statement SQL helpers are read (#96, which also names a composite field and a
   whole composite column in the notes on what was not read).
+
+
+**D105. A bool holds true, false or NULL in the proofs (#99).**
+The encoder writes a bool as the integer 1 or 0 (`tvl.Encoder.term`) and nothing kept a bool column
+or context value there, so a solver model could hold 2, neither true nor false: `is_public = true
+or is_public = false` was refuted for a NOT NULL column, and the scenario printed the 2 as `True`.
+`obligations.bool_row_axioms` asserts the domain for every row an obligation reads and every bool
+context value, in `Obligation.finish` (so the diff too) and the lint, as `enum_row_axioms` does for
+enums, and is constrained only where every encoder's spec declares the column bool.  A sort of its
+own for bools was the alternative; it would touch every comparison and the shared constant table
+for a value set of two.  Lean: a known gap, as for the enum axiom.

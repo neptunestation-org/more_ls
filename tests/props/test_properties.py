@@ -1208,3 +1208,45 @@ def test_the_trusted_roles_line_does_not_claim_forced_rls_on_adopted_tables():
     assert "the compiler forces RLS for owners" in line(owned)
     assert "forces RLS for owners" not in line(adopted)
     assert "never on an adopted table, whose owner is bound only if the table forces RLS itself" in line(adopted)
+
+
+BOOLS = """mls 0.1
+identity supabase { uid: auth.uid uuid; staff: jwt.claims.staff bool }
+roles visitor
+
+table notes owned {
+  id int not null,
+  owner_id uuid,
+  is_public bool not null,
+  pinned bool;
+  primary_key (id)
+}
+
+rules {
+  R1 policy own on notes: visitor select permissive using owner_id = @uid
+}
+
+properties {
+  P1 custom notes visitor select new: is_public = true or is_public = false
+  P2 custom notes visitor select new: is_public = true
+  P3 must_allow notes visitor select: owner_id = @uid and not is_public = true and not is_public = false
+  P4 custom notes visitor select new: pinned is null or pinned = true or pinned = false
+  P5 custom notes visitor select new: @staff = true or @staff = false
+}
+"""
+
+
+def test_a_boolean_holds_true_false_or_null_and_nothing_else():
+    """#99: the proofs encode a bool as 1 or 0, and the axioms keep it there: a NOT NULL boolean is
+    true or false (P1), a counterexample shows a value Postgres can hold (P2), no row meets a
+    condition that is neither (P3's witness fails), and the same for a nullable column (P4) and a
+    bool context value (P5)."""
+    from mls.spec.syntax import parse
+
+    spec = check_spec(parse(BOOLS))
+    results = {r.id: r for r in run_all(spec)}
+    assert {k: r.verdict for k, r in results.items()} == {
+        "P1": "PROVED", "P2": "REFUTED", "P3": "REFUTED", "P4": "PROVED", "P5": "PROVED"}
+    bad = next(o for o in results["P2"].obligations if o.verdict == "REFUTED")
+    assert bad.scenario.rows["r"]["values"]["is_public"] is False
+    assert [o.verdict for o in results["P3"].obligations if "some row meets the condition" in o.name] == ["REFUTED"]

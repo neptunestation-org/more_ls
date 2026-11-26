@@ -50,6 +50,12 @@ What a Python change left untranscribed.  Remove an entry when the transcription
   value (#89): the axiom that it is unset or one of its labels is a hypothesis on `Env`, not
   transcribed.
 
+- **The bool domain axiom (#99).**  `props/obligations.py:bool_row_axioms` (a bool column of a row
+  an obligation reads, and a bool context value, is NULL or 0 or 1) is not transcribed, for the
+  enum axiom's reason: columns are `Int`-valued, so it is an extra hypothesis on the valuation that
+  `Pred.tf_sound` neither uses nor states.  It only strengthens the obligations' assumptions to the
+  states Postgres can hold.
+
 What each step states rather than proves (sets rather than bags outside `Cardinality.lean`,
 self-referencing FKs, the `SECURITY DEFINER` helper seeing every row, `FOR UPDATE` serializing
 writers) is in `docs/design/archive/ROADMAP.md`, "Parallel track — Lean 4".

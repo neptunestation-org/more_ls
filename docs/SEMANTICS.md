@@ -343,6 +343,9 @@ All are "assumptions ∧ ¬goal is UNSAT"; SAT yields a counterexample rendered 
 - **citext constants:** a string constant compared with a `citext` column is encoded as its
   lower-case value (the checker admits only ASCII constants, whose case Postgres and the encoder
   fold alike), so two constants equal up to case are one value there.
+- **Bool domain axioms:** a bool is encoded as the integer 1 (true) or 0 (false), and every bool
+  column of a row an obligation reads, and every bool context value, is asserted NULL or one of
+  the two.
 - **Enum domain axioms:** an enum column holds one of its type's labels (or NULL when it is
   nullable): Postgres refuses any other value.  For every row an obligation reads, every enum
   column of its table is asserted equal to one of the labels, interned as distinct constants like

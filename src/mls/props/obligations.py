@@ -60,7 +60,8 @@ class Obligation:
         for e in self.encoders:
             self.assumptions = (self.assumptions + e.side_conditions + up_row_axioms(e, self.rows)
                                 + hop_row_axioms(e, self.rows) + relation_row_axioms(e, self.rows))
-        self.assumptions = self.assumptions + enum_row_axioms(self.encoders, self.rows)
+        self.assumptions = (self.assumptions + enum_row_axioms(self.encoders, self.rows)
+                            + bool_row_axioms(self.encoders, self.rows))
         return self
 
 
@@ -103,6 +104,35 @@ def enum_row_axioms(encs: list[Encoder], rows: dict[str, str]) -> list[Term]:
             for x in labels:
                 enc.const_types.setdefault(x, set()).add("enum")
         out.extend(or_(enc.ctx_null(name), dom) for enc in encs)
+    return out
+
+
+def bool_row_axioms(encs: list[Encoder], rows: dict[str, str]) -> list[Term]:
+    """#99: a bool is encoded as the integer 1 (true) or 0 (false), and holds nothing else: every
+    bool column of every row an obligation reads, and every bool context value, is NULL or 0 or 1.
+    Under several encoders a column is constrained only where every encoder's spec declares it bool
+    (as for enums: the axiom never hides a row one of the specs can meet)."""
+    if not encs:
+        return []
+
+    def dom(v: Term) -> Term:
+        return or_(eq(v, IntVal(0)), eq(v, IntVal(1)))
+
+    out: list[Term] = []
+    for row, table in rows.items():
+        tables = [enc.spec.tables.get(table) for enc in encs]
+        if any(t is None for t in tables):
+            continue
+        for c in tables[0].columns:
+            decl = [t.columns.get(c) for t in tables]
+            if not all(d is not None and d.type == "bool" for d in decl):
+                continue
+            v = dom(col_value_var(row, c))
+            out.append(or_(col_null_var(row, c), v) if any(d.nullable for d in decl) else v)
+    for name in encs[0].spec.identity.context:
+        decl = [enc.spec.identity.context.get(name) for enc in encs]
+        if all(d is not None and d.type == "bool" for d in decl):
+            out.extend(or_(enc.ctx_null(name), dom(ctx_var(name))) for enc in encs)
     return out
 
 
