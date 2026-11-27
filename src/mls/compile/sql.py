@@ -45,8 +45,9 @@ class SqlCompiler:
 
     def column(self, name: str, table: str, row: str | None = None) -> str:
         if Mutation.FIELD_OTHER in self.mutations and "." in name:
-            c = name.partition(".")[0]
-            name = next((o for o in self.spec.tables[table].columns if o != name and o.partition(".")[0] == c), name)
+            c, cols = name.partition(".")[0], self.spec.tables[table].columns
+            name = next((o for o in cols if o != name and o.partition(".")[0] == c
+                         and cols[o].type == cols[name].type), name)  # a sibling the SQL still accepts
         return col(name, row)
 
     def term(self, t, table: str, type_hint: ColType | None = None) -> str:

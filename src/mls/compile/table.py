@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from mls.compile.sql import column_ddl, const_sql, q
+from mls.sqltext import col as field_sql
 from mls.spec.model import Spec, Table, pair_unique
 
 
@@ -10,7 +11,7 @@ def pk_name(table: str) -> str:
 
 
 def unique_name(table: str, cols: list[str]) -> str:
-    return f"{table}_{'_'.join(cols)}_key"
+    return f"{table}_{'_'.join(cols)}_key".replace(".", "_")  # #97: a field `c.f` names it as c_f
 
 
 def implied_keys(spec: Spec) -> dict[str, dict[str, tuple[str, str]]]:
@@ -57,6 +58,18 @@ def table_ddl(name: str, t: Table) -> list[str]:
             cols.append(f"{q(parts[0])} {q(col.composite)}")
     if t.primary_key:
         cols.append(f"constraint {q(pk_name(name))} primary key ({', '.join(q(c) for c in t.primary_key)})")
+    fielded = []
     for u in t.unique:
+        if any(t.columns[c].field_parts(c) is not None for c in u if c in t.columns):
+            fielded.append(u)  # #97: Postgres keys a field only by a unique index on its expression
+            continue
         cols.append(f"constraint {q(unique_name(name, u))} unique ({', '.join(q(c) for c in u)})")
-    return [f"create table {q(name)} (\n  " + ",\n  ".join(cols) + "\n)"]
+    return ([f"create table {q(name)} (\n  " + ",\n  ".join(cols) + "\n)"]
+            + [field_key_ddl(name, u) for u in fielded])
+
+
+def field_key_ddl(table: str, cols: list[str]) -> str:
+    """#97: a unique key over fields of composite columns, as a unique expression index (a field is
+    `(("c")."f")`, a plain column itself)."""
+    return (f"create unique index {q(unique_name(table, cols))} on {q(table)} "
+            f"({', '.join(f'({field_sql(c)})' if '.' in c else q(c) for c in cols)})")

@@ -11,6 +11,7 @@ import pytest
 
 from mls.compile import compile_spec
 from mls.pg.adopt import import_schema
+from mls.spec.recursion import routed
 from mls.pg.drift import drift
 from mls.pg.harness import Harness
 from mls.props.diff import behaviour_diff
@@ -38,6 +39,7 @@ ROUND_TRIP = {
     "trusted_function": specs.function_spec,  # #72: the calls read back as the context values, the md5 pins
     "optional": specs.optional_spec,  # #75: an optional value's `IS NULL` reads back, not folded
     "composite": specs.composite_spec,  # #94: fields of composite columns read back as `(c).f`
+    "field_relation": specs.field_relation_spec,  # #97: a relation over fields, through its helper; a key on fields
     "citext": specs.citext_spec,  # #73: citext columns and their constants (`'x'::citext`) read back
     "role_claim": specs.role_claim_spec,  # #89: a claim cast to an enum type reads back as an enum value
     "grants": specs.grants_spec,  # #90: a membership with a constant value reads back
@@ -96,7 +98,8 @@ def test_round_trip_per_template(name, pg_dsn):
         assert bad == [], [str(c) for c in bad]
         # the compiler's own relation policies and grants are recognized, not re-imported as rules
         assert not any(p.name.startswith("mls_rel_") for p in imported.policies())
-        assert any("relation-visibility policy" in n for n in res.notes) or not source.relations
+        helpers = {r for _, r in routed(source)}  # a relation read only through its helper has no such policy
+        assert any("relation-visibility policy" in n for n in res.notes) or not set(source.relations) - helpers
         # what the source declares as rules comes back as rules of the same kind and name
         kinds = {(r.kind, r.name) for r in source.rules if r.kind != "column_rule"}
         assert kinds <= {(r.kind, r.name) for r in imported.rules}

@@ -939,3 +939,29 @@ def test_is_true_reads_only_over_a_test_that_is_never_unknown():
         assert (r.kind, r.pred) == ("lifted", want), (text, r.reasons)
     r, _ = do("((level > 1) IS NOT TRUE)")
     assert r.kind == "opaque" and any("IS TRUE / IS FALSE inside an expression" in x for x in r.reasons)
+
+
+def test_a_hand_written_subquery_over_fields_is_a_membership():
+    """#97: neutree's shapes, an EXISTS correlated on fields of both tables and an IN over a field,
+    with a condition on a third field: a relation over the assignments' fields, keyed by the unique
+    index on them."""
+    from tests.templates.specs import field_relation_spec
+
+    d = field_relation_spec().model_dump(mode="json", by_alias=True, exclude_none=True)
+    d["relations"], d["rules"], d["properties"] = {}, [], []
+    env = Env.of_spec(Spec.model_validate(d))
+    want = {"key": {"ctx": "uid"}, "value": {"col": "metadata.workspace"}}
+    for text, where in [
+        ("(EXISTS ( SELECT 1 FROM assignments ra WHERE (((ra.spec).user_id = auth.uid()) AND "
+         "((ra.spec).workspace = (endpoints.metadata).workspace))))", None),
+        ("((metadata).workspace IN ( SELECT (assignments.spec).workspace FROM assignments "
+         "WHERE ((assignments.spec).user_id = auth.uid())))", None),
+        ("(EXISTS ( SELECT 1 FROM assignments ra WHERE (((ra.spec).user_id = auth.uid()) AND "
+         "((ra.spec).workspace = (endpoints.metadata).workspace) AND ((ra.spec).role <> 'viewer'::text))))",
+         {"cmp": [{"col": "spec.role"}, "<>", {"const": "viewer"}]})]:
+        r, sink = do(text, env=env, table="endpoints")
+        assert r.kind == "lifted", (text, r.reasons)
+        m = r.pred["member"]
+        assert {k: m[k] for k in want} == want
+        assert sink.env.relations[m["relation"]] == ("assignments", "spec.user_id", "spec.workspace")
+        assert sink.env.conditions.get(m["relation"]) == where

@@ -918,11 +918,15 @@ def test_a_composite_field_is_read_by_predicates_and_refused_where_postgres_need
     d["tables"]["endpoints"]["columns"]["id2"] = {"type": "int", "nullable": True, "composite": "x"}
     assert has(errors(d), f"{cols}.id2.composite", "names a composite type but is not a field")
     d = comp()
+    d["tables"]["endpoints"]["primary_key"] = ["metadata.workspace"]
+    assert has(errors(d), "$.tables.endpoints.primary_key[0]", "a primary key needs a column")
+    d = comp()  # #97: a unique key (an expression index) and a relation may read fields
     d["tables"]["endpoints"]["unique"] = [["metadata.workspace"]]
-    assert has(errors(d), "$.tables.endpoints.unique[0][0]", "a unique constraint needs a column")
-    d = comp()
     d["relations"] = {"owns": {"table": "endpoints", "key": "metadata.owner", "value": "id"}}
-    assert has(errors(d), "$.relations.owns", "a relation needs a column")
+    assert errors(d) == []
+    d["rules"].append({"id": "R7", "kind": "inclusion", "name": "owned_fk", "table": "endpoints",
+                       "columns": ["metadata.editor", "id"], "relation": "owns", "on_delete": "restrict"})
+    assert has(errors(d), "$.rules[6].relation", "reads a field of a composite column, and a foreign key")
     d = comp()
     d["rules"].append({"id": "R7", "kind": "column_rule", "table": "endpoints", "role": "authenticated",
                        "columns": ["id", "metadata.workspace"], "access": "read"})

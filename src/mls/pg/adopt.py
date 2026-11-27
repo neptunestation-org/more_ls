@@ -118,6 +118,20 @@ class ImportResult:
     notes: list[str] = field(default_factory=list)
 
 
+_INDEX_FIELD = re.compile(r'^\(*\(("?)([^()"]+)\1\)\.("?)([^()".]+)\3\)*$')
+_INDEX_COLUMN = re.compile(r'^("?)([^()".]+)\1$')
+
+
+def index_column(elem: str) -> str | None:
+    """#97: the column an index element is: a field `(c).f` is the column `c.f`, a bare name itself;
+    any other expression None."""
+    m = _INDEX_FIELD.match(elem.strip())
+    if m:
+        return f"{m.group(2)}.{m.group(4)}"
+    m = _INDEX_COLUMN.match(elem.strip())
+    return m.group(2) if m else None
+
+
 def ident(name: str) -> str:
     """An MLS identifier for a catalog name (lower-case, underscores, at most 63 characters)."""
     s = re.sub(r"[^a-z0-9_]", "_", name.lower())
@@ -254,6 +268,15 @@ def _read(conn: psycopg.Connection, schema: str) -> dict[str, Any]:
                                  "validated": r[9], "refname": r[10], "deferrable": r[11], "deferred": r[12],
                                  "delsetcols": list(r[13]) if r[13] else None}
                                 for r in cur.fetchall()]
+            # #97: a unique index that backs no constraint and has no predicate: a key on fields
+            cur.execute("""select c2.relname,
+                                  array(select pg_get_indexdef(i.indexrelid, k, true)
+                                        from generate_series(1, i.indnkeyatts) k order by k)
+                           from pg_index i join pg_class c2 on c2.oid = i.indexrelid
+                           where i.indrelid = %s and i.indisunique and i.indpred is null
+                             and not exists (select 1 from pg_constraint x where x.conindid = i.indexrelid)
+                           order by 1""", (oid,))
+            t["unique_indexes"] = [{"name": r[0], "elems": list(r[1])} for r in cur.fetchall()]
             cur.execute("""select p.oid, p.polname, p.polcmd, p.polpermissive,
                                   array(select rolname from pg_roles where oid = any (p.polroles) order by 1),
                                   0 = any (p.polroles),
@@ -488,6 +511,12 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
                     tb.setdefault("unique", []).append(con["colnames"])
                 else:
                     notes.append(f"unique constraint {con['name']} on {name} uses a column that is not modelled; left out")
+        for ix in t.get("unique_indexes", []):  # #97: a key on fields is a unique expression index
+            key = [index_column(e) for e in ix["elems"]]
+            if all(k is not None and k in cols for k in key) and any("." in k for k in key):
+                tb.setdefault("unique", []).append(key)
+                notes.append(f"unique index {ix['name']} on {name} is a key on fields of a composite column: "
+                             f"unique ({', '.join(key)})")
         spec_tables[name] = tb
     governed = {n for n, tb in spec_tables.items() if tb["mode"] == "adopted"}
 
@@ -566,7 +595,9 @@ def import_schema(conn: psycopg.Connection, schema: str = "public", roles: list[
         for p in t["policies"]:
             for text in (p["using"], p["check"]):
                 for rel, start, end, sub in lookup_calls(text or "", cat["lookups"]):
-                    col = re.search(r'("[^"]+"|[a-z_][a-z0-9_]*) = ANY \($', text[:start])
+                    # #97: the policy's column may be a field, `(c).f`
+                    col = re.search(r'(\([^()]+\)\.(?:"[^"]+"|[a-z_][a-z0-9_]*)|"[^"]+"|[a-z_][a-z0-9_]*) = ANY \($',
+                                    text[:start])
                     if col is None:
                         continue
                     hops = sub.count("= any (array(")

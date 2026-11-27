@@ -14,6 +14,8 @@ of every shop; the helper answers without granting a row), those whose relation 
 policy's own table, then, in order of policy table and relation name,
 each lookup that still closes a cycle once the earlier ones are routed, until none does (an order
 of the names, not of the rules, so that listing the same policies differently changes nothing).
+A relation that reads a field of a composite column is routed too (#97): the caller's subquery would
+need SELECT on the whole composite column.
 A chain whose visibility policies close a cycle of their own is routed as well (#33): one that
 reads a table twice (co-members, `member_of . team_members(team_id, user_id)`: the hop's policy
 on team_members would read team_members), or a hop whose visibility leads back to its table.  Per role the graph differs (the
@@ -115,8 +117,9 @@ def routed(spec: Spec) -> frozenset[tuple[str, str]]:
     # by table and relation, not rule order: the same policies listed in another order (an import
     # lists them by table) route the same lookups
     all_uses = sorted(uses(spec), key=lambda u: (u.table, u.relation, u.role, u.reads_rows))
+    fields = field_relations(spec)
     out = {(u.table, u.relation) for u in all_uses
-           if u.const_key or u.table in u.tables or len(set(u.tables)) < len(u.tables)}
+           if u.const_key or u.table in u.tables or len(set(u.tables)) < len(u.tables) or u.relation in fields}
     changed = True
     while changed:
         changed = False
@@ -135,6 +138,24 @@ def routed(spec: Spec) -> frozenset[tuple[str, str]]:
     res = frozenset(out)
     _cache[id(spec)] = (spec, res)
     return res
+
+
+def field_relations(spec: Spec) -> frozenset[str]:
+    """#97: the relations that read a field of a composite column (a key, value or condition, at any
+    level).  Their lookups always go through the helper: a caller's subquery would need SELECT on
+    the composite column, which grants its sibling fields too."""
+    from mls.spec.chain import read_columns
+
+    out = set()
+    for name in spec.relations:
+        try:
+            reads = read_columns(spec, name)
+        except (KeyError, IndexError, AttributeError):
+            continue
+        if any(spec.tables[t].columns[c].field_parts(c) is not None
+               for t, cols in reads for c in cols if t in spec.tables and c in spec.tables[t].columns):
+            out.add(name)
+    return frozenset(out)
 
 
 def is_routed(spec: Spec, table: str, relation: str) -> bool:

@@ -778,8 +778,10 @@ class Checker:
                     return
 
     def check_field_uses(self) -> None:
-        """#94: a field is read by predicates only.  Keys, foreign keys, relations, hierarchies,
-        cardinality groups and column privileges are per column in Postgres, so they refuse one."""
+        """#94: a field is read by predicates, and (#97) by a relation and a unique key, which a unique
+        expression index backs.  A primary key, foreign keys, hierarchies, cardinality groups and
+        column privileges are per column in Postgres, so they refuse one, and so do a hierarchy's
+        members and an inclusion's target relation when they read one."""
         def field(table: str, c) -> bool:
             t = self.spec.tables.get(table)
             return (t is not None and isinstance(c, str) and c in t.columns
@@ -794,27 +796,24 @@ class Checker:
             for i, c in enumerate(t.primary_key or []):
                 if field(tname, c):
                     refuse(f"$.tables.{tname}.primary_key[{i}]", tname, c, "a primary key")
-            for i, u in enumerate(t.unique):
-                for j, c in enumerate(u):
-                    if field(tname, c):
-                        refuse(f"$.tables.{tname}.unique[{i}][{j}]", tname, c, "a unique constraint")
-        from mls.spec.chain import read_columns
-        for rname, rel in self.spec.relations.items():
-            try:
-                reads = read_columns(self.spec, rname)
-            except (KeyError, IndexError, AttributeError):
-                continue  # an unknown table or relation: reported where it is named
-            for table, cols in reads:
-                for c in sorted(cols):
-                    if field(table, c):
-                        refuse(f"$.relations.{rname}", table, c, "a relation")
+        from mls.spec.recursion import field_relations
+
+        fielded = field_relations(self.spec)
         for hname, h in self.spec.hierarchies.items():
+            if h.members in fielded:
+                self.err(f"$.hierarchies.{hname}.members", f"relation '{h.members}' reads a field of a "
+                         f"composite column, and a hierarchy's helpers need its columns",
+                         "use a relation over columns of the table")
             for fld in ("id", "parent", "depth"):
                 if field(h.table, getattr(h, fld)):
                     refuse(f"$.hierarchies.{hname}.{fld}", h.table, getattr(h, fld), "a hierarchy")
         for i, r in enumerate(self.spec.rules):
             path = self.rule_paths[i]
             if isinstance(r, InclusionRule):
+                if r.relation in fielded:
+                    self.err(f"{path}.relation", f"relation '{r.relation}' reads a field of a composite "
+                             f"column, and a foreign key references columns",
+                             "name a relation over columns of the table")
                 for j, c in enumerate(r.columns):
                     if field(r.table, c):
                         refuse(f"{path}.columns[{j}]", r.table, c, "an inclusion rule (a foreign key)")

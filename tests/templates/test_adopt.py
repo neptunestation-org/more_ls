@@ -1246,3 +1246,26 @@ def test_a_plpgsql_helper_of_guards_and_one_return_reads_inline(brownfield):
     assert any("can_read_team(uuid, bigint)" in a.get("inlined", "")
                for a in res.spec["tables"]["team_docs"].get("assume", [])), res.spec["tables"]["team_docs"]
     check_spec(Spec.model_validate(res.spec))
+
+
+def test_a_key_on_fields_is_the_unique_index_on_them_whatever_its_name(pg_dsn):
+    """#97: Postgres keys fields only by a unique expression index.  Import reads one as the
+    table's key, and drift matches the spec's key to the live index by its definition, under the
+    live name."""
+    spec = specs.field_relation_spec()
+    h = Harness(spec, compile_spec(spec), pg_dsn, "mls_adopt_field_key")
+    h.deploy()
+    try:
+        h.conn.execute('alter index "assignments_spec_user_id_spec_workspace_key" rename to "ra_user_ws"')
+        res = import_schema(h.conn)
+        assert ["spec.user_id", "spec.workspace"] in res.spec["tables"]["assignments"]["unique"]
+        assert any("unique index ra_user_ws on assignments is a key on fields" in n for n in res.notes), res.notes
+        d = drift(h.conn, spec, compile_spec(spec))
+        assert d.ok and not [i for i in d.items if "index" in i.object], [str(i) for i in d.items]
+        assert verify_adopted(h.conn, spec) == []
+        h.conn.execute('drop index "ra_user_ws"')  # drift reports a key the database lacks
+        d = drift(h.conn, spec, compile_spec(spec))
+        assert not d.ok and "missing: index assignments_spec_user_id_spec_workspace_key on assignments" in [
+            str(i) for i in d.items]
+    finally:
+        h.close()

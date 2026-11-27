@@ -253,9 +253,13 @@ union member the renderer does not cover.
   (`DelegateAssumed`, `catalog.delegation_text`), stated in the proof report, a drift note when it differs;
   tests in `tests/templates/test_bypass.py`.
 - D103 (#94): a field of an adopted composite column is the column `c.f` with `Column.composite` (its type);
-  rendered `sqltext.col` / `sqltext.target`, types from `sql.composite_ddl` (harness, drift's shadow), refused in keys,
-  relations, inclusions, hierarchies, cardinality groups and column rules (`check.check_field_uses`); import reads
-  `(c).f` (`Parser.postfix`); fixture `specs.composite_spec`, mutation `FIELD_OTHER`.
+  rendered `sqltext.col` / `sqltext.target`, types from `sql.composite_ddl` (harness, drift's shadow), refused in primary
+  keys, inclusions, hierarchies, cardinality groups and column rules (`check.check_field_uses`); import reads
+  `(c).f` (`Parser.postfix`); fixture `specs.composite_spec`, mutation `FIELD_OTHER` (a sibling of the same type).
+- D107 (#97): a relation may read fields (`recursion.field_relations`), always routed (helper body via
+  `SqlCompiler.column`; `plan.soundness_errors` skips routed uses); a `unique` key on fields is a unique expression
+  index (`table.field_key_ddl`), read by import (`adopt.index_column`, `unique_indexes`), matched by definition in
+  drift (`_own_key_names`); fixture `specs.field_relation_spec` (neutree's shape).
 - D104 (#95): import inlines plpgsql helpers of guards and one `return` (`lift.plpgsql_body`); the lifter reads
   `(c) is [not] true` only over a test never UNKNOWN (IS NULL, IS TRUE, or a folded constant); a call whose inlined
   body holds an unreadable part quotes it in its note (`Env.unread_bodies`).

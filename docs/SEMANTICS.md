@@ -341,7 +341,8 @@ All are "assumptions ∧ ¬goal is UNSAT"; SAT yields a counterexample rendered 
   `role = 'owner'` within `role = 'owner' or role = 'admin'`.
 - **Fields of composite columns:** a field `c.f` is a column of the row like any other, NULL
   whenever `c` is (`(c).f` in SQL); nothing relates two fields of one composite, as nothing
-  relates two columns.
+  relates two columns.  A relation over fields means what a relation over columns means (§7); its
+  pair is unique by a key on fields, which a unique index on their expressions enforces.
 - **citext constants:** a string constant compared with a `citext` column is encoded as its
   lower-case value (the checker admits only ASCII constants, whose case Postgres and the encoder
   fold alike), so two constants equal up to case are one value there.

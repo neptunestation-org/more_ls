@@ -130,10 +130,18 @@ the schema (as in `metadata api.metadata`, with fields `name`, `workspace`, ...)
 fields: each field of an MLS type is a column named `column.field` that names its composite type
 (`{"type": "text", "nullable": true, "composite": "metadata"}`; terse `"metadata.workspace" text
 composite metadata`).  Predicates read it as any column; the compiler writes `("metadata")."workspace"`.
-A field is nullable (it is NULL when its composite is) and declares no default.  Keys, privileges and
-foreign keys are per column in Postgres, so a field cannot be in a primary key, a unique
-constraint, an inclusion, a relation, a hierarchy, a cardinality group or a column rule.  A role with
-a column rule on the table reads and writes no field.  `mls import` reads the fields of every composite
+A field is nullable (it is NULL when its composite is) and declares no default.  A `unique` key may
+name fields: Postgres keys them only by a unique index on their expressions
+(`create unique index ... ((("spec")."user_id"), (("spec")."workspace"))`), which the table must have;
+`mls import` reads such an index (one with no `WHERE`) as a key, and `mls drift` matches the key to
+it by its definition, whatever its name.  A relation's key, value and condition may be fields, so
+that a relation over role assignments kept in a composite column is a relation like any other; its
+lookups always go through its helper function, which reads the table without the caller's
+privileges (a caller's subquery would need `SELECT` on the whole composite column, every field of
+it), so it needs no visibility policy and no column grant.  Privileges and foreign keys are per
+column in Postgres, so a field cannot be in a primary key, an inclusion, a hierarchy, a cardinality
+group or a column rule, and a relation that reads a field cannot be an inclusion's target or a
+hierarchy's members.  A role with a column rule on the table reads and writes no field.  `mls import` reads the fields of every composite
 column whose type is the schema's, and leaves out (with a note) the fields of other types;
 `check --dsn` looks each field up in its column's type.  MLS creates no composite type, so an owned
 table has no fields.

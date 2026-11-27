@@ -257,6 +257,15 @@ def _own_key_names(exp: dict, act: dict) -> tuple[dict, dict]:
         idx = exp["indexes"].pop(name, None)
         if idx is not None:  # its definition names it: compare under the live name
             exp["indexes"][live] = idx.replace(f"INDEX {name} ON", f"INDEX {live} ON", 1)
+    # #97: a key on fields is a unique index of its own, no constraint: matched by its definition
+    for name, idx in list(exp["indexes"].items()):
+        if name in act["indexes"] or name in exp["constraints"] or not idx.startswith("CREATE UNIQUE INDEX"):
+            continue
+        live = next((n for n, a in act["indexes"].items() if n not in exp["indexes"]
+                     and a == idx.replace(f"INDEX {name} ON", f"INDEX {n} ON", 1)), None)
+        if live is not None:
+            exp["indexes"][live] = act["indexes"][live]
+            del exp["indexes"][name]
     return exp, act
 
 

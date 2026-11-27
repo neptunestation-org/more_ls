@@ -33,6 +33,7 @@ from mls.identity import get_adapter
 from mls.props.effective import all_policies, all_transitions
 from mls.spec.chain import levels, read_columns
 from mls.spec.model import Spec
+from mls.spec.recursion import is_routed
 
 
 @dataclass
@@ -79,6 +80,8 @@ def soundness_errors(spec: Spec) -> list[MlsError]:
         rels = relations_in(p.using, set())
         relations_in(p.check, rels)
         for rname in sorted(rels):
+            if is_routed(spec, p.table, rname):
+                continue  # D67, #97: the helper reads it without the caller's privileges
             for table, cols in read_columns(spec, rname):
                 g = privs.get((p.role, table), {}).get("select")
                 if isinstance(g, set) and not cols <= g:

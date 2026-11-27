@@ -38,13 +38,17 @@ def lookup_fn_ddl(spec: Spec, relation: str, sc: SqlCompiler, replace: bool = Fa
     lv = levels(spec, relation)
     where = []
     if lv[0].key is not None:  # #63: a set has no key; it keeps every row its condition keeps
-        where.append("true" if Mutation.LOOKUP_KEY_DROPPED in sc.mutations else f"{q(lv[0].key)} = k")
+        where.append("true" if Mutation.LOOKUP_KEY_DROPPED in sc.mutations
+                     else f"{sc.column(lv[0].key, lv[0].table)} = k")
     cond = condition(spec, relation)
     if cond is not None and Mutation.RELATION_CONDITION_DROPPED not in sc.mutations:
         where.append(sc.pred(cond, lv[0].table))
-    inner = f"select {q(lv[0].value)} from {q(lv[0].table)}" + (f" where {' and '.join(where)}" if where else "")
+    # #97: a key or value may be a field of a composite column, read as `("c")."f"`
+    inner = (f"select {sc.column(lv[0].value, lv[0].table)} from {q(lv[0].table)}"
+             + (f" where {' and '.join(where)}" if where else ""))
     for h in lv[1:]:
-        inner = f"select {q(h.value)} from {q(h.table)} where {q(h.key)} = any (array({inner}))"
+        inner = (f"select {sc.column(h.value, h.table)} from {q(h.table)} "
+                 f"where {sc.column(h.key, h.table)} = any (array({inner}))")
     verb = "create or replace function" if replace else "create function"
     arg = "" if kt is None else f"k {kt}"
     # #63: a set's helper is what keeps its rows from needing the caller's visibility

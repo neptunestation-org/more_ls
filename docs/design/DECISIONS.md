@@ -2188,3 +2188,26 @@ public notes" according to what its role was called and which adapter read the c
   the database does not record.
 - *Lean:* `Env.ctxUnset` is already a function of the value: the encoder gives it per obligation,
   so nothing to transcribe.
+
+**D107. A relation may read fields of composite columns (#97; amends D103).**
+neutree keeps its role assignments in a composite column (`spec.user_id`, `spec.role`,
+`spec.workspace`), so D103's refusal of fields in relations left its RBAC unwritable even by hand.
+- *Privileges:* a column grant covers the whole composite column, every sibling field.  A caller's
+  subquery over fields would need it, and a visibility policy would then show the siblings too, so a
+  relation that reads a field (key, value or condition, at any level: `recursion.field_relations`)
+  is always routed through its lookup helper (D67), which reads without the caller's privileges and
+  needs neither.  The alternative, granting the composite column and saying so, would widen what
+  the relation's readers see beyond the relation.  `plan.soundness_errors` no longer asks a routed
+  use for column privileges (it never needed them).
+- *Keys:* the pair must still be unique (D60).  Postgres keys a field only by a unique index on its
+  expression, so a `unique` key may name fields (a primary key still may not): `table_ddl` emits
+  `create unique index <table>_<c_f..>_key on t ((("c")."f"), ...)` for it (the harness, drift's
+  shadow); import reads a predicate-free unique index backing no constraint whose elements are
+  fields or columns (`adopt.index_column`), with a note; drift matches it to the live index by
+  definition, under the live name, as it matches adopted keys (#69).
+- *Refused:* a relation over fields as an inclusion's target (a foreign key references columns) and
+  as a hierarchy's members (its helpers read columns).
+- *Mutation:* `FIELD_OTHER` now picks a sibling of the same type (another type made the SQL fail,
+  not the behaviour); the fixture `specs.field_relation_spec` reads the fields only in the helper,
+  so the mutation is caught there.
+- *Lean:* no change to the encoding (a field is a column).

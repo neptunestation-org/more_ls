@@ -81,3 +81,24 @@ def test_a_chain_that_reads_its_own_table_twice_goes_through_a_helper():
     names = {p.name for p in implicit_policies(spec)}
     assert not [n for n in names if n.startswith("mls_rel_teammate_")], names
     assert "mls_rel_team_assignee_h3_authenticated_1" in names, names
+
+
+def test_a_relation_over_fields_goes_through_its_helper_and_needs_no_grant():
+    """#97: the caller's subquery would need SELECT on the composite column, which shows its sibling
+    fields, so a relation that reads a field is routed: no visibility policy, and a column rule that
+    keeps the role from the assignments' composite column leaves the policies compilable."""
+    from mls.props.effective import implicit_policies
+    from tests.templates import specs
+
+    spec = specs.field_relation_spec()
+    assert routed(spec) == {("endpoints", "works_in")}
+    assert not [p for p in implicit_policies(spec) if p.table == "assignments"]
+    d = spec.model_dump(mode="json", by_alias=True, exclude_none=True)
+    d["rules"] += [{"id": "R8", "kind": "policy", "name": "own_assignments", "table": "assignments",
+                    "role": "authenticated", "command": "select", "mode": "permissive",
+                    "using": {"cmp": [{"col": "spec.user_id"}, "=", {"ctx": "uid"}]}},
+                   {"id": "R9", "kind": "column_rule", "table": "assignments", "role": "authenticated",
+                    "columns": ["id"], "access": "read"}]
+    sql = compile_spec(check_spec(type(spec).model_validate(d))).sql()
+    assert 'grant select ("id") on "assignments" to "authenticated"' in sql
+    assert '("spec")."user_id" = k' in sql

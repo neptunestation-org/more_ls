@@ -34,6 +34,7 @@ CASES = {
     "optional": (specs.optional_spec, Mutation.CTX_IS_NULL_FOLDED, None),  # #75: signed-out callers
     "citext": (specs.citext_spec, Mutation.CITEXT_AS_TEXT, None),  # #73
     "composite": (specs.composite_spec, Mutation.FIELD_OTHER, None),  # #94
+    "field_relation": (specs.field_relation_spec, Mutation.FIELD_OTHER, None),  # #97
     "role_claim": (specs.role_claim_spec, Mutation.IN_DROP_LAST, None),  # #89: an enum claim
     "grants": (specs.grants_spec, Mutation.MEMBER_CONST_ANY_VALUE, None),  # #90: authorize()
     "defaults": (specs.defaults_spec, Mutation.POLICY_ALL_RESTRICTIVE, None),  # #76

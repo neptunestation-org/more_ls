@@ -452,6 +452,56 @@ def composite_spec() -> Spec:
     return make(parse(COMPOSITE).model_dump(mode="json", by_alias=True, exclude_none=True))
 
 
+FIELD_RELATION = """mls 0.1
+identity supabase { uid: auth.uid uuid }
+roles authenticated
+
+table assignments adopted {
+  id int not null,
+  "spec.user_id" uuid composite assignment_spec,
+  "spec.workspace" uuid composite assignment_spec,
+  "spec.role" text composite assignment_spec;
+  primary_key (id);
+  unique ("spec.user_id", "spec.workspace");
+  assume ('rls not_forced')
+}
+
+table endpoints adopted {
+  id int not null,
+  "metadata.workspace" uuid composite resource_meta,
+  "metadata.name" text composite resource_meta;
+  primary_key (id);
+  assume ('rls not_forced')
+}
+
+relation works_in = assignments("spec.user_id", "spec.workspace") where "spec.role" <> 'viewer'
+
+rules {
+  R1 policy workspace_read on endpoints: authenticated select permissive using works_in(@uid, "metadata.workspace")
+  R2 policy workspace_insert on endpoints: authenticated insert permissive check works_in(@uid, "metadata.workspace")
+  R3 policy workspace_update on endpoints: authenticated update permissive using works_in(@uid, "metadata.workspace") check works_in(@uid, "metadata.workspace")
+  R4 policy workspace_delete on endpoints: authenticated delete permissive using works_in(@uid, "metadata.workspace")
+}
+
+properties {
+  P1 must_allow endpoints authenticated select: works_in(@uid, "metadata.workspace") description 'a member reads the endpoints of their workspaces'
+  P2 custom endpoints authenticated select new: works_in(@uid, "metadata.workspace") description 'a user reads only the endpoints of their workspaces'
+}
+"""
+
+
+def field_relation_spec() -> Spec:
+    """#97: neutree's shape: role assignments keep the user, the workspace and the role in one
+    composite column (`spec`), keyed by a unique expression index on two fields; a relation reads
+    those fields, with a condition on the third, and the endpoints' policies read it with a field
+    of their own composite.  The relation goes through its lookup helper (no grant on the composite
+    column, which would show its sibling fields), so only the helper reads the assignments' fields:
+    the mutation reads another field of the same composite there (the workspace for the user)."""
+    from mls.spec.syntax import parse
+
+    return make(parse(FIELD_RELATION).model_dump(mode="json", by_alias=True, exclude_none=True))
+
+
 DEFAULTS = """mls 0.1
 identity supabase { uid: auth.uid uuid }
 roles authenticated
