@@ -148,7 +148,9 @@ assignment and no teams, org units or service accounts, too little to compare on
   no row, and a filter that is a negated array test.
 
 The language gaps, in order of reach: a hop over a field; a condition on a hop; a membership that
-ends in a set or a hierarchy (continuing a chain); more than three hops; upward hierarchy reach.  An open question for a later takeover on plain PostgREST: the
+ends in a set or a hierarchy (continuing a chain); more than three hops; upward hierarchy reach (#101).
+
+An open question for a later takeover on plain PostgREST: the
 anonymous role there is `anonymous`, which the Supabase identity does not know is signed out
 (it knows `anon`), so the proofs would let it carry a user id.
 
