@@ -84,7 +84,7 @@ were assigned after the fact.
 | nextbase (11-25) | Supabase JWT, S, `to public` policies, `auth.role()` | 3, 12 | — / — | 1 (#85) | 1 (#86) | 2 (#87 #88) | first try | 43 | deployed, drift none, 3 proved |
 | slack-clone (11-25) | Supabase JWT, S, RBAC through a role claim and `authorize()` | 5, 13 | — / 0 | 0 | 2 (#89 #90) | 1 (b3e95f4) | 1 repair round | 34 | deployed, drift none, 5 proved |
 | postgrest-starter-kit (11-25) | session settings (PostgREST claims, read through helper functions), S, views as the API | 2, 1 | 0 / 0 | 1 (#91) | 1 (#92) | 1 (#93) | first try | 12 | deployed, drift none, 2 proved |
-| neutree (11-26) | plain PG with GoTrue's `auth.uid()` (read as the Supabase identity), L, Kubernetes-style composite columns, RBAC through plpgsql definer helpers | 31, 93 | 119 / 147 | 0 | 2 (#94 #95; #97 open) | 1 (#96) | not run | — | import only |
+| neutree (11-26) | plain PG with GoTrue's `auth.uid()` (read as the Supabase identity), L, Kubernetes-style composite columns, RBAC through plpgsql definer helpers | 31, 93 | 119 / 147 | 0 | 3 (#94 #95 #97; #100 open) | 1 (#96) | not run | — | import only |
 
 postgrest-starter-kit, the first row chosen by the program (empty identity cell, unexercised
 pattern), loaded unchanged as the superuser its Docker setup uses.  Its claims come through helper
@@ -102,8 +102,11 @@ failed at every composite field (`(metadata).workspace`); after #94 it reads the
 reads plpgsql helpers of guards and one return, but every permission check ends in
 `user_role_assignments()`, a set-returning UNION over groups, teams, org units and service
 accounts, so the policies stay opaque, now in finer parts (147 blocks for 119).  Rewriting the RBAC
-in MLS would need relations over composite fields (#97, open), so the row closes import-only and
-does not count toward convergence.  An open question for a later takeover on plain PostgREST: the
+in MLS needed relations over composite fields (#97).  A second import after #97 reads the
+composite-field keys but still leaves 147 blocks: 145 reach `user_role_assignments()`, whose
+`UNION ALL` of four subject paths import does not split, one arm reading org-unit ancestors from a
+materialized path and one synthesizing rows from unnested role arrays (#100, open).  The row stays
+import-only and does not count toward convergence.  An open question for a later takeover on plain PostgREST: the
 anonymous role there is `anonymous`, which the Supabase identity does not know is signed out
 (it knows `anon`), so the proofs would let it carry a user id.
 
